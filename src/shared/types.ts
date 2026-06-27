@@ -36,27 +36,52 @@ export interface Agent {
 }
 
 export interface Quota {
-  /** "Session" | "Week" */
+  /** "Session" | "Week" | "Budget" */
   label: string
-  /** 0..100 */
+  /** 0..100 (real utilization from the OAuth usage endpoint). */
   usedPct: number
-  /** ms epoch when the quota resets, or null if unknown. */
+  /** ms epoch when the window resets, or null if unknown. */
   resetsAt: number | null
-  /** 'amber' bar (session) | 'blue' bar (week). */
-  tone: 'amber' | 'blue'
+  /** Bar color. */
+  tone: 'amber' | 'blue' | 'green'
+  /** Drives warning/critical coloring of the percentage. */
+  severity?: 'normal' | 'warning' | 'critical'
+}
+
+/**
+ * A Claude *subscription* account's rate-limit windows (Max / Team seats),
+ * from the real OAuth usage endpoint. Session = 5-hour, week = 7-day.
+ */
+export interface PlanWindow {
+  available: boolean
+  /** "You · Max" | "Growth Saloon" etc. */
+  label: string
+  session?: Quota
+  week?: Quota
+  /** Output tokens today (from local transcripts; personal account only). */
+  todayTokensOut?: number
+  /** Why it's unavailable (e.g. "not signed in", "auth expired"). */
+  note?: string
+}
+
+/** Org API-key usage from the Admin API — pay-per-use, no 5-hour window. */
+export interface ApiUsage {
+  available: boolean
+  label: string
+  todayTokensOut?: number
+  todayCostUsd?: number
+  /** Optional daily-budget bar, shown only when a budget is configured. */
+  budget?: Quota
 }
 
 export interface UsageSummary {
-  session?: Quota
-  week?: Quota
-  /** Total output tokens today across sessions. */
-  todayTokensOut?: number
-  /** Output tokens / minute (recent). */
-  burnPerMin?: number
-  /** Minutes until the session quota is exhausted at the current burn rate. */
-  etaToLimitMin?: number
-  /** Where the usage numbers came from. */
-  source: 'api' | 'hooks' | 'mock' | 'none'
+  /** Your personal Max plan — most of your local Claude Code sessions. */
+  personal: PlanWindow
+  /** The org's Claude Code subscription seats (desktop app). */
+  org: PlanWindow
+  /** The org's API-key token usage (a separate, pay-per-use account). */
+  api: ApiUsage
+  mock: boolean
 }
 
 export interface StatusSnapshot {

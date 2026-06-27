@@ -59,7 +59,18 @@ html, body, #root {
 /* ---- usage dashboard ---- */
 .usage { display: flex; flex-direction: column; }
 
-.quota { margin-bottom: 10px; }
+.uzone { margin-bottom: 11px; }
+.uzone-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: rgba(60, 40, 55, 0.5);
+  margin: 0 0 6px;
+}
+.uzone-note { font-size: 13px; color: var(--ink-soft); padding: 1px 0 3px; }
+
+.quota { margin-bottom: 8px; }
 .quota-head {
   display: flex;
   align-items: baseline;
@@ -69,7 +80,9 @@ html, body, #root {
 .quota-label { font-size: 14px; font-weight: 700; color: var(--ink); }
 .quota-reset { font-size: 13px; color: var(--ink-soft); }
 .quota-pct { margin-left: auto; font-size: 14px; font-weight: 600; color: var(--ink-soft); }
-.quota-pct.is-amber { color: var(--amber); }
+.quota-pct.sev-normal { color: var(--ink-soft); }
+.quota-pct.sev-warning { color: var(--amber); }
+.quota-pct.sev-critical { color: var(--red); }
 
 .quota-track {
   height: 7px;
@@ -80,6 +93,8 @@ html, body, #root {
 .quota-fill { height: 100%; border-radius: 5px; transition: width 0.4s ease; }
 .quota-fill--amber { background: linear-gradient(90deg, #f4a92b, #e08512); }
 .quota-fill--blue { background: linear-gradient(90deg, #3f8dff, #2f86ff); }
+.quota-fill--green { background: linear-gradient(90deg, #45c47e, #1aa64b); }
+.quota-fill.sev-critical { background: linear-gradient(90deg, #ef6b6b, #e5484d); }
 
 .burn {
   font-size: 13px;

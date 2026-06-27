@@ -10,12 +10,27 @@ export function mockSnapshot(): StatusSnapshot {
     generatedAt: now,
     waitingCount: 2,
     usage: {
-      source: 'mock',
-      session: { label: 'Session', usedPct: 72, resetsAt: now + (2 * 60 + 39) * 60_000, tone: 'amber' },
-      week: { label: 'Week', usedPct: 38, resetsAt: now + 5 * 24 * 60 * 60_000, tone: 'blue' },
-      todayTokensOut: 1_200_000,
-      burnPerMin: 8000,
-      etaToLimitMin: 25
+      mock: true,
+      personal: {
+        available: true,
+        label: 'You · Max',
+        session: { label: 'Session', usedPct: 72, resetsAt: now + (2 * 60 + 39) * 60_000, tone: 'amber', severity: 'warning' },
+        week: { label: 'Week', usedPct: 38, resetsAt: now + 5 * 24 * 60 * 60_000, tone: 'blue', severity: 'normal' },
+        todayTokensOut: 1_200_000
+      },
+      org: {
+        available: true,
+        label: 'Growth Saloon',
+        session: { label: 'Session', usedPct: 54, resetsAt: now + 3 * 60 * 60_000, tone: 'amber', severity: 'normal' },
+        week: { label: 'Week', usedPct: 22, resetsAt: now + 5 * 24 * 60 * 60_000, tone: 'blue', severity: 'normal' }
+      },
+      api: {
+        available: true,
+        label: 'Growth Saloon',
+        todayTokensOut: 84_000,
+        todayCostUsd: 2.1,
+        budget: { label: 'Budget', usedPct: 30, resetsAt: now + 8 * 60 * 60_000, tone: 'green', severity: 'normal' }
+      }
     },
     agents: [
       {
