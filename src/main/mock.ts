@@ -18,12 +18,6 @@ export function mockSnapshot(): StatusSnapshot {
         week: { label: 'Week', usedPct: 38, resetsAt: now + 5 * 24 * 60 * 60_000, tone: 'blue', severity: 'normal' },
         todayTokensOut: 1_200_000
       },
-      org: {
-        available: true,
-        label: 'Growth Saloon',
-        session: { label: 'Session', usedPct: 54, resetsAt: now + 3 * 60 * 60_000, tone: 'amber', severity: 'normal' },
-        week: { label: 'Week', usedPct: 22, resetsAt: now + 5 * 24 * 60 * 60_000, tone: 'blue', severity: 'normal' }
-      },
       api: {
         available: true,
         label: 'Growth Saloon',

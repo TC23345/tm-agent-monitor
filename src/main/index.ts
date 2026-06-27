@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { Daemon } from './daemon.js'
 import { fetchApiUsage } from './usage.js'
 import { LocalUsage } from './localUsage.js'
-import { readPersonalToken, readOrgToken, fetchWindow } from './subscriptionUsage.js'
+import { readPersonalToken, fetchWindow } from './subscriptionUsage.js'
 import { mockSnapshot } from './mock.js'
 import { focusHwnd, focusByPid, available as winAvailable } from '../native/win32.mjs'
 import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage } from '../shared/types.js'
@@ -37,7 +37,6 @@ let tray: Tray | null = null
 let daemon: Daemon
 const localUsage = new LocalUsage()
 let personal: PlanWindow = { available: false, label: 'You · Max' }
-let org: PlanWindow = { available: false, label: ORG_LABEL }
 let api: ApiUsage = { available: false, label: ORG_LABEL }
 let prevWaiting = new Set<string>()
 
@@ -54,7 +53,7 @@ function trayImage() {
 function createWindow(): void {
   win = new BrowserWindow({
     width: 440,
-    height: 720,
+    height: 680,
     show: false,
     frame: false,
     transparent: true,
@@ -115,7 +114,6 @@ function buildSnapshot(): StatusSnapshot {
 
   const usage: UsageSummary = {
     personal: { ...personal, todayTokensOut: localUsage.todayTokensOut() },
-    org,
     api,
     mock: false
   }
@@ -163,10 +161,7 @@ function notifyTransitions(snap: StatusSnapshot): void {
 
 async function refreshWindows(): Promise<void> {
   if (mockMode) return
-  ;[personal, org] = await Promise.all([
-    fetchWindow('You · Max', readPersonalToken()),
-    fetchWindow(ORG_LABEL, readOrgToken())
-  ])
+  personal = await fetchWindow('You · Max', readPersonalToken())
 }
 
 async function refreshApi(): Promise<void> {
@@ -229,7 +224,7 @@ if (!gotLock) {
     if (process.env.CLAUDE_WATCH_SELFTEST)
       console.log(
         `[selftest] personal=${personal.available} 5h=${personal.session?.usedPct ?? '-'}% wk=${personal.week?.usedPct ?? '-'}% | ` +
-        `org=${org.available}(${org.note ?? 'ok'}) | api=${api.available} | todayOut=${localUsage.todayTokensOut() ?? '-'}`
+        `api=${api.available} | todayOut=${localUsage.todayTokensOut() ?? '-'}`
       )
     setInterval(refreshWindows, 30_000)
     setInterval(refreshApi, 60_000)

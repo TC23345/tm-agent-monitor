@@ -38,7 +38,16 @@ function quota(label: string, w: ApiWindow | null | undefined, tone: Quota['tone
   }
 }
 
-/** The personal Max token Claude Code (CLI/VS Code) writes to disk. */
+/**
+ * The personal Max token Claude Code writes to disk. On this machine every Claude
+ * Code surface — CLI, VS Code, and the desktop app's Claude Code tab (which runs
+ * the bundled claude.exe) — authenticates with this same file, so this one token
+ * covers all of them.
+ *
+ * (Future: a separate org *subscription* would live in the desktop app's claude.ai
+ * web session — cookie-based, a different extraction — and could feed a second
+ * window meter via this same fetchWindow().)
+ */
 export function readPersonalToken(): string | undefined {
   try {
     const cred = JSON.parse(readFileSync(join(homedir(), '.claude', '.credentials.json'), 'utf8'))
@@ -46,15 +55,6 @@ export function readPersonalToken(): string | undefined {
   } catch {
     return undefined
   }
-}
-
-/**
- * The org seats' token (used by the desktop app's Claude Code tab). The desktop
- * app stores it in an OS-encrypted store, so the reliable path is an explicit
- * env override; auto-extraction from the desktop store is a follow-up.
- */
-export function readOrgToken(): string | undefined {
-  return process.env.CLAUDE_WATCH_ORG_TOKEN || undefined
 }
 
 export async function fetchWindow(label: string, token: string | undefined): Promise<PlanWindow> {

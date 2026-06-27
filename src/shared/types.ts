@@ -75,10 +75,8 @@ export interface ApiUsage {
 }
 
 export interface UsageSummary {
-  /** Your personal Max plan — most of your local Claude Code sessions. */
+  /** Your personal Max plan — drives ALL Claude Code here (CLI, VS Code, desktop). */
   personal: PlanWindow
-  /** The org's Claude Code subscription seats (desktop app). */
-  org: PlanWindow
   /** The org's API-key token usage (a separate, pay-per-use account). */
   api: ApiUsage
   mock: boolean

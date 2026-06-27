@@ -30,7 +30,7 @@ function Zone({ title, children }: { title: string; children: React.ReactNode })
 }
 
 export function UsageDashboard({ usage, now }: { usage: UsageSummary; now: number }) {
-  const { personal, org, api } = usage
+  const { personal, api } = usage
   return (
     <section className="usage">
       <Zone title={personal.label}>
@@ -47,17 +47,6 @@ export function UsageDashboard({ usage, now }: { usage: UsageSummary; now: numbe
           </>
         ) : (
           <div className="uzone-note">{personal.note ?? 'not connected'}</div>
-        )}
-      </Zone>
-
-      <Zone title={`${org.label} · Team`}>
-        {org.available ? (
-          <>
-            {org.session && <QuotaBar q={org.session} now={now} />}
-            {org.week && <QuotaBar q={org.week} now={now} />}
-          </>
-        ) : (
-          <div className="uzone-note">{org.note ?? 'not connected'}</div>
         )}
       </Zone>
 
