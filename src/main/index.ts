@@ -34,6 +34,11 @@ const TRAY_FALLBACK =
 
 let win: BrowserWindow | null = null
 let tray: Tray | null = null
+// Tried in order if the configured hotkey can't be registered. Mixed modifier
+// patterns so at least one is likely free of an existing global binding.
+const HOTKEY_FALLBACKS = ['Control+Shift+C', 'Alt+Shift+W', 'Control+Shift+Space', 'Alt+Shift+C']
+let activeHotkey: string | null = null
+
 let daemon: Daemon
 const localUsage = new LocalUsage()
 let personal: PlanWindow = { available: false, label: 'You · Max' }
@@ -105,6 +110,31 @@ function toggleWindow(): void {
   }
 }
 
+/** Register the summon hotkey, falling back through alternates on conflict. */
+function registerHotkey(): void {
+  const candidates = [HOTKEY, ...HOTKEY_FALLBACKS.filter((h) => h !== HOTKEY)]
+  for (const acc of candidates) {
+    let ok = false
+    try {
+      ok = globalShortcut.register(acc, toggleWindow)
+    } catch {
+      ok = false
+    }
+    if (ok && globalShortcut.isRegistered(acc)) {
+      activeHotkey = acc
+      console.log(`[hotkey] active: ${acc}${acc === HOTKEY ? '' : ` (fallback — ${HOTKEY} was unavailable)`}`)
+      return
+    }
+    globalShortcut.unregister(acc)
+    console.warn(`[hotkey] could not register ${acc}`)
+  }
+  activeHotkey = null
+  console.error(
+    `[hotkey] no hotkey registered (tried ${candidates.join(', ')}). ` +
+    `Use the tray icon to toggle, or set CLAUDE_WATCH_HOTKEY to a free combo.`
+  )
+}
+
 // --- status assembly --------------------------------------------------------
 function buildSnapshot(): StatusSnapshot {
   if (mockMode) return mockSnapshot()
@@ -138,7 +168,8 @@ function pushStatus(): void {
 function updateTray(snap: StatusSnapshot): void {
   if (!tray) return
   const n = snap.waitingCount
-  tray.setToolTip(n > 0 ? `Claude Watch — ${n} waiting for input` : 'Claude Watch')
+  const hk = activeHotkey ? ` · ${activeHotkey}` : ''
+  tray.setToolTip(n > 0 ? `Claude Watch — ${n} waiting${hk}` : `Claude Watch${hk}`)
 }
 
 function notifyTransitions(snap: StatusSnapshot): void {
@@ -190,7 +221,7 @@ function createTray(): void {
   tray = new Tray(trayImage())
   tray.setToolTip('Claude Watch')
   const menu = Menu.buildFromTemplate([
-    { label: 'Show / Hide', click: toggleWindow },
+    { label: activeHotkey ? `Show / Hide  (${activeHotkey})` : 'Show / Hide', click: toggleWindow },
     { type: 'separator' },
     { label: `Mock data`, type: 'checkbox', checked: mockMode, click: (i) => { mockMode = i.checked; pushStatus() } },
     { label: 'Quit', click: () => app.quit() }
@@ -215,6 +246,7 @@ if (!gotLock) {
     await daemon.start()
 
     createWindow()
+    registerHotkey()
     createTray()
     registerIpc()
 
@@ -231,9 +263,6 @@ if (!gotLock) {
     setInterval(() => localUsage.refresh(), 30_000)
     setInterval(pushStatus, DEFAULTS.pollMs)
     pushStatus()
-
-    const ok = globalShortcut.register(HOTKEY, toggleWindow)
-    if (!ok) console.error(`[hotkey] failed to register ${HOTKEY}`)
 
     // Show once on first launch so it's discoverable.
     positionNearTrayTopRight()
