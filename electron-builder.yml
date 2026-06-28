@@ -1,0 +1,32 @@
+appId: com.taylor.claude-watch
+productName: Claude Watch
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - "!**/*.map"
+# koffi is a native module loaded at runtime — it must live outside the asar.
+asarUnpack:
+  - "**/node_modules/koffi/**"
+# Ship the tray/app PNGs so the installed app finds them at process.resourcesPath.
+extraResources:
+  - from: resources
+    to: .
+    filter:
+      - "*.png"
+win:
+  target:
+    - nsis
+    - portable
+  icon: build/icon.ico
+  artifactName: ${productName}-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Claude Watch
+portable:
+  artifactName: ClaudeWatch-${version}-portable.exe

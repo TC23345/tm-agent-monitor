@@ -13,15 +13,21 @@ import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 // --- minimal .env loader (no dependency) -----------------------------------
-function loadEnv(): void {
-  const path = join(process.cwd(), '.env')
+// Reads the project .env (dev) AND %APPDATA%/claude-watch/.env (installed app,
+// whose working dir has no .env). First value wins, so dev .env takes priority.
+function loadEnvFrom(path: string): void {
   if (!existsSync(path)) return
   for (const line of readFileSync(path, 'utf8').split('\n')) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i)
-    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
+    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '').trim()
   }
 }
-loadEnv()
+loadEnvFrom(join(process.cwd(), '.env'))
+try {
+  loadEnvFrom(join(app.getPath('appData'), 'claude-watch', '.env'))
+} catch {
+  /* app.getPath unavailable — non-fatal */
+}
 
 const PORT = Number(process.env.CLAUDE_WATCH_PORT) || DEFAULTS.port
 const HOTKEY = process.env.CLAUDE_WATCH_HOTKEY || DEFAULTS.hotkey

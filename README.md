@@ -4,7 +4,7 @@ A hotkey-summoned desktop panel that monitors your running **Claude Code** agent
 and your **Claude API usage** — a Windows re-imagining of
 [ImTaegan/claude-watch](https://github.com/ImTaegan/claude-watch) (which is a macOS
 menu-bar app). Because Windows has no menu bar, the panel is summoned with a global
-hotkey (default **Alt+C**) and lives in the system tray.
+hotkey (default **Ctrl+Alt+W**) and lives in the system tray.
 
 It reproduces the reference design: a translucent card over a magenta→orange gradient
 showing Session/Week usage bars, today's token output, and a live list of agents with
@@ -63,7 +63,7 @@ Anthropic Admin API (usage)     ──fetch──────────►  Us
 
 ```sh
 npm install
-npm run dev        # launches the app (shows on first run; toggle with Alt+C)
+npm run dev        # launches the app (shows on first run; toggle with Ctrl+Alt+W)
 ```
 
 See the design without any data source:
@@ -95,7 +95,7 @@ agent list still works; the usage bars stay hidden.
 
 | Var | Default | Purpose |
 |---|---|---|
-| `CLAUDE_WATCH_HOTKEY` | `Alt+C` | Global summon/hide hotkey (avoid `Ctrl+Alt+*` AltGr & `Ctrl+Shift+W`) |
+| `CLAUDE_WATCH_HOTKEY` | `Ctrl+Alt+W` | Global summon/hide hotkey (if it won't fire, try e.g. `Alt+C`) |
 | `CLAUDE_WATCH_NOTIFICATIONS` | `0` | `1` = desktop "needs input" notifications (off by default — noisy) |
 | `CLAUDE_WATCH_PORT` | `7459` | Daemon port |
 | `CLAUDE_WATCH_MOCK` | `0` | Start in mock mode |

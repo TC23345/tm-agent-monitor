@@ -119,9 +119,9 @@ export interface HookReport {
 
 export const DEFAULTS = {
   port: 7459,
-  // Alt+C: Ctrl+Shift+W closes editor tabs, and Ctrl+Alt+<key> = AltGr on many
-  // layouts (Windows routes it to the layout instead of the app).
-  hotkey: 'Alt+C',
+  // Control+Alt+W — chosen by the user. (On some layouts Ctrl+Alt = AltGr; if it
+  // ever stops firing, override CLAUDE_WATCH_HOTKEY, e.g. Alt+C.)
+  hotkey: 'Control+Alt+W',
   pollMs: 1000,
   /** An agent with no update within this window is pruned. */
   staleMs: 15 * 60 * 1000,
