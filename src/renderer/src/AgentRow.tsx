@@ -9,6 +9,10 @@ export function AgentRow({ agent, now }: { agent: Agent; now: number }) {
   const tone = contextTone(agent.contextPct)
   const text = agent.state === 'waiting' ? agent.question : agent.activity
 
+  const where = agent.cwd ?? agent.project
+  const rowTitle = `${where}\nClick to focus its terminal · right-click to open the folder`
+  const ctxTitle = `Context window used by this session${agent.contextRising ? ' — and climbing' : ''}`
+
   return (
     <div
       className={`row ${alert ? 'row--alert' : ''} ${agent.state === 'waiting' ? 'is-waiting' : ''}`}
@@ -17,19 +21,19 @@ export function AgentRow({ agent, now }: { agent: Agent; now: number }) {
         e.preventDefault()
         if (agent.cwd) window.watch.openPath(agent.cwd)
       }}
-      title={agent.cwd ? `${agent.cwd} — click to focus, right-click to open folder` : undefined}
+      title={rowTitle}
     >
       <AgentIcon agent={agent} />
       <span className="row-text">{text}</span>
       <span className="row-meta">
         {agent.contextPct !== undefined && (
-          <span className={`ctx ctx--${tone}`}>
+          <span className={`ctx ctx--${tone}`} title={ctxTitle}>
             {agent.contextRising && <ArrowUp className="ctx-arrow" strokeWidth={2.5} />}
             {Math.round(agent.contextPct)}%
           </span>
         )}
         {running && <RunningSpinner />}
-        <span className="dur">{shortDuration(agent.since, now)}</span>
+        <span className="dur" title="Time in the current state">{shortDuration(agent.since, now)}</span>
       </span>
     </div>
   )

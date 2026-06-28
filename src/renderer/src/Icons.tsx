@@ -31,6 +31,20 @@ function toolIcon(tool: ToolKind | undefined): LucideIcon {
   }
 }
 
+/** Short label describing an agent's state (used for hover tooltips). */
+export function stateLabel(agent: Agent): string {
+  switch (agent.state) {
+    case 'waiting':
+      return agent.waitReason === 'question' ? 'Waiting for your answer' : 'Waiting for permission'
+    case 'complete':
+      return 'Finished — ready for you'
+    case 'idle':
+      return 'Idle'
+    default:
+      return 'Running'
+  }
+}
+
 /** State icon + color class for an agent (Lucide, crisp single-stroke). */
 export function AgentIcon({ agent }: { agent: Agent }) {
   let Icon: LucideIcon
@@ -58,7 +72,7 @@ export function AgentIcon({ agent }: { agent: Agent }) {
       cls = 'ic ic--running'
   }
   return (
-    <span className={cls}>
+    <span className={cls} title={stateLabel(agent)}>
       <Icon className="ic-svg" strokeWidth={2} />
     </span>
   )

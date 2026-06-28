@@ -23,12 +23,19 @@ export function App() {
 
   const groups = groupByProject(snap?.agents ?? [])
   const waiting = snap?.waitingCount ?? 0
+  const connTitle = snap?.mock
+    ? 'Showing sample (mock) data — toggle with the gear'
+    : snap?.daemonConnected
+      ? 'Local daemon connected — receiving live agent updates'
+      : 'Daemon offline — run the hook installer to see live agents'
 
   return (
     <div className="app">
-      <header className="header">
+      <header className="header" title="Live Claude Code agents and your usage · drag here to move the window">
         <h1>Claude Agents</h1>
-        {waiting > 0 && <span className="needs">{waiting} waiting</span>}
+        {waiting > 0 && (
+          <span className="needs" title="Agents waiting for your input right now">{waiting} waiting</span>
+        )}
       </header>
 
       {snap && <UsageDashboard usage={snap.usage} now={now} />}
@@ -50,15 +57,15 @@ export function App() {
       <div className="rule" />
 
       <footer className="footer">
-        <div className={`conn ${snap?.daemonConnected ? 'is-on' : 'is-off'}`}>
+        <div className={`conn ${snap?.daemonConnected ? 'is-on' : 'is-off'}`} title={connTitle}>
           <span className="conn-dot" />
           {snap?.mock ? 'mock data' : snap?.daemonConnected ? 'connected' : 'disconnected'}
         </div>
         <div className="footer-actions">
-          <button className="iconbtn" title="Toggle mock data" onClick={() => window.watch.toggleMock(!snap?.mock)}>
+          <button className="iconbtn" title="Toggle sample (mock) data on/off" onClick={() => window.watch.toggleMock(!snap?.mock)}>
             <Settings className="gear" strokeWidth={2} />
           </button>
-          <button className="quit" onClick={() => window.watch.quit()}>Quit</button>
+          <button className="quit" title="Quit Claude Watch (closes the tray app)" onClick={() => window.watch.quit()}>Quit</button>
         </div>
       </footer>
     </div>
