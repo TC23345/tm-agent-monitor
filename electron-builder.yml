@@ -37,3 +37,4 @@ publish:
   provider: github
   owner: TC23345
   repo: tm-agent-monitor
+  releaseType: release # publish directly (not a draft) so auto-update sees it

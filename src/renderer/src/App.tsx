@@ -4,11 +4,13 @@ import { UsageDashboard } from './UsageDashboard'
 import { ProjectGroup } from './ProjectGroup'
 import { groupByProject } from './group'
 import { Settings } from './Icons'
+import { SettingsPanel } from './SettingsPanel'
 import logo from './assets/logo.png'
 
 export function App() {
   const [snap, setSnap] = useState<StatusSnapshot | null>(null)
   const [now, setNow] = useState(Date.now())
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   useEffect(() => {
     window.watch.getStatus().then(setSnap)
@@ -51,7 +53,7 @@ export function App() {
   const groups = groupByProject(snap?.agents ?? [])
   const waiting = snap?.waitingCount ?? 0
   const connTitle = snap?.mock
-    ? 'Showing sample (mock) data — toggle with the gear'
+    ? 'Showing sample (mock) data — change in Settings'
     : snap?.daemonConnected
       ? 'Local daemon connected — receiving live agent updates'
       : 'Daemon offline — run the hook installer to see live agents'
@@ -91,12 +93,14 @@ export function App() {
           {snap?.mock ? 'mock data' : snap?.daemonConnected ? 'connected' : 'disconnected'}
         </div>
         <div className="footer-actions">
-          <button className="iconbtn" title="Toggle sample (mock) data on/off" onClick={() => window.watch.toggleMock(!snap?.mock)}>
+          <button className="iconbtn" title="Settings — hotkey, notifications, startup, mock data" onClick={() => setSettingsOpen(true)}>
             <Settings className="gear" strokeWidth={2} />
           </button>
           <button className="quit" title="Quit TaylorMade Agent Monitor (closes the tray app)" onClick={() => window.watch.quit()}>Quit</button>
         </div>
       </footer>
+
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
   )
 }

@@ -117,6 +117,16 @@ export interface HookReport {
   ts?: number
 }
 
+/** Live settings exposed to / editable from the in-app settings panel. */
+export interface AppSettings {
+  hotkey: string
+  notifications: boolean
+  launchAtLogin: boolean
+  mock: boolean
+  hasAdminKey: boolean
+  port: number
+}
+
 export const DEFAULTS = {
   port: 7459,
   // Control+Alt+W — chosen by the user. (On some layouts Ctrl+Alt = AltGr; if it

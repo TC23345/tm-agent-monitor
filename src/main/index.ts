@@ -8,8 +8,12 @@ import { LocalUsage } from './localUsage.js'
 import { readPersonalToken, fetchWindow } from './subscriptionUsage.js'
 import { mockSnapshot } from './mock.js'
 import { focusHwnd, focusByPid, available as winAvailable } from '../native/win32.mjs'
-import { autoUpdater } from 'electron-updater'
+// electron-updater is CommonJS — a *named* ESM import fails at runtime ("Named
+// export 'autoUpdater' not found"), so import the default export and destructure.
+import electronUpdater from 'electron-updater'
 import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage } from '../shared/types.js'
+
+const { autoUpdater } = electronUpdater
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -133,7 +137,7 @@ function toggleWindow(): void {
 
 /** Register the summon hotkey, falling back through alternates on conflict. */
 function registerHotkey(): void {
-  const candidates = [HOTKEY, ...HOTKEY_FALLBACKS.filter((h) => h !== HOTKEY)]
+  const candidates = [hotkeyPref, ...HOTKEY_FALLBACKS.filter((h) => h !== hotkeyPref)]
   for (const acc of candidates) {
     let ok = false
     try {
@@ -143,7 +147,7 @@ function registerHotkey(): void {
     }
     if (ok && globalShortcut.isRegistered(acc)) {
       activeHotkey = acc
-      console.log(`[hotkey] active: ${acc}${acc === HOTKEY ? '' : ` (fallback — ${HOTKEY} was unavailable)`}`)
+      console.log(`[hotkey] active: ${acc}${acc === hotkeyPref ? '' : ` (fallback — ${hotkeyPref} was unavailable)`}`)
       return
     }
     globalShortcut.unregister(acc)
@@ -194,7 +198,7 @@ function updateTray(snap: StatusSnapshot): void {
 }
 
 function notifyTransitions(snap: StatusSnapshot): void {
-  if (!NOTIFY || !Notification.isSupported()) return
+  if (!notify || !Notification.isSupported()) return
   const nowWaiting = new Set(snap.agents.filter((a) => a.state === 'waiting').map((a) => a.id))
   if (win && !win.isVisible()) {
     for (const a of snap.agents) {
@@ -242,10 +246,35 @@ function setupAutoUpdate(): void {
 }
 
 // --- IPC --------------------------------------------------------------------
+function settingsView() {
+  return {
+    hotkey: activeHotkey ?? hotkeyPref,
+    notifications: notify,
+    launchAtLogin: app.getLoginItemSettings().openAtLogin,
+    mock: mockMode,
+    hasAdminKey: !!ADMIN_KEY,
+    port: PORT
+  }
+}
+
 function registerIpc(): void {
   ipcMain.handle('status:get', () => buildSnapshot())
   ipcMain.handle('mock:toggle', (_e, on: boolean) => { mockMode = on; pushStatus(); return mockMode })
   ipcMain.handle('mock:state', () => mockMode)
+  ipcMain.handle('settings:get', () => settingsView())
+  ipcMain.handle('settings:set', (_e, patch: Partial<{ hotkey: string; notifications: boolean; launchAtLogin: boolean; mock: boolean }>) => {
+    if (patch.hotkey && patch.hotkey !== hotkeyPref) {
+      hotkeyPref = patch.hotkey
+      settings.hotkey = patch.hotkey
+      globalShortcut.unregisterAll()
+      registerHotkey()
+    }
+    if (typeof patch.notifications === 'boolean') { notify = patch.notifications; settings.notifications = patch.notifications }
+    if (typeof patch.mock === 'boolean') { mockMode = patch.mock; settings.mock = patch.mock; pushStatus() }
+    if (typeof patch.launchAtLogin === 'boolean') app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin, args: ['--hidden'] })
+    saveSettings()
+    return settingsView()
+  })
   ipcMain.on('agent:focus', (_e, _id: string, hwnd?: string, pid?: number) => {
     if (!hwnd && !pid) return // nothing to focus (e.g. mock data) — keep panel open
     win?.hide() // step aside so the terminal can take the foreground
@@ -290,6 +319,11 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     if (process.platform === 'win32') app.setAppUserModelId('com.taylormade.agent-monitor')
+
+    settings = loadSettings()
+    if (settings.hotkey) hotkeyPref = settings.hotkey
+    if (typeof settings.notifications === 'boolean') notify = settings.notifications
+    if (typeof settings.mock === 'boolean') mockMode = settings.mock
 
     if (process.env.CLAUDE_WATCH_SELFTEST) console.log(`[selftest] win32 native focus available: ${winAvailable()}`)
 

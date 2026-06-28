@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { StatusSnapshot } from '../shared/types.js'
+import type { StatusSnapshot, AppSettings } from '../shared/types.js'
 
 const api = {
   getStatus: (): Promise<StatusSnapshot> => ipcRenderer.invoke('status:get'),
@@ -17,6 +17,8 @@ const api = {
   copyText: (t: string) => ipcRenderer.send('text:copy', t),
   hide: () => ipcRenderer.send('window:hide'),
   reportHeight: (h: number) => ipcRenderer.send('window:content-height', h),
+  getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
+  setSettings: (patch: Partial<AppSettings>): Promise<AppSettings> => ipcRenderer.invoke('settings:set', patch),
   quit: () => ipcRenderer.send('app:quit')
 }
 
