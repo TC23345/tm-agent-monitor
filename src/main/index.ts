@@ -1,7 +1,7 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, clipboard, screen } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { Daemon } from './daemon.js'
 import { fetchApiUsage } from './usage.js'
 import { LocalUsage } from './localUsage.js'
@@ -27,6 +27,9 @@ const PORT = Number(process.env.CLAUDE_WATCH_PORT) || DEFAULTS.port
 const HOTKEY = process.env.CLAUDE_WATCH_HOTKEY || DEFAULTS.hotkey
 const ADMIN_KEY = process.env.ANTHROPIC_ADMIN_KEY || undefined
 const ORG_LABEL = process.env.CLAUDE_WATCH_ORG_NAME || 'Growth Saloon'
+// Desktop notifications are opt-in — your own active sessions fire "needs input"
+// constantly, which is noisy. Set CLAUDE_WATCH_NOTIFICATIONS=1 to enable.
+const NOTIFY = process.env.CLAUDE_WATCH_NOTIFICATIONS === '1'
 let mockMode = process.env.CLAUDE_WATCH_MOCK === '1'
 
 const TRAY_FALLBACK =
@@ -36,7 +39,7 @@ let win: BrowserWindow | null = null
 let tray: Tray | null = null
 // Tried in order if the configured hotkey can't be registered. Mixed modifier
 // patterns so at least one is likely free of an existing global binding.
-const HOTKEY_FALLBACKS = ['Control+Shift+C', 'Alt+Shift+W', 'Control+Shift+Space', 'Alt+Shift+C']
+const HOTKEY_FALLBACKS = ['Alt+Shift+C', 'Control+Shift+Space', 'Alt+Shift+A', 'Alt+Shift+S']
 let activeHotkey: string | null = null
 
 let daemon: Daemon
@@ -173,7 +176,7 @@ function updateTray(snap: StatusSnapshot): void {
 }
 
 function notifyTransitions(snap: StatusSnapshot): void {
-  if (!Notification.isSupported()) return
+  if (!NOTIFY || !Notification.isSupported()) return
   const nowWaiting = new Set(snap.agents.filter((a) => a.state === 'waiting').map((a) => a.id))
   if (win && !win.isVisible()) {
     for (const a of snap.agents) {
@@ -267,6 +270,21 @@ if (!gotLock) {
     // Show once on first launch so it's discoverable.
     positionNearTrayTopRight()
     win?.show()
+
+    // Dev: capture the panel to a PNG then exit (CLAUDE_WATCH_CAPTURE=<path>).
+    if (process.env.CLAUDE_WATCH_CAPTURE && win) {
+      const out = process.env.CLAUDE_WATCH_CAPTURE
+      setTimeout(async () => {
+        try {
+          const img = await win!.webContents.capturePage()
+          writeFileSync(out, img.toPNG())
+          console.log(`[capture] wrote ${out}`)
+        } catch (e) {
+          console.error('[capture] failed', e)
+        }
+        app.quit()
+      }, 1600)
+    }
   })
 
   app.on('will-quit', () => {

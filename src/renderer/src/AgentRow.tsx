@@ -1,16 +1,17 @@
 import type { Agent } from '@shared/types'
-import { AgentIcon, ArrowUp } from './Icons'
+import { AgentIcon, RunningSpinner, ArrowUp } from './Icons'
 import { shortDuration, contextTone } from './format'
 
+/** One session within a project group. Project name lives in the group header. */
 export function AgentRow({ agent, now }: { agent: Agent; now: number }) {
-  const highlight = agent.state === 'waiting' && agent.waitReason === 'question'
-  const animate = agent.state === 'running' ? 'is-running' : agent.state === 'waiting' ? 'is-waiting' : ''
+  const running = agent.state === 'running'
+  const alert = agent.state === 'waiting' && agent.waitReason === 'question'
   const tone = contextTone(agent.contextPct)
-  const subtitle = agent.state === 'waiting' ? agent.question : agent.activity
+  const text = agent.state === 'waiting' ? agent.question : agent.activity
 
   return (
     <div
-      className={`agent ${highlight ? 'agent--highlight' : ''} ${animate}`}
+      className={`row ${alert ? 'row--alert' : ''} ${agent.state === 'waiting' ? 'is-waiting' : ''}`}
       onClick={() => window.watch.focusAgent(agent.id, agent.focusHwnd, agent.focusPid)}
       onContextMenu={(e) => {
         e.preventDefault()
@@ -19,19 +20,17 @@ export function AgentRow({ agent, now }: { agent: Agent; now: number }) {
       title={agent.cwd ? `${agent.cwd} — click to focus, right-click to open folder` : undefined}
     >
       <AgentIcon agent={agent} />
-      <div className="agent-body">
-        <div className="agent-name">{agent.project}</div>
-        <div className="agent-sub">{subtitle}</div>
-      </div>
-      <div className="agent-meta">
+      <span className="row-text">{text}</span>
+      <span className="row-meta">
         {agent.contextPct !== undefined && (
           <span className={`ctx ctx--${tone}`}>
-            {agent.contextRising && <ArrowUp className="ctx-arrow" />}
+            {agent.contextRising && <ArrowUp className="ctx-arrow" strokeWidth={2.5} />}
             {Math.round(agent.contextPct)}%
           </span>
         )}
+        {running && <RunningSpinner />}
         <span className="dur">{shortDuration(agent.since, now)}</span>
-      </div>
+      </span>
     </div>
   )
 }

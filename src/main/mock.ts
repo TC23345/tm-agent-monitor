@@ -45,6 +45,10 @@ export function mockSnapshot(): StatusSnapshot {
         activity: '$ npm run build', contextPct: 31, since: ago(17_000), updatedAt: now
       },
       {
+        id: 'a7', project: 'growth-saloon', state: 'running', tool: 'edit',
+        activity: 'editing vite.config.ts', contextPct: 22, since: ago(40_000), updatedAt: now
+      },
+      {
         id: 'a5', project: 'gs-referral', state: 'complete',
         activity: 'finished — ready for you', contextPct: 47, since: ago(4_000), updatedAt: now
       },

@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
-    "koffi": "^3.0.2"
+    "koffi": "^3.0.2",
+    "lucide-react": "^1.21.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
