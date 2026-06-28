@@ -19,7 +19,6 @@ export function ProjectGroup({ group, now }: { group: Group; now: number }) {
         {group.needsInput > 0 && (
           <span className="group-dot" title={`${group.needsInput} session${group.needsInput === 1 ? '' : 's'} here waiting for your input`} />
         )}
-        <span className="group-count" title="Sessions in this project">{n}</span>
       </button>
       {!collapsed && (
         <div className="group-rows">

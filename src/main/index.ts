@@ -8,6 +8,7 @@ import { LocalUsage } from './localUsage.js'
 import { readPersonalToken, fetchWindow } from './subscriptionUsage.js'
 import { mockSnapshot } from './mock.js'
 import { focusHwnd, focusByPid, available as winAvailable } from '../native/win32.mjs'
+import { autoUpdater } from 'electron-updater'
 import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage } from '../shared/types.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -30,12 +31,23 @@ try {
 }
 
 const PORT = Number(process.env.CLAUDE_WATCH_PORT) || DEFAULTS.port
-const HOTKEY = process.env.CLAUDE_WATCH_HOTKEY || DEFAULTS.hotkey
 const ADMIN_KEY = process.env.ANTHROPIC_ADMIN_KEY || undefined
 const ORG_LABEL = process.env.CLAUDE_WATCH_ORG_NAME || 'Growth Saloon'
-// Desktop notifications are opt-in — your own active sessions fire "needs input"
-// constantly, which is noisy. Set CLAUDE_WATCH_NOTIFICATIONS=1 to enable.
-const NOTIFY = process.env.CLAUDE_WATCH_NOTIFICATIONS === '1'
+
+// Persisted user settings (override env/defaults), edited via the in-app panel.
+interface Settings { hotkey?: string; notifications?: boolean; mock?: boolean }
+const settingsFile = () => join(app.getPath('userData'), 'settings.json')
+function loadSettings(): Settings {
+  try { return JSON.parse(readFileSync(settingsFile(), 'utf8')) } catch { return {} }
+}
+function saveSettings(): void {
+  try { writeFileSync(settingsFile(), JSON.stringify(settings, null, 2)) } catch { /* non-fatal */ }
+}
+let settings: Settings = {}
+
+// Effective config: settings.json > env > default. Mutable so the panel changes them live.
+let hotkeyPref = process.env.CLAUDE_WATCH_HOTKEY || DEFAULTS.hotkey
+let notify = process.env.CLAUDE_WATCH_NOTIFICATIONS === '1'
 let mockMode = process.env.CLAUDE_WATCH_MOCK === '1'
 
 const TRAY_FALLBACK =
@@ -67,7 +79,7 @@ function trayImage() {
 function createWindow(): void {
   win = new BrowserWindow({
     width: 440,
-    height: 680,
+    height: 520, // initial; auto-sizes to content once the renderer reports its height
     show: false,
     frame: false,
     transparent: true,
@@ -178,7 +190,7 @@ function updateTray(snap: StatusSnapshot): void {
   if (!tray) return
   const n = snap.waitingCount
   const hk = activeHotkey ? ` · ${activeHotkey}` : ''
-  tray.setToolTip(n > 0 ? `Claude Watch — ${n} waiting${hk}` : `Claude Watch${hk}`)
+  tray.setToolTip(n > 0 ? `TaylorMade Agent Monitor — ${n} waiting${hk}` : `TaylorMade Agent Monitor${hk}`)
 }
 
 function notifyTransitions(snap: StatusSnapshot): void {
@@ -201,12 +213,32 @@ function notifyTransitions(snap: StatusSnapshot): void {
 
 async function refreshWindows(): Promise<void> {
   if (mockMode) return
-  personal = await fetchWindow('You · Max', readPersonalToken())
+  const next = await fetchWindow('You · Max', readPersonalToken())
+  // Keep the last good value through transient failures (e.g. HTTP 429 on the
+  // usage endpoint); only overwrite on success, on the first load, or on a
+  // terminal failure (not signed in / auth expired).
+  const terminal = next.note === 'auth expired' || next.note === 'not connected'
+  if (next.available || !personal.available || terminal) personal = next
 }
 
 async function refreshApi(): Promise<void> {
   if (mockMode || !ADMIN_KEY) return
   api = await fetchApiUsage(ADMIN_KEY)
+}
+
+// Auto-update from the public release feed (packaged builds only). Downloads in
+// the background and installs on quit; just nudges the user when one is staged.
+function setupAutoUpdate(): void {
+  autoUpdater.on('update-downloaded', (info) => {
+    tray?.setToolTip(`TaylorMade Agent Monitor — update ${info.version} ready (restart to apply)`)
+    if (Notification.isSupported()) {
+      new Notification({ title: 'Update ready', body: `Version ${info.version} installs when you quit.` }).show()
+    }
+  })
+  autoUpdater.on('error', (e) => console.error(`[update] ${e?.message ?? e}`))
+  const check = () => { autoUpdater.checkForUpdates().catch(() => {}) }
+  check()
+  setInterval(check, 6 * 60 * 60 * 1000)
 }
 
 // --- IPC --------------------------------------------------------------------
@@ -223,15 +255,25 @@ function registerIpc(): void {
   ipcMain.on('path:open', (_e, p: string) => { if (p) shell.openPath(p) })
   ipcMain.on('text:copy', (_e, t: string) => { if (t) clipboard.writeText(t) })
   ipcMain.on('window:hide', () => win?.hide())
+  ipcMain.on('window:content-height', (_e, h: number) => {
+    if (!win || win.isDestroyed()) return
+    const b = win.getBounds()
+    const disp = screen.getDisplayNearestPoint({ x: b.x, y: b.y })
+    const max = disp.workArea.height - 24
+    const [w, cur] = win.getContentSize()
+    const target = Math.round(Math.max(160, Math.min(h + 20, max)))
+    if (cur !== target) win.setContentSize(w, target)
+  })
   ipcMain.on('app:quit', () => { app.quit() })
 }
 
 function createTray(): void {
   tray = new Tray(trayImage())
-  tray.setToolTip('Claude Watch')
+  tray.setToolTip('TaylorMade Agent Monitor')
   const menu = Menu.buildFromTemplate([
     { label: activeHotkey ? `Show / Hide  (${activeHotkey})` : 'Show / Hide', click: toggleWindow },
     { type: 'separator' },
+    { label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (i) => app.setLoginItemSettings({ openAtLogin: i.checked, args: ['--hidden'] }) },
     { label: `Mock data`, type: 'checkbox', checked: mockMode, click: (i) => { mockMode = i.checked; pushStatus() } },
     { label: 'Quit', click: () => app.quit() }
   ])
@@ -247,7 +289,7 @@ if (!gotLock) {
   app.on('second-instance', () => toggleWindow())
 
   app.whenReady().then(async () => {
-    if (process.platform === 'win32') app.setAppUserModelId('com.taylor.claude-watch')
+    if (process.platform === 'win32') app.setAppUserModelId('com.taylormade.agent-monitor')
 
     if (process.env.CLAUDE_WATCH_SELFTEST) console.log(`[selftest] win32 native focus available: ${winAvailable()}`)
 
@@ -258,6 +300,7 @@ if (!gotLock) {
     registerHotkey()
     createTray()
     registerIpc()
+    if (app.isPackaged) setupAutoUpdate()
 
     // Subscription windows (real, OAuth), API usage (admin), and the local
     // today-tokens scan all refresh in the background on their own cadence.
@@ -273,9 +316,12 @@ if (!gotLock) {
     setInterval(pushStatus, DEFAULTS.pollMs)
     pushStatus()
 
-    // Show once on first launch so it's discoverable.
-    positionNearTrayTopRight()
-    win?.show()
+    // Show once on first launch so it's discoverable — unless started at login.
+    const startedHidden = process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAtLogin
+    if (!startedHidden) {
+      positionNearTrayTopRight()
+      win?.show()
+    }
 
     // Dev: capture the panel to a PNG then exit (CLAUDE_WATCH_CAPTURE=<path>).
     if (process.env.CLAUDE_WATCH_CAPTURE && win) {

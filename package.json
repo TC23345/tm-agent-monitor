@@ -1,5 +1,5 @@
 {
-  "name": "claude-watch-win",
+  "name": "taylormade-agent-monitor",
   "version": "0.1.0",
   "description": "Hotkey-summoned Claude Code agent + API usage monitor for Windows (claude-watch, re-imagined for Win).",
   "author": "Taylor",
@@ -15,9 +15,11 @@
     "icons": "node scripts/gen-icon.mjs 256 && node scripts/gen-icon.mjs 32 && node scripts/gen-ico.mjs",
     "hooks:install": "node hooks/install.mjs",
     "dist": "npm run build && electron-builder --win",
-    "dist:dir": "npm run build && electron-builder --win --dir"
+    "dist:dir": "npm run build && electron-builder --win --dir",
+    "publish": "npm run build && electron-builder --win --publish always"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "koffi": "^3.0.2"
   },
   "devDependencies": {

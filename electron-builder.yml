@@ -1,5 +1,5 @@
-appId: com.taylor.claude-watch
-productName: Claude Watch
+appId: com.taylormade.agent-monitor
+productName: TaylorMade Agent Monitor
 directories:
   output: dist
   buildResources: build
@@ -20,13 +20,20 @@ win:
     - nsis
     - portable
   icon: build/icon.ico
-  artifactName: ${productName}-${version}-${arch}.${ext}
+  artifactName: tm-agent-monitor-${version}-${arch}.${ext}
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Claude Watch
+  shortcutName: TaylorMade Agent Monitor
 portable:
-  artifactName: ClaudeWatch-${version}-portable.exe
+  artifactName: tm-agent-monitor-${version}-portable.exe
+# Auto-update feed: GitHub Releases on this repo. The repo must be PUBLIC so the
+# app can read latest.yml without a token. (Make it public, or point this at a
+# separate public releases repo to keep the code private.)
+publish:
+  provider: github
+  owner: TC23345
+  repo: tm-agent-monitor

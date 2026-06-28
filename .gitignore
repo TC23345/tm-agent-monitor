@@ -5,3 +5,4 @@ build
 .env
 *.log
 *.tsbuildinfo
+plan-design-system-agent-monitor.md

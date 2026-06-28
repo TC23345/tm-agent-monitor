@@ -16,6 +16,7 @@ const api = {
   openPath: (p: string) => ipcRenderer.send('path:open', p),
   copyText: (t: string) => ipcRenderer.send('text:copy', t),
   hide: () => ipcRenderer.send('window:hide'),
+  reportHeight: (h: number) => ipcRenderer.send('window:content-height', h),
   quit: () => ipcRenderer.send('app:quit')
 }
 
