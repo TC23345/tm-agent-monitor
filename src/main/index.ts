@@ -63,6 +63,7 @@ let tray: Tray | null = null
 // patterns so at least one is likely free of an existing global binding.
 const HOTKEY_FALLBACKS = ['Alt+Shift+C', 'Control+Shift+Space', 'Alt+Shift+A', 'Alt+Shift+S']
 let activeHotkey: string | null = null
+let updateReady: string | null = null // version string once an update is downloaded
 
 let daemon: Daemon
 const localUsage = new LocalUsage()
@@ -215,14 +216,24 @@ function notifyTransitions(snap: StatusSnapshot): void {
   prevWaiting = nowWaiting
 }
 
+let usageLoaded = false
 async function refreshWindows(): Promise<void> {
   if (mockMode) return
   const next = await fetchWindow('You · Max', readPersonalToken())
-  // Keep the last good value through transient failures (e.g. HTTP 429 on the
-  // usage endpoint); only overwrite on success, on the first load, or on a
-  // terminal failure (not signed in / auth expired).
   const terminal = next.note === 'auth expired' || next.note === 'not connected'
-  if (next.available || !personal.available || terminal) personal = next
+  if (next.available) {
+    personal = next
+    usageLoaded = true
+  } else if (terminal) {
+    personal = next // show the real reason (signed out / auth expired)
+  } else if (!usageLoaded) {
+    // Transient failure (HTTP 429 rate-limit, timeout, unreachable) before the
+    // first successful load — show a gentle placeholder instead of the raw error.
+    // We don't poll faster on 429; the endpoint's retry-after asks us to back off,
+    // so the normal cadence retries and recovers within a cycle.
+    personal = { available: false, label: 'You · Max', note: 'Checking usage…' }
+  }
+  // else: keep the last-good value through transient blips after a good load
 }
 
 async function refreshApi(): Promise<void> {
@@ -234,9 +245,10 @@ async function refreshApi(): Promise<void> {
 // the background and installs on quit; just nudges the user when one is staged.
 function setupAutoUpdate(): void {
   autoUpdater.on('update-downloaded', (info) => {
-    tray?.setToolTip(`TaylorMade Agent Monitor — update ${info.version} ready (restart to apply)`)
+    updateReady = info.version
+    tray?.setToolTip(`TaylorMade Agent Monitor — update ${info.version} ready (right-click → Restart to update)`)
     if (Notification.isSupported()) {
-      new Notification({ title: 'Update ready', body: `Version ${info.version} installs when you quit.` }).show()
+      new Notification({ title: 'Update ready', body: `Version ${info.version} — right-click the tray icon → Restart to update (or it installs on quit).` }).show()
     }
   })
   autoUpdater.on('error', (e) => console.error(`[update] ${e?.message ?? e}`))
@@ -299,18 +311,27 @@ function registerIpc(): void {
   ipcMain.on('app:quit', () => { app.quit() })
 }
 
-function createTray(): void {
-  tray = new Tray(trayImage())
-  tray.setToolTip('TaylorMade Agent Monitor')
-  const menu = Menu.buildFromTemplate([
+// Built fresh on each right-click so it reflects current state (mock, launch-at-
+// login, and whether an update is staged).
+function buildTrayMenu(): Menu {
+  const items: Electron.MenuItemConstructorOptions[] = [
     { label: activeHotkey ? `Show / Hide  (${activeHotkey})` : 'Show / Hide', click: toggleWindow },
     { type: 'separator' },
     { label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (i) => app.setLoginItemSettings({ openAtLogin: i.checked, args: ['--hidden'] }) },
-    { label: `Mock data`, type: 'checkbox', checked: mockMode, click: (i) => { mockMode = i.checked; pushStatus() } },
-    { label: 'Quit', click: () => app.quit() }
-  ])
+    { label: 'Mock data', type: 'checkbox', checked: mockMode, click: (i) => { mockMode = i.checked; pushStatus() } }
+  ]
+  if (updateReady) {
+    items.push({ type: 'separator' }, { label: `Restart to update (v${updateReady})`, click: () => autoUpdater.quitAndInstall() })
+  }
+  items.push({ type: 'separator' }, { label: 'Quit', click: () => app.quit() })
+  return Menu.buildFromTemplate(items)
+}
+
+function createTray(): void {
+  tray = new Tray(trayImage())
+  tray.setToolTip('TaylorMade Agent Monitor')
   tray.on('click', toggleWindow)
-  tray.on('right-click', () => tray?.popUpContextMenu(menu))
+  tray.on('right-click', () => tray?.popUpContextMenu(buildTrayMenu()))
 }
 
 // --- lifecycle --------------------------------------------------------------
