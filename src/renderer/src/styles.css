@@ -62,6 +62,20 @@ html, body, #root {
   gap: 10px;
   margin-bottom: 18px;
 }
+.appname {
+  -webkit-app-region: drag;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--text);
+}
+.header-right {
+  -webkit-app-region: drag;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
 .brand {
   height: 26px;
   width: auto;
@@ -71,7 +85,6 @@ html, body, #root {
 }
 .needs {
   -webkit-app-region: no-drag;
-  margin-left: auto;
   font-size: 12px;
   font-weight: 600;
   color: #fff;
@@ -105,6 +118,16 @@ html, body, #root {
 .uzone { margin-bottom: 16px; }
 .uzone:last-child { margin-bottom: 2px; }
 .uzone-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--faint); margin: 0 0 9px; }
+.uzone-toggle {
+  -webkit-app-region: no-drag;
+  display: flex; align-items: center; gap: 7px;
+  width: 100%; background: none; border: none; padding: 0; margin: 0 0 9px;
+  cursor: pointer; text-align: left; color: inherit;
+}
+.uzone-toggle .uzone-label { margin: 0; }
+.uzone-toggle:hover .uzone-label { color: var(--muted); }
+.uzone-chevron { width: 13px; height: 13px; color: var(--faint); flex: 0 0 auto; }
+.uzone-summary { font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--faint); margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .uzone-note { font-size: 13px; color: var(--muted); padding: 2px 0 4px; }
 
 .quota { margin-bottom: 12px; }

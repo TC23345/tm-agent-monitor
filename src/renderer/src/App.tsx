@@ -60,11 +60,14 @@ export function App() {
 
   return (
     <div className="app" ref={appRef}>
-      <header className="header" title="TaylorMade Agent Monitor — live Claude Code agents and your usage · drag here to move">
-        <img className="brand" src={logo} alt="TaylorMade Solutions" draggable={false} />
-        {waiting > 0 && (
-          <span className="needs" title="Agents waiting for your input right now">{waiting} waiting</span>
-        )}
+      <header className="header" title="Claude Code agent monitor · drag here to move">
+        <span className="appname">Claude Code</span>
+        <div className="header-right">
+          {waiting > 0 && (
+            <span className="needs" title="Agents waiting for your input right now">{waiting} waiting</span>
+          )}
+          <img className="brand" src={logo} alt="TaylorMade Solutions" draggable={false} />
+        </div>
       </header>
 
       {snap && <UsageDashboard usage={snap.usage} now={now} />}

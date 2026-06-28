@@ -22,11 +22,34 @@ function QuotaBar({ q, now, hint }: { q: Quota; now: number; hint?: string }) {
   )
 }
 
-function Zone({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+/** A usage section. Pass `collapseKey` to make its label a collapse toggle. */
+function Zone({
+  title,
+  hint,
+  collapseKey,
+  summary,
+  children
+}: {
+  title: string
+  hint?: string
+  collapseKey?: string
+  summary?: React.ReactNode
+  children: React.ReactNode
+}) {
+  const [collapsed, toggle] = useCollapse(collapseKey ?? 'usage._fixed', false)
+  const Chevron = collapsed ? ChevronRight : ChevronDown
   return (
     <div className="uzone">
-      <div className="uzone-label" title={hint}>{title}</div>
-      {children}
+      {collapseKey ? (
+        <button className="uzone-toggle" onClick={toggle} title={hint}>
+          <Chevron className="uzone-chevron" strokeWidth={2} />
+          <span className="uzone-label">{title}</span>
+          {collapsed && summary !== undefined && <span className="uzone-summary">{summary}</span>}
+        </button>
+      ) : (
+        <div className="uzone-label" title={hint}>{title}</div>
+      )}
+      {(!collapseKey || !collapsed) && children}
     </div>
   )
 }
@@ -44,6 +67,10 @@ export function UsageDashboard({ usage, now }: { usage: UsageSummary; now: numbe
   const [collapsed, toggle] = useCollapse('usage', false)
   const { personal, api } = usage
   const Chevron = collapsed ? ChevronRight : ChevronDown
+
+  const apiSummary = api.available
+    ? `${compactNumber(api.todayTokensOut ?? 0)} tokens${api.todayCostUsd !== undefined ? ` · $${api.todayCostUsd.toFixed(2)}` : ''}`
+    : 'no admin key'
 
   return (
     <section className="usage">
@@ -85,7 +112,9 @@ export function UsageDashboard({ usage, now }: { usage: UsageSummary; now: numbe
 
           <Zone
             title={`${api.label} · API`}
-            hint="Your organization's API-key usage — pay-per-use, a separate account from your subscription (no 5-hour window)"
+            hint="Your organization's API-key usage — pay-per-use, a separate account from your subscription (no 5-hour window) · click to collapse/expand"
+            collapseKey="usage.api"
+            summary={apiSummary}
           >
             {api.available ? (
               <>

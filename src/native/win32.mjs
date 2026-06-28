@@ -134,6 +134,18 @@ function processSnapshot() {
 // Owns the desktop / taskbar / Explorer windows — never the session's terminal.
 const NON_TERMINAL_EXES = new Set(['explorer.exe'])
 
+// Foreground-window fallback allowlist. Windows Terminal (esp. as the default
+// terminal) reparents the shell, so WindowsTerminal.exe isn't an ancestor and the
+// process-tree walk misses it. When the hook fires on a user prompt the terminal
+// is the foreground window — capture it if it's a recognized terminal.
+const TERMINAL_EXES = new Set([
+  'windowsterminal.exe', 'wt.exe', 'openconsole.exe',
+  'powershell.exe', 'pwsh.exe', 'cmd.exe',
+  'code.exe', 'cursor.exe', 'windsurf.exe',
+  'alacritty.exe', 'wezterm-gui.exe', 'hyper.exe',
+  'conemu64.exe', 'conemu.exe', 'mintty.exe', 'tabby.exe'
+])
+
 /**
  * Walk up the process tree from `startPid` and return the first ancestor (or
  * startPid itself) that owns a visible top-level window — i.e. the terminal /
@@ -185,9 +197,32 @@ export function consoleWindow() {
   }
 }
 
+/**
+ * The current foreground window, if it belongs to a recognized terminal. Used as
+ * a last resort for terminals the process-tree walk can't reach (notably Windows
+ * Terminal as the default terminal). Valid because the hook fires the instant the
+ * user submits a prompt, when their terminal still holds the foreground.
+ */
+export function foregroundTerminalWindow() {
+  const a = load()
+  if (!a) return null
+  try {
+    const hwnd = a.fns.GetForegroundWindow()
+    if (!hwnd || BigInt(hwnd) === 0n) return null
+    if (!a.fns.IsWindowVisible(hwnd) || a.fns.GetWindowTextLengthW(hwnd) <= 0) return null
+    const pidBox = [0]
+    a.fns.GetWindowThreadProcessId(hwnd, pidBox)
+    const exe = processSnapshot().exeOf.get(pidBox[0])
+    if (exe && TERMINAL_EXES.has(exe)) return { hwnd: BigInt(hwnd).toString(), pid: pidBox[0] }
+    return null
+  } catch {
+    return null
+  }
+}
+
 /** Discover the window for the process tree the CURRENT process lives in. */
 export function findTerminalWindowForCurrentProcess() {
-  return consoleWindow() ?? findTerminalWindow(process.pid)
+  return consoleWindow() ?? findTerminalWindow(process.pid) ?? foregroundTerminalWindow()
 }
 
 /** Force a window to the foreground, working around the foreground lock. */
