@@ -35,6 +35,7 @@ function load() {
       ShowWindow: user32.func('int __stdcall ShowWindow(uintptr_t hwnd, int cmd)'),
       AttachThreadInput: user32.func('int __stdcall AttachThreadInput(uint32 a, uint32 b, int attach)'),
       GetCurrentThreadId: kernel32.func('uint32 __stdcall GetCurrentThreadId()'),
+      GetConsoleWindow: kernel32.func('uintptr_t __stdcall GetConsoleWindow()'),
       CreateToolhelp32Snapshot: kernel32.func('uintptr_t __stdcall CreateToolhelp32Snapshot(uint32 flags, uint32 pid)'),
       CloseHandle: kernel32.func('int __stdcall CloseHandle(uintptr_t h)')
     }
@@ -160,9 +161,33 @@ export function findTerminalWindow(startPid) {
   return null
 }
 
+/**
+ * The console window hosting the CURRENT process, if it's a classic console
+ * (conhost) terminal — e.g. a standalone PowerShell / cmd window. The window is
+ * owned by a conhost.exe *child* of the shell, so the upward process-tree walk
+ * can't see it; GetConsoleWindow returns it directly. Returns null for ConPTY
+ * terminals (Windows Terminal, VS Code/Cursor) where it's an invisible
+ * pseudo-console — those are found by findTerminalWindow instead.
+ */
+export function consoleWindow() {
+  const a = load()
+  if (!a) return null
+  try {
+    const hwnd = a.fns.GetConsoleWindow()
+    if (!hwnd || BigInt(hwnd) === 0n) return null
+    // Skip the hidden ConPTY pseudo-console; only a real, titled console window counts.
+    if (!a.fns.IsWindowVisible(hwnd) || a.fns.GetWindowTextLengthW(hwnd) <= 0) return null
+    const pidBox = [0]
+    a.fns.GetWindowThreadProcessId(hwnd, pidBox)
+    return { hwnd: BigInt(hwnd).toString(), pid: pidBox[0] }
+  } catch {
+    return null
+  }
+}
+
 /** Discover the window for the process tree the CURRENT process lives in. */
 export function findTerminalWindowForCurrentProcess() {
-  return findTerminalWindow(process.pid)
+  return consoleWindow() ?? findTerminalWindow(process.pid)
 }
 
 /** Force a window to the foreground, working around the foreground lock. */
