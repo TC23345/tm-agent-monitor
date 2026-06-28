@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { StatusSnapshot } from '@shared/types'
 import { UsageDashboard } from './UsageDashboard'
 import { ProjectGroup } from './ProjectGroup'
@@ -25,30 +25,41 @@ export function App() {
   }, [])
 
   // Report the card's natural height so main can size the window to fit content.
-  // Add back the agent list's scrolled-away overflow so the desired height isn't
-  // capped by the current (possibly too-small) window.
+  // Desired height = the (possibly capped) card height + the agent list's
+  // scrolled-away overflow, so the window grows to fit instead of scrolling.
   const appRef = useRef<HTMLDivElement>(null)
-  const agentsRef = useRef<HTMLDivElement>(null)
+  const agentsRef = useRef<HTMLDivElement>(null) // scroll container — for the overflow read
+  const agentsInnerRef = useRef<HTMLDivElement>(null) // natural-height list — what we observe
+  const rafRef = useRef(0)
+  const measure = useCallback(() => {
+    const app = appRef.current
+    if (!app) return
+    cancelAnimationFrame(rafRef.current)
+    rafRef.current = requestAnimationFrame(() => {
+      const a = agentsRef.current
+      const overflow = a ? Math.max(0, a.scrollHeight - a.clientHeight) : 0
+      window.watch.reportHeight(app.offsetHeight + overflow)
+    })
+  }, [])
   useEffect(() => {
     const app = appRef.current
     if (!app) return
-    let raf = 0
-    const measure = () => {
-      cancelAnimationFrame(raf)
-      raf = requestAnimationFrame(() => {
-        const a = agentsRef.current
-        const overflow = a ? Math.max(0, a.scrollHeight - a.clientHeight) : 0
-        window.watch.reportHeight(app.offsetHeight + overflow)
-      })
-    }
+    // Observe the card AND the natural-height inner list. Once the window is
+    // capped, the scroll container's box stops changing — only the inner list
+    // grows when terminals are added, so observing it is what re-fires the resize.
     const ro = new ResizeObserver(measure)
     ro.observe(app)
-    if (agentsRef.current) ro.observe(agentsRef.current)
+    if (agentsInnerRef.current) ro.observe(agentsInnerRef.current)
     return () => {
       ro.disconnect()
-      cancelAnimationFrame(raf)
+      cancelAnimationFrame(rafRef.current)
     }
-  }, [])
+  }, [measure])
+  // Belt-and-suspenders: re-measure whenever the snapshot changes (agents added,
+  // closed, or changing state) in case a layout change didn't trip the observer.
+  useEffect(() => {
+    measure()
+  }, [snap, measure])
 
   const groups = groupByProject(snap?.agents ?? [])
   const waiting = snap?.waitingCount ?? 0
@@ -75,17 +86,19 @@ export function App() {
       <div className="rule" />
 
       <section className="agents" ref={agentsRef}>
-        {!snap ? (
-          <div className="empty">Connecting…</div>
-        ) : groups.length === 0 ? (
-          <div className="empty">
-            {snap.daemonConnected
-              ? 'No active agents yet. Start Claude Code in a project.'
-              : 'Daemon offline — run the hook installer to see live agents.'}
-          </div>
-        ) : (
-          groups.map((g) => <ProjectGroup key={g.key} group={g} now={now} />)
-        )}
+        <div className="agents-inner" ref={agentsInnerRef}>
+          {!snap ? (
+            <div className="empty">Connecting…</div>
+          ) : groups.length === 0 ? (
+            <div className="empty">
+              {snap.daemonConnected
+                ? 'No active agents yet. Start Claude Code in a project.'
+                : 'Daemon offline — run the hook installer to see live agents.'}
+            </div>
+          ) : (
+            groups.map((g) => <ProjectGroup key={g.key} group={g} now={now} />)
+          )}
+        </div>
       </section>
 
       <div className="rule" />

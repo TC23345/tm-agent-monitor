@@ -1,6 +1,6 @@
 {
   "name": "taylormade-agent-monitor",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Hotkey-summoned Claude Code agent + API usage monitor for Windows (claude-watch, re-imagined for Win).",
   "author": "Taylor",
   "license": "MIT",
