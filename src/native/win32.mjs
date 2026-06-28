@@ -88,21 +88,38 @@ export function listWindows() {
   return out
 }
 
-/** Map of pid -> parentPid from a process snapshot. */
-function parentMap() {
+/** Decode a szExeFile (uint16[260] or pre-decoded string) to a lowercase name. */
+function decodeExe(v) {
+  try {
+    if (typeof v === 'string') return v.replace(/\0.*$/, '').toLowerCase()
+    let s = ''
+    for (const c of v) {
+      if (!c) break
+      s += String.fromCharCode(c)
+    }
+    return s.toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
+/** Process snapshot: { parents: pid->parentPid, exeOf: pid->lowercased exe name }. */
+function processSnapshot() {
   const a = load()
-  if (!a) return new Map()
+  if (!a) return { parents: new Map(), exeOf: new Map() }
   const { fns, sizeofEntry } = a
-  const map = new Map()
+  const parents = new Map()
+  const exeOf = new Map()
   const TH32CS_SNAPPROCESS = 0x2
   const INVALID = (1n << 64n) - 1n // INVALID_HANDLE_VALUE
   const snap = fns.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-  if (BigInt(snap) === INVALID || BigInt(snap) === 0n) return map
+  if (BigInt(snap) === INVALID || BigInt(snap) === 0n) return { parents, exeOf }
   try {
     const entry = { dwSize: sizeofEntry }
     let ok = fns.Process32FirstW(snap, entry)
     while (ok) {
-      map.set(entry.th32ProcessID, entry.th32ParentProcessID)
+      parents.set(entry.th32ProcessID, entry.th32ParentProcessID)
+      exeOf.set(entry.th32ProcessID, decodeExe(entry.szExeFile))
       ok = fns.Process32NextW(snap, entry)
     }
   } catch {
@@ -110,8 +127,11 @@ function parentMap() {
   } finally {
     fns.CloseHandle(snap)
   }
-  return map
+  return { parents, exeOf }
 }
+
+// Owns the desktop / taskbar / Explorer windows — never the session's terminal.
+const NON_TERMINAL_EXES = new Set(['explorer.exe'])
 
 /**
  * Walk up the process tree from `startPid` and return the first ancestor (or
@@ -125,11 +145,15 @@ export function findTerminalWindow(startPid) {
   const byPid = new Map()
   for (const w of windows) if (!byPid.has(w.pid)) byPid.set(w.pid, w.hwnd)
 
-  const parents = parentMap()
+  const { parents, exeOf } = processSnapshot()
   let pid = startPid
   for (let depth = 0; depth < 20 && pid && pid > 4; depth++) {
     const hwnd = byPid.get(pid)
-    if (hwnd !== undefined) return { hwnd: hwnd.toString(), pid }
+    // Take the first ancestor that owns a window — but skip Explorer, so a session
+    // whose terminal window can't be found doesn't fall through to the desktop shell.
+    if (hwnd !== undefined && !NON_TERMINAL_EXES.has(exeOf.get(pid))) {
+      return { hwnd: hwnd.toString(), pid }
+    }
     pid = parents.get(pid)
     if (pid === undefined) break
   }

@@ -7,7 +7,9 @@
 import { readFileSync, statSync, openSync, readSync, closeSync } from 'node:fs'
 
 const PORT = process.env.CLAUDE_WATCH_PORT || '7459'
-const CONTEXT_WINDOW = Number(process.env.CLAUDE_WATCH_CONTEXT_WINDOW || 200000)
+// Context window for the fill %. Defaults to 1M (current Opus). Sessions on a
+// 200K-context model can override with CLAUDE_WATCH_CONTEXT_WINDOW=200000.
+const CONTEXT_WINDOW = Number(process.env.CLAUDE_WATCH_CONTEXT_WINDOW || 1000000)
 
 function readStdin() {
   try {

@@ -253,7 +253,8 @@ function settingsView() {
     launchAtLogin: app.getLoginItemSettings().openAtLogin,
     mock: mockMode,
     hasAdminKey: !!ADMIN_KEY,
-    port: PORT
+    port: PORT,
+    version: app.getVersion()
   }
 }
 
@@ -277,9 +278,11 @@ function registerIpc(): void {
   })
   ipcMain.on('agent:focus', (_e, _id: string, hwnd?: string, pid?: number) => {
     if (!hwnd && !pid) return // nothing to focus (e.g. mock data) — keep panel open
-    win?.hide() // step aside so the terminal can take the foreground
+    // Focus the terminal directly. Because this panel is alwaysOnTop and hides on
+    // blur, a successful focus auto-hides it; we DON'T pre-hide, so a failed focus
+    // just leaves the panel up instead of revealing whatever was behind it.
     const ok = (hwnd && focusHwnd(hwnd)) || (pid && focusByPid(pid)) || false
-    if (!ok) { win?.show(); win?.focus() }
+    if (!ok && win) { win.show(); win.focus() }
   })
   ipcMain.on('path:open', (_e, p: string) => { if (p) shell.openPath(p) })
   ipcMain.on('text:copy', (_e, t: string) => { if (t) clipboard.writeText(t) })

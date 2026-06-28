@@ -125,6 +125,7 @@ export interface AppSettings {
   mock: boolean
   hasAdminKey: boolean
   port: number
+  version: string
 }
 
 export const DEFAULTS = {

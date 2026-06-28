@@ -106,6 +106,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               <span className="slabel">Daemon port</span>
               <span className="sval">{s.port}</span>
             </div>
+            <div className="srow srow--info">
+              <span className="slabel">Version</span>
+              <span className="sval">v{s.version}</span>
+            </div>
           </div>
         )}
       </div>
