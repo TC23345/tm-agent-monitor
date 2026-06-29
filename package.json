@@ -1,6 +1,6 @@
 {
   "name": "taylormade-agent-monitor",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Hotkey-summoned Claude Code agent + API usage monitor for Windows (claude-watch, re-imagined for Win).",
   "author": "Taylor",
   "license": "MIT",
@@ -12,6 +12,8 @@
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "node --test src/native/win32.test.mjs",
+    "focus:diag": "node scripts/focus-diag.mjs",
     "icons": "node scripts/gen-icon.mjs 256 && node scripts/gen-icon.mjs 32 && node scripts/gen-ico.mjs",
     "hooks:install": "node hooks/install.mjs",
     "dist": "npm run build && electron-builder --win",

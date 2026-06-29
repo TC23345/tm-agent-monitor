@@ -151,26 +151,40 @@ const TERMINAL_EXES = new Set([
  * startPid itself) that owns a visible top-level window — i.e. the terminal /
  * editor window hosting the session. Returns { hwnd: string, pid } | null.
  */
+/**
+ * Pure, testable walk: from `startPid`, climb the parent chain and return the
+ * first ancestor that owns a window — skipping `nonTerminal` exes (Explorer, the
+ * desktop shell). `byPid` maps pid -> hwnd, `parents` maps pid -> parentPid,
+ * `exeOf` maps pid -> lowercased exe name. Returns { hwnd: string, pid } | null.
+ */
+export function pickWindowFromTree(startPid, byPid, parents, exeOf, nonTerminal = NON_TERMINAL_EXES) {
+  let pid = startPid
+  for (let depth = 0; depth < 20 && pid && pid > 4; depth++) {
+    const hwnd = byPid.get(pid)
+    if (hwnd !== undefined && !nonTerminal.has(exeOf.get(pid))) {
+      return { hwnd: typeof hwnd === 'bigint' ? hwnd.toString() : String(hwnd), pid }
+    }
+    pid = parents.get(pid)
+    if (pid === undefined) break
+  }
+  return null
+}
+
 export function findTerminalWindow(startPid) {
   if (!load()) return null
   const windows = listWindows()
   if (!windows.length) return null
   const byPid = new Map()
   for (const w of windows) if (!byPid.has(w.pid)) byPid.set(w.pid, w.hwnd)
-
   const { parents, exeOf } = processSnapshot()
-  let pid = startPid
-  for (let depth = 0; depth < 20 && pid && pid > 4; depth++) {
-    const hwnd = byPid.get(pid)
-    // Take the first ancestor that owns a window — but skip Explorer, so a session
-    // whose terminal window can't be found doesn't fall through to the desktop shell.
-    if (hwnd !== undefined && !NON_TERMINAL_EXES.has(exeOf.get(pid))) {
-      return { hwnd: hwnd.toString(), pid }
-    }
-    pid = parents.get(pid)
-    if (pid === undefined) break
-  }
-  return null
+  return pickWindowFromTree(startPid, byPid, parents, exeOf)
+}
+
+/** Diagnostic: every visible titled window with its owning process exe. */
+export function debugWindows() {
+  if (!load()) return []
+  const { exeOf } = processSnapshot()
+  return listWindows().map((w) => ({ hwnd: w.hwnd.toString(), pid: w.pid, exe: exeOf.get(w.pid) ?? '?' }))
 }
 
 /**

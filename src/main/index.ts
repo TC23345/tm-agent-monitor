@@ -290,11 +290,13 @@ function registerIpc(): void {
   })
   ipcMain.on('agent:focus', (_e, _id: string, hwnd?: string, pid?: number) => {
     if (!hwnd && !pid) return // nothing to focus (e.g. mock data) — keep panel open
-    // Focus the terminal directly. Because this panel is alwaysOnTop and hides on
-    // blur, a successful focus auto-hides it; we DON'T pre-hide, so a failed focus
-    // just leaves the panel up instead of revealing whatever was behind it.
     const ok = (hwnd && focusHwnd(hwnd)) || (pid && focusByPid(pid)) || false
-    if (!ok && win) { win.show(); win.focus() }
+    // Explicitly hide on success: this panel is alwaysOnTop, so even after the
+    // terminal takes the foreground the panel can stay drawn over it — relying on
+    // the blur handler alone makes it look like "nothing happened". Hide it so the
+    // terminal is actually visible. On failure, keep the panel up (don't pre-hide).
+    if (ok) win?.hide()
+    else if (win) { win.show(); win.focus() }
   })
   ipcMain.on('path:open', (_e, p: string) => { if (p) shell.openPath(p) })
   ipcMain.on('text:copy', (_e, t: string) => { if (t) clipboard.writeText(t) })
