@@ -25,10 +25,10 @@ export function AgentContextMenu({ menu, onClose }: { menu: MenuState; onClose: 
     setPos({ x, y })
   }, [menu.x, menu.y])
 
+  // Actions close the menu but never the panel — it only closes on the hotkey.
   const reveal = () => {
     window.watch.openPath(menu.cwd)
     onClose()
-    window.watch.hide()
   }
   const copy = () => {
     window.watch.copyText(menu.cwd)
@@ -38,7 +38,6 @@ export function AgentContextMenu({ menu, onClose }: { menu: MenuState; onClose: 
   const openTerminal = () => {
     window.watch.openTerminal(menu.cwd)
     onClose()
-    window.watch.hide()
   }
 
   return (

@@ -57,19 +57,6 @@ export function App() {
       const a = agentsRef.current
       const overflow = a ? Math.max(0, a.scrollHeight - a.clientHeight) : 0
       window.watch.reportHeight(app.offsetHeight + overflow)
-      // Report the first row's click point (content-relative) so main can summon
-      // the panel with that row under the cursor. Fall back to the header if none.
-      const ar = app.getBoundingClientRect()
-      const row = app.querySelector<HTMLElement>('.row')
-      if (row) {
-        const rr = row.getBoundingClientRect()
-        window.watch.reportFirstRow({
-          x: Math.round(rr.left - ar.left + 24),
-          y: Math.round(rr.top - ar.top + rr.height / 2)
-        })
-      } else {
-        window.watch.reportFirstRow({ x: 24, y: 40 })
-      }
     })
   }, [])
   useEffect(() => {
@@ -142,11 +129,11 @@ export function App() {
           {snap?.mock ? 'mock data' : snap?.daemonConnected ? 'connected' : 'disconnected'}
         </div>
         <div className="footer-actions">
-          <button className="iconbtn" title="Open Cursor — pick a project" onClick={() => { window.watch.openCursor(); window.watch.hide() }}>
-            <FolderOpen className="gear" strokeWidth={2} />
-          </button>
           <button className="iconbtn" title="New project — create a folder in Projects and open it in Cursor" onClick={() => setNewProjectOpen(true)}>
             <FolderPlus className="gear" strokeWidth={2} />
+          </button>
+          <button className="iconbtn" title="Open Cursor — pick a project" onClick={() => window.watch.openCursor()}>
+            <FolderOpen className="gear" strokeWidth={2} />
           </button>
           <button className="iconbtn" title="Settings — hotkey, notifications, startup, mock data" onClick={() => setSettingsOpen(true)}>
             <Settings className="gear" strokeWidth={2} />

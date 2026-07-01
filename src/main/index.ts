@@ -39,7 +39,8 @@ const PORT = Number(process.env.CLAUDE_WATCH_PORT) || DEFAULTS.port
 const ADMIN_KEY = process.env.ANTHROPIC_ADMIN_KEY || undefined
 const ORG_LABEL = process.env.CLAUDE_WATCH_ORG_NAME || 'Growth Saloon'
 // Where "New project" creates folders. Defaults to ~/Projects (C:\Users\<you>\Projects).
-const PROJECTS_DIR = process.env.CLAUDE_WATCH_PROJECTS_DIR || join(app.getPath('home'), 'Projects')
+// Distinct from CLAUDE_WATCH_PROJECTS_DIR, which points at the transcript store.
+const NEW_PROJECT_DIR = process.env.CLAUDE_WATCH_NEW_PROJECT_DIR || join(app.getPath('home'), 'Projects')
 // How often to poll the subscription usage endpoint. The 5h/weekly windows move
 // slowly, and polling too fast trips its rate limit (HTTP 429), so keep it gentle.
 const USAGE_POLL_MS = 120_000
@@ -70,10 +71,6 @@ let tray: Tray | null = null
 const HOTKEY_FALLBACKS = ['Alt+Shift+C', 'Control+Shift+Space', 'Alt+Shift+A', 'Alt+Shift+S']
 let activeHotkey: string | null = null
 let updateReady: string | null = null // version string once an update is downloaded
-// Offset (content-relative px) of the first session row's click point, reported
-// by the renderer. Used to summon the panel so that row lands under the cursor.
-// Defaults aim at roughly where the first row sits under the header.
-let lastFirstRow = { x: 24, y: 96 }
 
 let daemon: Daemon
 const localUsage = new LocalUsage()
@@ -133,30 +130,12 @@ function positionNearTrayTopRight(): void {
   win.setPosition(x + width - w - 16, y + 16)
 }
 
-/**
- * Summon the panel at the cursor so the first session row sits under the
- * pointer — a single left-click then focuses that terminal without moving the
- * mouse. Clamped to the cursor's display work area so it never lands offscreen.
- */
-function positionAtCursorOnFirstRow(): void {
-  if (!win) return
-  const cursor = screen.getCursorScreenPoint()
-  const display = screen.getDisplayNearestPoint(cursor)
-  const { x, y, width, height } = display.workArea
-  const [w, h] = win.getSize()
-  const targetX = cursor.x - lastFirstRow.x
-  const targetY = cursor.y - lastFirstRow.y
-  const clampedX = Math.round(Math.max(x, Math.min(targetX, x + width - w)))
-  const clampedY = Math.round(Math.max(y, Math.min(targetY, y + height - h)))
-  win.setPosition(clampedX, clampedY)
-}
-
 function toggleWindow(): void {
   if (!win) return
   if (win.isVisible()) {
     win.hide()
   } else {
-    positionAtCursorOnFirstRow()
+    positionNearTrayTopRight()
     win.show()
     win.focus()
   }
@@ -313,7 +292,7 @@ function notifyTransitions(snap: StatusSnapshot): void {
           title: `${a.project} needs input`,
           body: a.question ?? 'Waiting for input'
         })
-        note.on('click', () => { positionAtCursorOnFirstRow(); win?.show(); win?.focus() })
+        note.on('click', () => { positionNearTrayTopRight(); win?.show(); win?.focus() })
         note.show()
       }
     }
@@ -406,14 +385,11 @@ function registerIpc(): void {
     return settingsView()
   })
   ipcMain.on('agent:focus', (_e, _id: string, hwnd?: string, pid?: number) => {
-    if (!hwnd && !pid) return // nothing to focus (e.g. mock data) — keep panel open
-    const ok = (hwnd && focusHwnd(hwnd)) || (pid && focusByPid(pid)) || false
-    // Explicitly hide on success: this panel is alwaysOnTop, so even after the
-    // terminal takes the foreground the panel can stay drawn over it — relying on
-    // the blur handler alone makes it look like "nothing happened". Hide it so the
-    // terminal is actually visible. On failure, keep the panel up (don't pre-hide).
-    if (ok) win?.hide()
-    else if (win) { win.show(); win.focus() }
+    if (!hwnd && !pid) return // nothing to focus (e.g. mock data)
+    // Bring the terminal to the foreground but keep the panel open. The panel is
+    // sticky now — it only closes on the hotkey (or tray / Escape), never a click.
+    const ok = hwnd ? focusHwnd(hwnd) : false
+    if (!ok && pid) focusByPid(pid)
   })
   ipcMain.on('path:open', (_e, p: string) => { if (p) shell.openPath(p) })
   ipcMain.on('text:copy', (_e, t: string) => { if (t) clipboard.writeText(t) })
@@ -422,7 +398,7 @@ function registerIpc(): void {
   ipcMain.handle('project:create', (_e, rawName: string) => {
     const name = sanitizeProjectName(rawName)
     if (!name) return { ok: false, error: 'Enter a valid project name.' }
-    const dir = join(PROJECTS_DIR, name)
+    const dir = join(NEW_PROJECT_DIR, name)
     try {
       mkdirSync(dir, { recursive: true })
       openInCursor(dir)
@@ -432,9 +408,6 @@ function registerIpc(): void {
     }
   })
   ipcMain.on('window:hide', () => win?.hide())
-  ipcMain.on('window:first-row', (_e, off: { x: number; y: number }) => {
-    if (off && Number.isFinite(off.x) && Number.isFinite(off.y)) lastFirstRow = off
-  })
   ipcMain.on('window:content-height', (_e, h: number) => {
     if (!win || win.isDestroyed()) return
     const b = win.getBounds()

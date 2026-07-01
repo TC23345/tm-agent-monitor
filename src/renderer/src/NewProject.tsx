@@ -14,8 +14,7 @@ export function NewProject({ onClose }: { onClose: () => void }) {
     try {
       const res = await window.watch.createProject(name)
       if (res?.ok) {
-        onClose()
-        window.watch.hide() // Cursor takes over — get the panel out of the way
+        onClose() // close the prompt but keep the panel open
       } else {
         setErr(res?.error ?? 'Could not create the project.')
         setBusy(false)

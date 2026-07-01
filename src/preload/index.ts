@@ -21,7 +21,6 @@ const api = {
     ipcRenderer.invoke('project:create', name),
   hide: () => ipcRenderer.send('window:hide'),
   reportHeight: (h: number) => ipcRenderer.send('window:content-height', h),
-  reportFirstRow: (off: { x: number; y: number }) => ipcRenderer.send('window:first-row', off),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
   setSettings: (patch: Partial<AppSettings>): Promise<AppSettings> => ipcRenderer.invoke('settings:set', patch),
   quit: () => ipcRenderer.send('app:quit')

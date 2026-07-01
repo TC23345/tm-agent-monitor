@@ -29,9 +29,17 @@ file-pen = editing · terminal = running a command · check = finished · moon =
 activity/question, context-fill `%` (graded, with a `↑` when climbing), duration, and an orange
 spinner while running. The header shows a red **"N waiting"** chip.
 
-**Footer** — daemon connection dot · gear (toggle sample/mock data) · Quit. **Click a row to
-bring that agent's terminal window to the foreground** (native, via Win32 FFI); right-click a row
-to open its project folder. Hover anything for an explanatory tooltip.
+**Footer** — daemon connection dot · **new project** (＋folder) · **open Cursor** (folder) ·
+gear (settings) · Quit. **Click a row to bring that agent's terminal window to the foreground**
+(native, via Win32 FFI). **Right-click a row** for an action menu: *Reveal in File Explorer* ·
+*Copy as path* · *Open new terminal* (launches Windows Terminal → PowerShell 7 in that session's
+folder, running `claude`). The **＋folder** button prompts for a name, creates
+`~/Projects/<name>`, and opens it in Cursor; the **folder** button opens Cursor in a fresh window.
+Hover anything for an explanatory tooltip.
+
+**Sticky panel** — once summoned it stays open (over everything, `alwaysOnTop`) and does **not**
+close on click, focus loss, or any action. It closes only on the **hotkey** (toggle), the tray
+**Show / Hide**, or **Escape**. It appears at the top-right of the display under your cursor.
 
 ## Architecture
 
@@ -87,6 +95,7 @@ working dir has no `.env`).
 | `CLAUDE_WATCH_ORG_NAME` | `Growth Saloon` | Label for the API meter |
 | `CLAUDE_WATCH_ORG_DAILY_BUDGET_USD` | – | Optional daily-spend budget bar on the API meter |
 | `CLAUDE_WATCH_PROJECTS_DIR` | `~/.claude/projects` | Transcript store for "Today tokens out" |
+| `CLAUDE_WATCH_NEW_PROJECT_DIR` | `~/Projects` | Where the ＋folder button creates new project folders |
 
 (Env var names keep the `CLAUDE_WATCH_` prefix for back-compat.)
 
