@@ -1,10 +1,19 @@
 import type { ProjectGroup as Group } from './group'
 import { AgentRow } from './AgentRow'
+import type { MenuState } from './AgentContextMenu'
 import { ChevronDown, ChevronRight } from './Icons'
 import { useCollapse } from './useCollapse'
 
 /** A collapsible project header over its nested session rows. */
-export function ProjectGroup({ group, now }: { group: Group; now: number }) {
+export function ProjectGroup({
+  group,
+  now,
+  onRowMenu
+}: {
+  group: Group
+  now: number
+  onRowMenu: (menu: MenuState) => void
+}) {
   const [collapsed, toggle] = useCollapse(group.key, false)
   const Chevron = collapsed ? ChevronRight : ChevronDown
 
@@ -23,7 +32,7 @@ export function ProjectGroup({ group, now }: { group: Group; now: number }) {
       {!collapsed && (
         <div className="group-rows">
           {group.agents.map((a) => (
-            <AgentRow key={a.id} agent={a} now={now} />
+            <AgentRow key={a.id} agent={a} now={now} onRowMenu={onRowMenu} />
           ))}
         </div>
       )}

@@ -2,15 +2,20 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { StatusSnapshot } from '@shared/types'
 import { UsageDashboard } from './UsageDashboard'
 import { ProjectGroup } from './ProjectGroup'
+import { AgentContextMenu, type MenuState } from './AgentContextMenu'
+import { NewProject } from './NewProject'
 import { groupByProject } from './group'
 import { Settings } from './Icons'
 import { SettingsPanel } from './SettingsPanel'
+import { FolderOpen, FolderPlus } from 'lucide-react'
 import logo from './assets/logo.png'
 
 export function App() {
   const [snap, setSnap] = useState<StatusSnapshot | null>(null)
   const [now, setNow] = useState(Date.now())
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [newProjectOpen, setNewProjectOpen] = useState(false)
+  const [menu, setMenu] = useState<MenuState | null>(null)
 
   useEffect(() => {
     window.watch.getStatus().then(setSnap)
@@ -23,6 +28,19 @@ export function App() {
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [])
+
+  // Escape closes an open context menu, otherwise dismisses the panel (the panel
+  // no longer auto-hides on blur, so this is the fast keyboard way out).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (menu) setMenu(null)
+      else if (newProjectOpen) setNewProjectOpen(false)
+      else if (!settingsOpen) window.watch.hide()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [menu, settingsOpen, newProjectOpen])
 
   // Report the card's natural height so main can size the window to fit content.
   // Desired height = the (possibly capped) card height + the agent list's
@@ -39,6 +57,19 @@ export function App() {
       const a = agentsRef.current
       const overflow = a ? Math.max(0, a.scrollHeight - a.clientHeight) : 0
       window.watch.reportHeight(app.offsetHeight + overflow)
+      // Report the first row's click point (content-relative) so main can summon
+      // the panel with that row under the cursor. Fall back to the header if none.
+      const ar = app.getBoundingClientRect()
+      const row = app.querySelector<HTMLElement>('.row')
+      if (row) {
+        const rr = row.getBoundingClientRect()
+        window.watch.reportFirstRow({
+          x: Math.round(rr.left - ar.left + 24),
+          y: Math.round(rr.top - ar.top + rr.height / 2)
+        })
+      } else {
+        window.watch.reportFirstRow({ x: 24, y: 40 })
+      }
     })
   }, [])
   useEffect(() => {
@@ -96,7 +127,9 @@ export function App() {
                 : 'Daemon offline — run the hook installer to see live agents.'}
             </div>
           ) : (
-            groups.map((g) => <ProjectGroup key={g.key} group={g} now={now} />)
+            groups.map((g) => (
+              <ProjectGroup key={g.key} group={g} now={now} onRowMenu={setMenu} />
+            ))
           )}
         </div>
       </section>
@@ -109,6 +142,12 @@ export function App() {
           {snap?.mock ? 'mock data' : snap?.daemonConnected ? 'connected' : 'disconnected'}
         </div>
         <div className="footer-actions">
+          <button className="iconbtn" title="Open Cursor — pick a project" onClick={() => { window.watch.openCursor(); window.watch.hide() }}>
+            <FolderOpen className="gear" strokeWidth={2} />
+          </button>
+          <button className="iconbtn" title="New project — create a folder in Projects and open it in Cursor" onClick={() => setNewProjectOpen(true)}>
+            <FolderPlus className="gear" strokeWidth={2} />
+          </button>
           <button className="iconbtn" title="Settings — hotkey, notifications, startup, mock data" onClick={() => setSettingsOpen(true)}>
             <Settings className="gear" strokeWidth={2} />
           </button>
@@ -117,6 +156,8 @@ export function App() {
       </footer>
 
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      {newProjectOpen && <NewProject onClose={() => setNewProjectOpen(false)} />}
+      {menu && <AgentContextMenu menu={menu} onClose={() => setMenu(null)} />}
     </div>
   )
 }

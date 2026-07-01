@@ -257,6 +257,43 @@ html, body, #root {
 }
 
 /* ---- settings panel ---- */
+/* ---- right-click action menu ---- */
+.ctxmenu-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  -webkit-app-region: no-drag;
+}
+.ctxmenu {
+  position: absolute;
+  min-width: 190px;
+  padding: 5px;
+  background: var(--elev);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+}
+.ctxmenu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.ctxmenu-item:hover { background: var(--card); }
+.ctxmenu-item:disabled { color: var(--faint); cursor: default; }
+.ctxmenu-item:disabled:hover { background: transparent; }
+.ctxmenu-ic { width: 16px; height: 16px; flex: 0 0 16px; color: var(--muted); }
+
 .settings-overlay {
   position: absolute;
   inset: 0;
@@ -294,6 +331,42 @@ html, body, #root {
 .settings-x .ic-svg { width: 16px; height: 16px; }
 .settings-loading { padding: 24px; text-align: center; color: var(--muted); font-size: 13px; }
 .settings-body { padding: 4px 14px 10px; }
+
+/* ---- new project modal ---- */
+.np-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.np-input {
+  -webkit-app-region: no-drag;
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  padding: 9px 11px;
+  outline: none;
+  transition: border-color 0.12s ease;
+}
+.np-input:focus { border-color: var(--accent); }
+.np-input::placeholder { color: var(--faint); }
+.np-hint { font-size: 11px; color: var(--faint); }
+.np-err { font-size: 12px; color: var(--st-question); }
+.np-create {
+  -webkit-app-region: no-drag;
+  margin-top: 2px;
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition: background 0.12s ease, opacity 0.12s ease;
+}
+.np-create:hover { background: var(--accent-bright); }
+.np-create:disabled { opacity: 0.5; cursor: default; }
 .srow {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 11px 0; border-bottom: 1px solid var(--hairline);

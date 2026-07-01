@@ -1,7 +1,8 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, clipboard, screen } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { Daemon } from './daemon.js'
 import { fetchApiUsage } from './usage.js'
 import { LocalUsage } from './localUsage.js'
@@ -37,6 +38,11 @@ try {
 const PORT = Number(process.env.CLAUDE_WATCH_PORT) || DEFAULTS.port
 const ADMIN_KEY = process.env.ANTHROPIC_ADMIN_KEY || undefined
 const ORG_LABEL = process.env.CLAUDE_WATCH_ORG_NAME || 'Growth Saloon'
+// Where "New project" creates folders. Defaults to ~/Projects (C:\Users\<you>\Projects).
+const PROJECTS_DIR = process.env.CLAUDE_WATCH_PROJECTS_DIR || join(app.getPath('home'), 'Projects')
+// How often to poll the subscription usage endpoint. The 5h/weekly windows move
+// slowly, and polling too fast trips its rate limit (HTTP 429), so keep it gentle.
+const USAGE_POLL_MS = 120_000
 
 // Persisted user settings (override env/defaults), edited via the in-app panel.
 interface Settings { hotkey?: string; notifications?: boolean; mock?: boolean }
@@ -64,6 +70,10 @@ let tray: Tray | null = null
 const HOTKEY_FALLBACKS = ['Alt+Shift+C', 'Control+Shift+Space', 'Alt+Shift+A', 'Alt+Shift+S']
 let activeHotkey: string | null = null
 let updateReady: string | null = null // version string once an update is downloaded
+// Offset (content-relative px) of the first session row's click point, reported
+// by the renderer. Used to summon the panel so that row lands under the cursor.
+// Defaults aim at roughly where the first row sits under the header.
+let lastFirstRow = { x: 24, y: 96 }
 
 let daemon: Daemon
 const localUsage = new LocalUsage()
@@ -109,10 +119,8 @@ function createWindow(): void {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  // Popover behavior: hide when it loses focus.
-  win.on('blur', () => {
-    if (win && !win.webContents.isDevToolsOpened()) win.hide()
-  })
+  // Sticky panel: it stays open until the hotkey/tray toggles it closed, a
+  // terminal is focused, or Escape is pressed — no auto-hide on blur.
   win.on('closed', () => { win = null })
 }
 
@@ -125,15 +133,112 @@ function positionNearTrayTopRight(): void {
   win.setPosition(x + width - w - 16, y + 16)
 }
 
+/**
+ * Summon the panel at the cursor so the first session row sits under the
+ * pointer — a single left-click then focuses that terminal without moving the
+ * mouse. Clamped to the cursor's display work area so it never lands offscreen.
+ */
+function positionAtCursorOnFirstRow(): void {
+  if (!win) return
+  const cursor = screen.getCursorScreenPoint()
+  const display = screen.getDisplayNearestPoint(cursor)
+  const { x, y, width, height } = display.workArea
+  const [w, h] = win.getSize()
+  const targetX = cursor.x - lastFirstRow.x
+  const targetY = cursor.y - lastFirstRow.y
+  const clampedX = Math.round(Math.max(x, Math.min(targetX, x + width - w)))
+  const clampedY = Math.round(Math.max(y, Math.min(targetY, y + height - h)))
+  win.setPosition(clampedX, clampedY)
+}
+
 function toggleWindow(): void {
   if (!win) return
   if (win.isVisible()) {
     win.hide()
   } else {
-    positionNearTrayTopRight()
+    positionAtCursorOnFirstRow()
     win.show()
     win.focus()
   }
+}
+
+/**
+ * Full path to a PowerShell executable. We resolve it ourselves rather than
+ * relying on `pwsh` being on PATH — Windows Terminal knows PowerShell 7 through
+ * its profile, not the system PATH, so a bare `pwsh` fails with 0x80070002
+ * ("file not found"). Prefer PowerShell 7, fall back to Windows PowerShell.
+ */
+function resolveShell(): string {
+  const pf = process.env['ProgramW6432'] || process.env.ProgramFiles || 'C:\\Program Files'
+  const candidates = [
+    join(pf, 'PowerShell', '7', 'pwsh.exe'),
+    join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', '7', 'pwsh.exe'),
+    join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  ]
+  return candidates.find((p) => existsSync(p)) || 'powershell.exe'
+}
+
+/**
+ * Open a new terminal in `cwd` (or home if missing) and launch `claude`.
+ * Prefers Windows Terminal; falls back to a fresh PowerShell console window.
+ */
+function openTerminal(cwd?: string): void {
+  const dir = cwd && existsSync(cwd) ? cwd : app.getPath('home')
+  const opts = { detached: true, stdio: 'ignore' as const, windowsHide: false }
+  const shellExe = resolveShell()
+  const wt = spawn('wt.exe', ['-d', dir, shellExe, '-NoExit', '-Command', 'claude'], opts)
+  wt.on('error', () => {
+    // wt.exe unavailable — open a plain PowerShell console window via `start`.
+    const script = `Set-Location -LiteralPath '${dir.replace(/'/g, "''")}'; claude`
+    try {
+      const fb = spawn('cmd.exe', ['/c', 'start', '""', shellExe, '-NoExit', '-Command', script], opts)
+      fb.on('error', (e) => console.error(`[terminal] open failed: ${e?.message ?? e}`))
+      fb.unref()
+    } catch (e) {
+      console.error(`[terminal] fallback failed: ${e}`)
+    }
+  })
+  wt.unref()
+}
+
+/**
+ * Launch Cursor — optionally opening `dir` as a workspace. With no dir it opens
+ * Cursor's welcome/recents so you can pick a project. Prefers the installed exe,
+ * falls back to the `cursor` CLI on PATH.
+ */
+function openInCursor(dir?: string): void {
+  const opts = { detached: true, stdio: 'ignore' as const }
+  const local = process.env.LOCALAPPDATA || join(app.getPath('home'), 'AppData', 'Local')
+  const exe = join(local, 'Programs', 'cursor', 'Cursor.exe')
+  // With a dir, open it as a workspace. With none, force a fresh window
+  // (`--new-window`) — a bare launch no-ops when Cursor is already running.
+  const args = dir ? [dir] : ['--new-window']
+  if (existsSync(exe)) {
+    const c = spawn(exe, args, opts)
+    c.on('error', () => cursorViaPath(dir))
+    c.unref()
+  } else {
+    cursorViaPath(dir)
+  }
+}
+function cursorViaPath(dir?: string): void {
+  try {
+    const args = dir ? [dir] : ['--new-window']
+    const c = spawn('cursor', args, { detached: true, stdio: 'ignore', shell: true })
+    c.on('error', (e) => console.error(`[cursor] open failed: ${e?.message ?? e}`))
+    c.unref()
+  } catch (e) {
+    console.error(`[cursor] fallback failed: ${e}`)
+  }
+}
+
+/** Strip characters Windows forbids in folder names; trim to a sane length. */
+function sanitizeProjectName(raw: string): string {
+  return String(raw ?? '')
+    .replace(/[<>:"/\\|?*]/g, '')
+    .trim()
+    .replace(/[. ]+$/, '')
+    .slice(0, 120)
 }
 
 /** Register the summon hotkey, falling back through alternates on conflict. */
@@ -208,7 +313,7 @@ function notifyTransitions(snap: StatusSnapshot): void {
           title: `${a.project} needs input`,
           body: a.question ?? 'Waiting for input'
         })
-        note.on('click', () => { positionNearTrayTopRight(); win?.show(); win?.focus() })
+        note.on('click', () => { positionAtCursorOnFirstRow(); win?.show(); win?.focus() })
         note.show()
       }
     }
@@ -217,20 +322,32 @@ function notifyTransitions(snap: StatusSnapshot): void {
 }
 
 let usageLoaded = false
+// Exponential backoff for the usage endpoint. It rate-limits (HTTP 429) if polled
+// too often — especially with more than one client (e.g. the installed app running
+// alongside a dev build) — so on 429 we wait progressively longer before retrying.
+let usageBackoffUntil = 0
+let usageBackoffMs = USAGE_POLL_MS
 async function refreshWindows(): Promise<void> {
   if (mockMode) return
+  if (Date.now() < usageBackoffUntil) return // still cooling down from a 429
   const next = await fetchWindow('You · Max', readPersonalToken())
+  const rateLimited = next.note === 'HTTP 429'
   const terminal = next.note === 'auth expired' || next.note === 'not connected'
   if (next.available) {
     personal = next
     usageLoaded = true
+    usageBackoffMs = USAGE_POLL_MS // recovered — reset backoff
+    usageBackoffUntil = 0
+  } else if (rateLimited) {
+    // Back off up to 10 min. Keep the last-good meter if we have one; only show a
+    // note before the first successful load so it's not a permanent "Checking…".
+    usageBackoffMs = Math.min(usageBackoffMs * 2, 10 * 60_000)
+    usageBackoffUntil = Date.now() + usageBackoffMs
+    if (!usageLoaded) personal = { available: false, label: 'You · Max', note: 'Usage rate-limited — retrying…' }
   } else if (terminal) {
     personal = next // show the real reason (signed out / auth expired)
   } else if (!usageLoaded) {
-    // Transient failure (HTTP 429 rate-limit, timeout, unreachable) before the
-    // first successful load — show a gentle placeholder instead of the raw error.
-    // We don't poll faster on 429; the endpoint's retry-after asks us to back off,
-    // so the normal cadence retries and recovers within a cycle.
+    // Timeout / unreachable before the first good load — gentle placeholder.
     personal = { available: false, label: 'You · Max', note: 'Checking usage…' }
   }
   // else: keep the last-good value through transient blips after a good load
@@ -300,7 +417,24 @@ function registerIpc(): void {
   })
   ipcMain.on('path:open', (_e, p: string) => { if (p) shell.openPath(p) })
   ipcMain.on('text:copy', (_e, t: string) => { if (t) clipboard.writeText(t) })
+  ipcMain.on('terminal:open', (_e, cwd?: string) => openTerminal(cwd))
+  ipcMain.on('cursor:open', () => openInCursor())
+  ipcMain.handle('project:create', (_e, rawName: string) => {
+    const name = sanitizeProjectName(rawName)
+    if (!name) return { ok: false, error: 'Enter a valid project name.' }
+    const dir = join(PROJECTS_DIR, name)
+    try {
+      mkdirSync(dir, { recursive: true })
+      openInCursor(dir)
+      return { ok: true, path: dir }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
+  })
   ipcMain.on('window:hide', () => win?.hide())
+  ipcMain.on('window:first-row', (_e, off: { x: number; y: number }) => {
+    if (off && Number.isFinite(off.x) && Number.isFinite(off.y)) lastFirstRow = off
+  })
   ipcMain.on('window:content-height', (_e, h: number) => {
     if (!win || win.isDestroyed()) return
     const b = win.getBounds()
@@ -370,7 +504,7 @@ if (!gotLock) {
         `[selftest] personal=${personal.available} 5h=${personal.session?.usedPct ?? '-'}% wk=${personal.week?.usedPct ?? '-'}% | ` +
         `api=${api.available} | todayOut=${localUsage.todayTokensOut() ?? '-'}`
       )
-    setInterval(refreshWindows, 30_000)
+    setInterval(refreshWindows, USAGE_POLL_MS)
     setInterval(refreshApi, 60_000)
     setInterval(() => localUsage.refresh(), 30_000)
     setInterval(pushStatus, DEFAULTS.pollMs)

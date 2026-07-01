@@ -15,8 +15,13 @@ const api = {
   focusAgent: (id: string, hwnd?: string, pid?: number) => ipcRenderer.send('agent:focus', id, hwnd, pid),
   openPath: (p: string) => ipcRenderer.send('path:open', p),
   copyText: (t: string) => ipcRenderer.send('text:copy', t),
+  openTerminal: (cwd?: string) => ipcRenderer.send('terminal:open', cwd),
+  openCursor: () => ipcRenderer.send('cursor:open'),
+  createProject: (name: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('project:create', name),
   hide: () => ipcRenderer.send('window:hide'),
   reportHeight: (h: number) => ipcRenderer.send('window:content-height', h),
+  reportFirstRow: (off: { x: number; y: number }) => ipcRenderer.send('window:first-row', off),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
   setSettings: (patch: Partial<AppSettings>): Promise<AppSettings> => ipcRenderer.invoke('settings:set', patch),
   quit: () => ipcRenderer.send('app:quit')
