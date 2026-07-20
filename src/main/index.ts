@@ -162,8 +162,8 @@ function trayImage() {
 
 function createWindow(): void {
   win = new BrowserWindow({
-    width: 440,
-    height: 520, // initial; auto-sizes to content once the renderer reports its height
+    width: SIDEBAR_WIDTH,
+    height: 800, // placeholder; positionSidebarLeft() sets real bounds before every show
     show: false,
     frame: false,
     transparent: true,
@@ -193,13 +193,22 @@ function createWindow(): void {
   win.on('closed', () => { win = null })
 }
 
-function positionNearTrayTopRight(): void {
+// The panel is a full-height sidebar pinned to the left edge of the work area on
+// whichever display the cursor is on. Height always spans the work area, so the
+// agent list — not the window — absorbs overflow.
+const SIDEBAR_WIDTH = 440
+const SIDEBAR_MARGIN = 16
+
+function positionSidebarLeft(): void {
   if (!win) return
   const cursor = screen.getCursorScreenPoint()
-  const display = screen.getDisplayNearestPoint(cursor)
-  const { x, y, width } = display.workArea
-  const [w] = win.getSize()
-  win.setPosition(x + width - w - 16, y + 16)
+  const { x, y, width, height } = screen.getDisplayNearestPoint(cursor).workArea
+  win.setBounds({
+    x: x + SIDEBAR_MARGIN,
+    y: y + SIDEBAR_MARGIN,
+    width: Math.min(SIDEBAR_WIDTH, width - SIDEBAR_MARGIN * 2),
+    height: height - SIDEBAR_MARGIN * 2
+  })
 }
 
 function toggleWindow(): void {
@@ -207,7 +216,7 @@ function toggleWindow(): void {
   if (win.isVisible()) {
     win.hide()
   } else {
-    positionNearTrayTopRight()
+    positionSidebarLeft()
     win.show()
     win.focus()
   }
@@ -536,7 +545,7 @@ function notifyTransitions(snap: StatusSnapshot): void {
         // Click jumps straight to that agent's terminal; fall back to the panel.
         note.on('click', () => {
           const ok = focusAgentById(a.id)
-          if (!ok) { positionNearTrayTopRight(); win?.show(); win?.focus() }
+          if (!ok) { positionSidebarLeft(); win?.show(); win?.focus() }
         })
         note.show()
       }
@@ -909,15 +918,6 @@ function registerIpc(): void {
   })
   ipcMain.handle('usage:insights', () => getUsageInsights())
   ipcMain.on('window:hide', () => win?.hide())
-  ipcMain.on('window:content-height', (_e, h: number) => {
-    if (!win || win.isDestroyed() || !Number.isFinite(h)) return
-    const b = win.getBounds()
-    const disp = screen.getDisplayNearestPoint({ x: b.x, y: b.y })
-    const max = disp.workArea.height - 24
-    const [w, cur] = win.getContentSize()
-    const target = Math.round(Math.max(160, Math.min(h + 20, max)))
-    if (cur !== target) win.setContentSize(w, target)
-  })
   ipcMain.on('app:quit', () => { app.quit() })
 }
 
@@ -1002,7 +1002,7 @@ if (!gotLock) {
     // Show once on first launch so it's discoverable — unless started at login.
     const startedHidden = process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAtLogin
     if (!startedHidden) {
-      positionNearTrayTopRight()
+      positionSidebarLeft()
       win?.show()
     }
 

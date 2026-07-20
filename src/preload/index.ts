@@ -25,7 +25,6 @@ const api = {
   createProject: (name: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
     ipcRenderer.invoke('project:create', name),
   hide: () => ipcRenderer.send('window:hide'),
-  reportHeight: (h: number) => ipcRenderer.send('window:content-height', h),
   getHistory: (): Promise<DailyUsageDay[]> => ipcRenderer.invoke('history:recent'),
   getUsageInsights: (): Promise<UsageInsights> => ipcRenderer.invoke('usage:insights'),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),

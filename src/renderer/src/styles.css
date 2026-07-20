@@ -35,13 +35,15 @@ html, body, #root {
   cursor: default;
 }
 
-/* Floating rounded dark card inside the transparent, frameless window. */
+/* Floating rounded dark card inside the transparent, frameless window. The card
+   fills the window's full height — the window is a fixed full-height sidebar, so
+   the agent list (flex: 1) absorbs the slack and scrolls. */
 .app {
   position: fixed;
   top: 10px;
   left: 10px;
   right: 10px;
-  max-height: calc(100vh - 20px);
+  bottom: 10px;
   display: flex;
   flex-direction: column;
   padding: 20px 20px 14px;
@@ -122,6 +124,24 @@ html, body, #root {
 .usage-title { font-size: 11px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted); }
 .usage-summary { font-size: 12px; color: var(--faint); margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .usage-body { padding: 14px 4px 2px; }
+
+/* Provider groups: Claude and Codex are separated so their zones read as two
+   comparable stacks rather than one flat list. The badge lives here, not on
+   each zone, since the group already establishes the provider. */
+.uprov { margin-bottom: 18px; }
+.uprov:last-child { margin-bottom: 2px; }
+.uprov + .uprov { border-top: 1px solid var(--hairline); padding-top: 16px; }
+.uprov-toggle {
+  -webkit-app-region: no-drag;
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; background: none; border: none; padding: 0; margin: 0 0 12px;
+  cursor: pointer; text-align: left; color: inherit;
+}
+.uprov-chevron { width: 14px; height: 14px; color: var(--faint); flex: 0 0 auto; }
+.uprov-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--text); }
+.uprov-toggle:hover .uprov-label { color: var(--accent-bright); }
+.uprov-summary { font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--faint); margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.uprov-body { padding-left: 3px; }
 
 .uzone { margin-bottom: 16px; }
 .uzone:last-child { margin-bottom: 2px; }

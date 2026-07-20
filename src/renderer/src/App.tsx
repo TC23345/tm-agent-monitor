@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { StatusSnapshot } from '@shared/types'
 import { UsageDashboard } from './UsageDashboard'
 import { ProjectGroup } from './ProjectGroup'
@@ -50,43 +50,6 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [menu, settingsOpen, newProjectOpen, folderMenu, view])
 
-  // Report the card's natural height so main can size the window to fit content.
-  // Desired height = the (possibly capped) card height + the agent list's
-  // scrolled-away overflow, so the window grows to fit instead of scrolling.
-  const appRef = useRef<HTMLDivElement>(null)
-  const agentsRef = useRef<HTMLDivElement>(null) // scroll container — for the overflow read
-  const agentsInnerRef = useRef<HTMLDivElement>(null) // natural-height list — what we observe
-  const rafRef = useRef(0)
-  const measure = useCallback(() => {
-    const app = appRef.current
-    if (!app) return
-    cancelAnimationFrame(rafRef.current)
-    rafRef.current = requestAnimationFrame(() => {
-      const a = agentsRef.current
-      const overflow = a ? Math.max(0, a.scrollHeight - a.clientHeight) : 0
-      window.watch.reportHeight(app.offsetHeight + overflow)
-    })
-  }, [])
-  useEffect(() => {
-    const app = appRef.current
-    if (!app) return
-    // Observe the card AND the natural-height inner list. Once the window is
-    // capped, the scroll container's box stops changing — only the inner list
-    // grows when terminals are added, so observing it is what re-fires the resize.
-    const ro = new ResizeObserver(measure)
-    ro.observe(app)
-    if (agentsInnerRef.current) ro.observe(agentsInnerRef.current)
-    return () => {
-      ro.disconnect()
-      cancelAnimationFrame(rafRef.current)
-    }
-  }, [measure])
-  // Belt-and-suspenders: re-measure whenever the snapshot changes (agents added,
-  // closed, or changing state) in case a layout change didn't trip the observer.
-  useEffect(() => {
-    measure()
-  }, [snap, measure])
-
   const agents = snap?.agents ?? []
   const waitingParents = new Set(agents.filter((a) => a.state === 'waiting' && a.parentId).map((a) => a.parentId!))
   const visibleAgents = waitingOnly
@@ -115,7 +78,7 @@ export function App() {
     : providerHealth.map(([provider, health]) => `${provider}: ${health.reporting ? 'reporting' : health.awaitingTrust ? 'awaiting trust' : health.installed ? 'installed, silent' : 'not installed'}`).join('\n')
 
   return (
-    <div className="app" ref={appRef}>
+    <div className="app">
       <header className="header" title="Claude and Codex agent monitor · drag here to move">
         <span className="appname">Agent Monitor</span>
         <div className="header-right">
@@ -136,8 +99,8 @@ export function App() {
 
       <div className="rule" />
 
-      <section className="agents" ref={agentsRef}>
-        <div className="agents-inner" ref={agentsInnerRef}>
+      <section className="agents">
+        <div className="agents-inner">
           {view === 'insights' ? (
             <UsageInsightsView />
           ) : !snap ? (

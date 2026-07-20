@@ -1,6 +1,6 @@
 {
   "name": "taylormade-agent-monitor",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Hotkey-summoned Claude and Codex agent monitor for Windows.",
   "author": "Taylor",
   "license": "MIT",
