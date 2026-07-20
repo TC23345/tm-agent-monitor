@@ -15,6 +15,22 @@ extraResources:
     to: .
     filter:
       - "*.png"
+  - from: hooks
+    to: hooks
+    filter:
+      - bridge.mjs
+      - focus-worker.mjs
+      - report.mjs
+      - install.mjs
+  - from: src/native
+    to: native
+    filter:
+      - win32.mjs
+  # The shared hook runs in external Node, outside Electron's asar resolver.
+  - from: node_modules/koffi
+    to: native/node_modules/koffi
+  - from: node_modules/@koromix/koffi-win32-x64
+    to: native/node_modules/@koromix/koffi-win32-x64
 win:
   target:
     - nsis

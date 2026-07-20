@@ -139,9 +139,11 @@ const NON_TERMINAL_EXES = new Set(['explorer.exe'])
 // process-tree walk misses it. When the hook fires on a user prompt the terminal
 // is the foreground window — capture it if it's a recognized terminal.
 const TERMINAL_EXES = new Set([
-  'windowsterminal.exe', 'wt.exe', 'openconsole.exe',
+  'windowsterminal.exe', 'wt.exe', 'openconsole.exe', 'conhost.exe',
   'powershell.exe', 'pwsh.exe', 'cmd.exe',
   'code.exe', 'cursor.exe', 'windsurf.exe',
+  'claude.exe', // Claude desktop app — its Code tab sessions live in its window
+  'codex.exe', 'chatgpt.exe', 'openai.chatgpt.exe',
   'alacritty.exe', 'wezterm-gui.exe', 'hyper.exe',
   'conemu64.exe', 'conemu.exe', 'mintty.exe', 'tabby.exe'
 ])
@@ -157,11 +159,17 @@ const TERMINAL_EXES = new Set([
  * desktop shell). `byPid` maps pid -> hwnd, `parents` maps pid -> parentPid,
  * `exeOf` maps pid -> lowercased exe name. Returns { hwnd: string, pid } | null.
  */
-export function pickWindowFromTree(startPid, byPid, parents, exeOf, nonTerminal = NON_TERMINAL_EXES) {
+export function pickWindowFromTree(startPid, byPid, parents, exeOf, nonTerminal = NON_TERMINAL_EXES, fg = null) {
   let pid = startPid
   for (let depth = 0; depth < 20 && pid && pid > 4; depth++) {
     const hwnd = byPid.get(pid)
     if (hwnd !== undefined && !nonTerminal.has(exeOf.get(pid))) {
+      // Multi-window editors (Cursor/VS Code) own ALL their windows from one pid;
+      // byPid keeps whichever came first in Z-order. When the foreground window
+      // belongs to that same pid it's the one the user is typing in — prefer it.
+      if (fg && fg.pid === pid && fg.hwnd !== undefined) {
+        return { hwnd: String(fg.hwnd), pid }
+      }
       return { hwnd: typeof hwnd === 'bigint' ? hwnd.toString() : String(hwnd), pid }
     }
     pid = parents.get(pid)
@@ -171,13 +179,25 @@ export function pickWindowFromTree(startPid, byPid, parents, exeOf, nonTerminal 
 }
 
 export function findTerminalWindow(startPid) {
-  if (!load()) return null
+  const a = load()
+  if (!a) return null
   const windows = listWindows()
   if (!windows.length) return null
   const byPid = new Map()
   for (const w of windows) if (!byPid.has(w.pid)) byPid.set(w.pid, w.hwnd)
   const { parents, exeOf } = processSnapshot()
-  return pickWindowFromTree(startPid, byPid, parents, exeOf)
+  let fg = null
+  try {
+    const fgHwnd = a.fns.GetForegroundWindow()
+    if (fgHwnd && BigInt(fgHwnd) !== 0n) {
+      const pidBox = [0]
+      a.fns.GetWindowThreadProcessId(fgHwnd, pidBox)
+      fg = { hwnd: BigInt(fgHwnd), pid: pidBox[0] }
+    }
+  } catch {
+    /* foreground preference is best-effort */
+  }
+  return pickWindowFromTree(startPid, byPid, parents, exeOf, NON_TERMINAL_EXES, fg)
 }
 
 /** Diagnostic: every visible titled window with its owning process exe. */
@@ -239,30 +259,69 @@ export function findTerminalWindowForCurrentProcess() {
   return consoleWindow() ?? findTerminalWindow(process.pid) ?? foregroundTerminalWindow()
 }
 
-/** Force a window to the foreground, working around the foreground lock. */
-export function focusHwnd(hwndStr) {
+/** Pure ownership check shared by the native boundary and tests. */
+export function focusOwnershipMatches(expectedPid, actualPid) {
+  return Number.isInteger(expectedPid) && expectedPid > 0 && expectedPid <= 0xffffffff &&
+    Number.isInteger(actualPid) && actualPid === expectedPid
+}
+
+/** Re-check that a persisted HWND still belongs to the process that reported it. */
+export function hwndOwnedByPid(hwndStr, expectedPid) {
   const a = load()
-  if (!a || !hwndStr) return false
-  const { fns } = a
+  if (!a || !hwndStr || !Number.isInteger(expectedPid)) return false
   try {
     const hwnd = BigInt(hwndStr)
-    const SW_RESTORE = 9, SW_SHOW = 5
+    if (hwnd <= 0n || !a.fns.IsWindowVisible(hwnd) || a.fns.GetWindowTextLengthW(hwnd) <= 0) return false
+    const pidBox = [0]
+    a.fns.GetWindowThreadProcessId(hwnd, pidBox)
+    return focusOwnershipMatches(expectedPid, pidBox[0])
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Native focus body, exported for deterministic failure-path tests. Any input
+ * queues successfully attached here are detached in `finally`, even if a later
+ * Win32 call throws.
+ */
+export function focusHwndWithApi(fns, hwnd) {
+  const attached = []
+  const SW_RESTORE = 9, SW_SHOW = 5
+  let currentThread = 0
+  try {
     if (fns.IsIconic(hwnd)) fns.ShowWindow(hwnd, SW_RESTORE)
 
     const fg = fns.GetForegroundWindow()
     const cur = fns.GetCurrentThreadId()
+    currentThread = cur
     const tBox = [0], fBox = [0]
     const targetThread = fns.GetWindowThreadProcessId(hwnd, tBox)
     const fgThread = fns.GetWindowThreadProcessId(BigInt(fg), fBox)
 
-    if (fgThread && fgThread !== cur) fns.AttachThreadInput(cur, fgThread, 1)
-    if (targetThread && targetThread !== cur) fns.AttachThreadInput(cur, targetThread, 1)
+    for (const thread of new Set([fgThread, targetThread])) {
+      if (thread && thread !== cur && fns.AttachThreadInput(cur, thread, 1)) attached.push(thread)
+    }
     fns.BringWindowToTop(hwnd)
     const ok = fns.SetForegroundWindow(hwnd)
     fns.ShowWindow(hwnd, SW_SHOW)
-    if (targetThread && targetThread !== cur) fns.AttachThreadInput(cur, targetThread, 0)
-    if (fgThread && fgThread !== cur) fns.AttachThreadInput(cur, fgThread, 0)
     return !!ok
+  } finally {
+    for (let i = attached.length - 1; i >= 0; i--) {
+      try { fns.AttachThreadInput(currentThread, attached[i], 0) } catch { /* best-effort detach */ }
+    }
+  }
+}
+
+/** Force a window to the foreground, working around the foreground lock. */
+export function focusHwnd(hwndStr, expectedPid) {
+  const a = load()
+  if (!a || !hwndStr) return false
+  const { fns } = a
+  try {
+    if (expectedPid !== undefined && !hwndOwnedByPid(hwndStr, expectedPid)) return false
+    const hwnd = BigInt(hwndStr)
+    return focusHwndWithApi(fns, hwnd)
   } catch (err) {
     if (process.env.CLAUDE_WATCH_DEBUG) console.error('[win32] focus failed:', err.message)
     return false

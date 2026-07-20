@@ -10,7 +10,12 @@ export default defineConfig({
   },
   preload: {
     build: {
-      rollupOptions: { input: { index: resolve('src/preload/index.ts') } }
+      rollupOptions: {
+        input: { index: resolve('src/preload/index.ts') },
+        // Sandboxed Electron preloads execute as CommonJS; ESM imports fail in
+        // the sandbox bundle even when the application package is type=module.
+        output: { format: 'cjs', entryFileNames: '[name].cjs' }
+      }
     }
   },
   renderer: {

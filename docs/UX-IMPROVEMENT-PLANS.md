@@ -1,5 +1,10 @@
 # TaylorMade Agent Monitor — UX/UX Improvement Plans (for approval)
 
+> Status (provider-neutral iteration): window auto-sizing, threshold alerts, per-session
+> tokens, loading/offline states, nested indent rails, bulk collapse, settings,
+> launch-at-login, auto-update, and provider-aware connection states are implemented.
+> Remaining items below are backlog, not descriptions of current gaps.
+
 Synthesized from three parallel design reviews (visual design · interaction/IA · feature/utility).
 Effort: **S** ≈ ½–1 day · **M** ≈ 2–4 days · **L** ≈ 1 week+.
 

@@ -1,7 +1,14 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
-/** Boolean collapse state persisted in localStorage, keyed per group/panel. */
-export function useCollapse(key: string, defaultCollapsed = false): [boolean, () => void] {
+/** Fired by the footer collapse-all button; detail = desired collapsed state. */
+export const COLLAPSE_ALL_EVENT = 'cw-collapse-all'
+
+/**
+ * Boolean collapse state persisted in localStorage, keyed per group/panel.
+ * Pass `bulk: true` (project groups) to also follow the collapse-all event —
+ * the usage zones deliberately don't, so collapse-all only sweeps the agent list.
+ */
+export function useCollapse(key: string, defaultCollapsed = false, bulk = false): [boolean, () => void] {
   const storageKey = `cw.collapse.${key}`
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
@@ -11,16 +18,25 @@ export function useCollapse(key: string, defaultCollapsed = false): [boolean, ()
       return defaultCollapsed
     }
   })
-  const toggle = useCallback(() => {
-    setCollapsed((c) => {
-      const next = !c
+  const set = useCallback(
+    (next: boolean) => {
+      setCollapsed(next)
       try {
         localStorage.setItem(storageKey, next ? '1' : '0')
       } catch {
         /* private mode / quota — non-fatal */
       }
-      return next
-    })
-  }, [storageKey])
+    },
+    [storageKey]
+  )
+  const toggle = useCallback(() => set(!collapsed), [set, collapsed])
+
+  useEffect(() => {
+    if (!bulk) return
+    const onAll = (e: Event) => set(!!(e as CustomEvent<boolean>).detail)
+    window.addEventListener(COLLAPSE_ALL_EVENT, onAll)
+    return () => window.removeEventListener(COLLAPSE_ALL_EVENT, onAll)
+  }, [bulk, set])
+
   return [collapsed, toggle]
 }

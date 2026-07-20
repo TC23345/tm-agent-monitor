@@ -1,152 +1,117 @@
 # TaylorMade Agent Monitor (Windows)
 
-A hotkey-summoned, dark desktop panel that monitors your running **Claude Code** agents and
-your **Claude usage**. Summoned with a global hotkey (default **Ctrl+Alt+W**), it lives in the
-system tray. Originally inspired by the macOS menu-bar app
-[ImTaegan/claude-watch](https://github.com/ImTaegan/claude-watch); rebuilt for Windows with the
-TaylorMade Solutions brand.
+A hotkey-summoned Electron panel for local **Claude Code and Codex** work. It groups live roots by project, nests subagents, shows provider health and local usage, and keeps optional daily history. The default toggle is **Ctrl+Alt+W**.
 
-Built with **Electron + TypeScript + React**. Dark theme, single accent, Lucide icons, the
-TAYLORMADE SOLUTIONS wordmark in the header and a `tm` monogram as the app/tray/installer icon.
+## Current capabilities
 
-## What it shows
+- Provider-neutral live lifecycle model with collision-safe identities (`provider:sessionId[:actorId]`).
+- Claude and Codex roots grouped together by canonical project path, with provider badges and expandable child rows.
+- Per-provider install/reporting/trust health. Codex user hooks require an explicit review in `/hooks`.
+- Claude subscription windows, deduplicated local Claude transcript totals, best-effort isolated Codex rollout totals, and actual Anthropic organization API spend.
+- Provider/model-specific API-equivalent value. Unknown models retain tokens and mark combined value partial; estimates are not subscription bills.
+- Optional MongoDB schema-v2 history with aggregate compatibility fields and `byProvider` breakdowns.
+- Native Windows focus, resolving the stored agent ID in main and validating HWND/PID ownership before raising a window.
+- Sandbox-enabled renderer, runtime-validated IPC, authenticated loopback ingestion, and a per-install discovery token.
 
-**Usage (collapsible) — two meters, two accounts:**
-- **YOU · MAX** — your personal subscription's **real** 5-hour (Session) + weekly windows, from
-  the same OAuth usage endpoint Claude Code's `/usage` uses, plus "Today N tokens out" summed
-  from local transcripts. This one login drives *all* your Claude Code here (CLI, VS Code, and
-  the desktop app's Claude Code tab).
-- **{ORG} · API** — the org's API-key token usage + cost from the Admin API (pay-per-use, no
-  5-hour window). Optional daily-budget bar.
+Windows can raise the Codex/ChatGPT desktop window, but public Win32 APIs cannot select a specific task tab.
 
-Percentages are color-graded by the OAuth endpoint's own severity (normal → amber → red). A
-transient rate-limit (HTTP 429) keeps the last good values instead of flashing an error.
+## Development
 
-**Agents — grouped by project:** every project is a collapsible header (with a red dot when a
-session there needs you); sessions nest beneath with a left indent rail. Each session row shows a
-Lucide state icon — shield = permission wait · message-alert = question (row highlighted) ·
-file-pen = editing · terminal = running a command · check = finished · moon = idle — plus the
-activity/question, context-fill `%` (graded, with a `↑` when climbing), duration, and an orange
-spinner while running. The header shows a red **"N waiting"** chip.
+```powershell
+npm install
+npm run dev
+npm run typecheck
+npm test
+npm run build
+```
 
-**Footer** — daemon connection dot · **new project** (＋folder) · **open Cursor** (folder) ·
-gear (settings) · Quit. **Click a row to bring that agent's terminal window to the foreground**
-(native, via Win32 FFI). **Right-click a row** for an action menu: *Reveal in File Explorer* ·
-*Copy as path* · *Open new terminal* (launches Windows Terminal → PowerShell 7 in that session's
-folder, running `claude`). The **＋folder** button prompts for a name, creates
-`~/Projects/<name>`, and opens it in Cursor; the **folder** button opens Cursor in a fresh window.
-Hover anything for an explanatory tooltip.
+Use `electron . --mock` (or `CLAUDE_WATCH_MOCK=1` in development) for provider-rich sample data. The `--mock` flag has highest precedence so packaged captures cannot silently touch real data.
 
-**Sticky panel** — once summoned it stays open (over everything, `alwaysOnTop`) and does **not**
-close on click, focus loss, or any action. It closes only on the **hotkey** (toggle), the tray
-**Show / Hide**, or **Escape**. It appears at the top-right of the display under your cursor.
+## Hook setup
+
+The shared bridge reads stdin, normalizes provider events to `AgentEventV1`, and performs one authenticated loopback request. It has no retry loop and caps delivery at 250 ms.
+
+```powershell
+npm run hooks:install             # Claude user hooks
+npm run hooks:codex               # Codex user hooks
+node hooks/install.mjs --all --status
+node hooks/install.mjs --all --repair
+node hooks/install.mjs --all --remove
+```
+
+Installer writes are atomic, preserve unrelated settings, create `*.tm-agent-monitor.bak`, and remove only handlers carrying the exact ownership marker. After installing Codex hooks, use **Settings → Codex hooks → Review trust**. The app copies `/hooks`, opens Codex in a terminal, and keeps the trust warning visible until a real hook event verifies the bridge. Local Codex desktop, CLI, and IDE surfaces that emit hooks are supported; cloud-only tasks are out of scope.
+
+The app publishes `%APPDATA%\taylormade-agent-monitor\hook-endpoint.json` containing `{schemaVersion, port, token}`. This keeps custom ports synchronized without depending on a hook process inheriting Electron environment variables.
+
+## Data sources
+
+| Source | Purpose | Stability |
+|---|---|---|
+| Claude/Codex lifecycle hooks | Authoritative live state | Supported provider surface |
+| `~/.claude/projects` JSONL | Claude daily tokens/value | Local transcript data |
+| `~/.codex/sessions` rollouts | Codex tokens, context, quota windows | Best effort; parser drift disables only Codex usage |
+| Claude OAuth usage endpoint | Personal subscription windows | Best effort local account data |
+| Anthropic Admin API | Actual organization token/cost report | Optional admin key |
+| MongoDB `token_board.daily_usage` | Optional durable history | Additive schema v2 |
+
+Claude transcript scanning uses per-file/per-message ledgers. It scans retained-day data in bounded chunks, replaces duplicate contributions, rebuilds after truncation/rewrite, removes vanished files, serializes refreshes, and publishes aggregates atomically.
+
+## Configuration
+
+Configuration is bootstrapped before provider services are constructed. Precedence is process environment, installed `userData/.env`, legacy `%APPDATA%\claude-watch\.env`, then project `.env` in development only. Open the canonical config folder from Settings.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CLAUDE_WATCH_HOTKEY` | `Control+Alt+W` | Global toggle |
+| `CLAUDE_WATCH_NOTIFICATIONS` | `0` | Attention notifications |
+| `CLAUDE_WATCH_PORT` | `7459` | Loopback daemon port |
+| `CLAUDE_WATCH_MOCK` | `0` | Development mock mode |
+| `ANTHROPIC_ADMIN_KEY` | – | Anthropic Admin API report |
+| `CLAUDE_WATCH_ORG_NAME` | `Growth Saloon` | Admin-spend label |
+| `CLAUDE_WATCH_DAILY_BUDGET_USD` | – | Optional daily actual-spend budget |
+| `CLAUDE_WATCH_PROJECTS_DIR` | `~/.claude/projects` | Claude transcript root |
+| `CLAUDE_WATCH_NEW_PROJECT_DIR` | `~/Projects` | New-project folder |
+| `MONGODB_URI` | – | Optional history sync (`CLAUDE_WATCH_MONGODB_URI` also works) |
+| `TM_AGENT_MONITOR_ENDPOINT_FILE` | app-data path above | Bridge discovery override |
 
 ## Architecture
 
-```
-Claude Code hooks (report.mjs) ──POST /report──► Daemon (127.0.0.1:7459) ┐
-OAuth usage endpoint           ──fetch─────────► subscription windows    ├─► StatusSnapshot ──IPC──► React UI
-Anthropic Admin API            ──fetch─────────► org API usage           │
-~/.claude/projects transcripts ──read──────────► "today tokens out"      ┘
-```
-
-- **Daemon** (`src/main/daemon.ts`) — local HTTP server; hooks push agent events.
-- **Hooks** (`hooks/report.mjs`) — run on every Claude Code event, derive activity + context %
-  (+ the terminal HWND for click-to-focus), POST to the daemon. Installed via `hooks/install.mjs`.
-- **Subscription windows** (`src/main/subscriptionUsage.ts`) — real 5h/weekly from
-  `https://api.anthropic.com/api/oauth/usage` using `~/.claude/.credentials.json`.
-- **Org API usage** (`src/main/usage.ts`) — Admin API token + cost report. Optional.
-- **Today tokens** (`src/main/localUsage.ts`) — sums `output_tokens` from local transcripts.
-- **Native focus** (`src/native/win32.mjs`) — koffi FFI to `user32`/`kernel32`; loads system DLLs
-  at runtime (no per-Electron-ABI rebuild).
-- **UI** (`src/renderer`) — React, polled once a second.
-
-## Setup
-
-```sh
-npm install
-npm run dev                          # launches the app; toggle with Ctrl+Alt+W
-$env:CLAUDE_WATCH_MOCK=1; npm run dev # see the design with sample data (PowerShell)
+```text
+Claude/Codex hooks -> hooks/bridge.mjs -> authenticated POST /v1/events
+                                             |
+Claude transcript ledger --------------------+--> provider-neutral AgentStore
+Codex rollout parser ------------------------+--> UsageAccount[] / DailyUsageDay
+OAuth + Anthropic Admin APIs ----------------+--> Electron IPC -> React renderer
+                                                          |
+                                              optional MongoDB schema v2
 ```
 
-### Live agents (Claude Code hooks)
+The compatibility `POST /report` route remains for bounded Claude legacy payloads, but it is authenticated and schema-validated. `/health` and `/status` diagnostics also require the bearer token. All routes are exact-match and JSON ingestion rejects wrong content types, oversized bodies, future/non-finite timestamps, excessive strings, invalid enums, and cardinality overflow.
 
-```sh
-npm run hooks:install                # writes ~/.claude/settings.json (or --project)
+## Build and package
+
+```powershell
+npm run dist:dir
+npm run dist
 ```
-Restart open Claude Code sessions. Remove with `node hooks/install.mjs --remove`.
 
-### Live usage (optional)
+Every distribution/publish command regenerates `build/icon.ico` offline from tracked `resources/icon.png`. A clean checkout does not depend on ignored local icon assets or a network font. Packaged resources include the shared bridge/installer and native focus module. Builds are unsigned.
 
-The **YOU · MAX** windows need no config (they read `~/.claude/.credentials.json` automatically).
-For the **org API** meter, set `ANTHROPIC_ADMIN_KEY` (an `sk-ant-admin…` key). In dev, put it in
-`.env`; for the **installed app**, put it in `%APPDATA%\claude-watch\.env` (the installed app's
-working dir has no `.env`).
+`npm run dist` produces two Windows executables in `dist/`: the `*-x64.exe` installer opens the setup wizard, while `*-portable.exe` runs without installation. From a fresh PowerShell window, the newest locally built installer can be launched with:
 
-## Configuration (`.env`)
+```powershell
+Start-Process (Get-ChildItem .\dist\tm-agent-monitor-*-x64.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+```
 
-| Var | Default | Purpose |
-|---|---|---|
-| `CLAUDE_WATCH_HOTKEY` | `Ctrl+Alt+W` | Global summon/hide hotkey (if it won't fire, try e.g. `Alt+C`) |
-| `CLAUDE_WATCH_NOTIFICATIONS` | `0` | `1` = desktop "needs input" notifications (off by default — noisy) |
-| `CLAUDE_WATCH_PORT` | `7459` | Daemon port |
-| `CLAUDE_WATCH_MOCK` | `0` | Start in mock mode |
-| `ANTHROPIC_ADMIN_KEY` | – | Org **API** meter (admin usage + cost) |
-| `CLAUDE_WATCH_ORG_NAME` | `Growth Saloon` | Label for the API meter |
-| `CLAUDE_WATCH_ORG_DAILY_BUDGET_USD` | – | Optional daily-spend budget bar on the API meter |
-| `CLAUDE_WATCH_PROJECTS_DIR` | `~/.claude/projects` | Transcript store for "Today tokens out" |
-| `CLAUDE_WATCH_NEW_PROJECT_DIR` | `~/Projects` | Where the ＋folder button creates new project folders |
-
-(Env var names keep the `CLAUDE_WATCH_` prefix for back-compat.)
-
-## Build & package
-
-```sh
+```powershell
 npm run typecheck
-npm run build          # compiles main + preload + renderer into out/
-npm run dist           # build + electron-builder → NSIS installer + portable in dist/
-npm run dist:dir       # unpacked build only (faster, for testing)
+npm test
+npm run build
+npm run dist:dir
+npm audit
+git status --short
 ```
 
-`npm run dist` produces `dist/tm-agent-monitor-<ver>-x64.exe` (installer) and
-`dist/tm-agent-monitor-<ver>-portable.exe`. `koffi` is marked `asarUnpack` so native focus
-works packaged. App/tray/installer icons come from the `tm` monogram (`scripts/brand-icon.mjs` →
-`scripts/gen-ico.mjs`); run `npm run icons` to regenerate.
+## Scope after provider-neutral monitoring
 
-> Builds are **unsigned** — Windows SmartScreen warns ("More info → Run anyway"). The appId is
-> `com.taylormade.agent-monitor`.
-
-### Auto-update
-
-Packaged builds pull updates from GitHub Releases on `TC23345/tm-agent-monitor` (a **public**
-repo, so the app can read `latest.yml` without a token). The app checks on launch + every 6h,
-downloads in the background, and installs on quit (with a notification nudge).
-(To keep the code private instead, point `publish.repo` in `electron-builder.yml` at a separate
-public releases repo.)
-Each release — bump `version` in `package.json`, then publish (needs a GH token with `repo` scope):
-```sh
-$env:GH_TOKEN="<token>"; npm run publish
-```
-This builds + uploads the installer, `latest.yml`, and blockmap to a GitHub Release on the public
-repo. Installed apps see the higher version and update themselves. (Unsigned ⇒ SmartScreen may still
-prompt on the updated build.)
-
-## Click-to-focus (native)
-
-Clicking a session row brings its terminal to the front. The hook walks the process tree from the
-Claude Code session to the first ancestor owning a visible top-level window — covers **Windows
-Terminal**, the **VS Code integrated terminal**, and classic consoles. It foregrounds the
-*window*; selecting a specific WT **tab** isn't possible via public Win32 APIs.
-
-## Plans & docs (`docs/` + local)
-- `docs/UX-IMPROVEMENT-PLANS.md` — prioritized visual / interaction / feature improvement plan.
-- `docs/CLAUDE-CODE-MANAGEMENT-PLAN.md` — extending the app into an MCP/hooks/workflows manager.
-- `plan-design-system-agent-monitor.md` (gitignored) — brand → app design-system migration spec
-  (cyan/mono/sharp values, applied opt-in; the app keeps orange for now).
-
-## Notes & follow-ups
-- **Org *subscription* window** (separate from the API meter) isn't tracked yet — the desktop
-  Claude Code tab shares the personal Max login here; a true org subscription would live in the
-  desktop app's claude.ai web session (cookie-based). Planned.
-- Queued from the UX plans: window **auto-sizing to content**, **launch-at-login**, an in-app
-  **settings panel** (hotkey/notifications/mock), and real **auto-update**.
+Broader Claude/Codex configuration management (MCP servers, skills, plugins, safe diff editors) remains a later roadmap. See `docs/CLAUDE-CODE-MANAGEMENT-PLAN.md`; the stable monitoring and hook-management foundation described here is already implemented.

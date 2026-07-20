@@ -1,0 +1,4 @@
+{"timestamp":"2026-07-16T10:00:00.000Z","type":"session_meta","payload":{"id":"drift","cwd":"C:\\Projects\\drift"}}
+not-json
+{"timestamp":"2026-07-16T10:01:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_usage":{"input":100}},"rate_limits":{"primary":{"percent_used":10,"minutes":300}}}}
+{"timestamp":"bad-date","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":"not-a-number","output_tokens":20}}}}

@@ -2,7 +2,7 @@
 // These exercise pickWindowFromTree without loading koffi, so they run anywhere.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { pickWindowFromTree } from './win32.mjs'
+import { focusHwndWithApi, focusOwnershipMatches, pickWindowFromTree } from './win32.mjs'
 
 const M = (obj) => new Map(Object.entries(obj).map(([k, v]) => [Number(k), v]))
 
@@ -64,4 +64,70 @@ test('accepts numeric hwnds too (stringifies them)', () => {
   const parents = M({ 100: 50, 50: 40 })
   const exeOf = M({ 100: 'node.exe', 50: 'code.exe', 40: 'explorer.exe' })
   assert.deepEqual(pickWindowFromTree(100, byPid, parents, exeOf), { hwnd: '5001', pid: 50 })
+})
+
+test('prefers the foreground window when the same pid owns several (multi-window Cursor)', () => {
+  // Cursor(50) owns two windows; byPid kept the Z-topmost (5001) but the user is
+  // typing in 5002, which holds the foreground -> capture 5002.
+  const byPid = M({ 50: 5001n })
+  const parents = M({ 100: 90, 90: 50, 50: 40 })
+  const exeOf = M({ 100: 'node.exe', 90: 'pwsh.exe', 50: 'cursor.exe', 40: 'explorer.exe' })
+  const fg = { hwnd: 5002n, pid: 50 }
+  assert.deepEqual(pickWindowFromTree(100, byPid, parents, exeOf, undefined, fg), { hwnd: '5002', pid: 50 })
+})
+
+test('ignores a foreground window owned by an unrelated process', () => {
+  const byPid = M({ 50: 5001n })
+  const parents = M({ 100: 50, 50: 40 })
+  const exeOf = M({ 100: 'node.exe', 50: 'code.exe', 40: 'explorer.exe' })
+  const fg = { hwnd: 9001n, pid: 999 } // some other app holds the foreground
+  assert.deepEqual(pickWindowFromTree(100, byPid, parents, exeOf, undefined, fg), { hwnd: '5001', pid: 50 })
+})
+
+test('focus ownership requires the exact positive process id', () => {
+  assert.equal(focusOwnershipMatches(42, 42), true)
+  assert.equal(focusOwnershipMatches(42, 41), false)
+  assert.equal(focusOwnershipMatches(0, 0), false)
+  assert.equal(focusOwnershipMatches(1.5, 1.5), false)
+})
+
+test('detaches every attached input queue when focusing throws', () => {
+  const calls = []
+  const fns = {
+    IsIconic: () => 0,
+    ShowWindow: () => 1,
+    GetForegroundWindow: () => 99n,
+    GetCurrentThreadId: () => 10,
+    GetWindowThreadProcessId: (hwnd, pidBox) => {
+      pidBox[0] = hwnd === 50n ? 500 : 900
+      return hwnd === 50n ? 50 : 90
+    },
+    AttachThreadInput: (current, target, attach) => {
+      calls.push([current, target, attach])
+      return 1
+    },
+    BringWindowToTop: () => { throw new Error('simulated Win32 failure') },
+    SetForegroundWindow: () => 1
+  }
+  assert.throws(() => focusHwndWithApi(fns, 50n), /simulated/)
+  assert.deepEqual(calls, [
+    [10, 90, 1], [10, 50, 1],
+    [10, 50, 0], [10, 90, 0]
+  ])
+})
+
+test('attaches a shared target/foreground input queue only once', () => {
+  const calls = []
+  const fns = {
+    IsIconic: () => 0,
+    ShowWindow: () => 1,
+    GetForegroundWindow: () => 99n,
+    GetCurrentThreadId: () => 10,
+    GetWindowThreadProcessId: (_hwnd, pidBox) => { pidBox[0] = 500; return 50 },
+    AttachThreadInput: (current, target, attach) => { calls.push([current, target, attach]); return 1 },
+    BringWindowToTop: () => 1,
+    SetForegroundWindow: () => 1
+  }
+  assert.equal(focusHwndWithApi(fns, 50n), true)
+  assert.deepEqual(calls, [[10, 50, 1], [10, 50, 0]])
 })

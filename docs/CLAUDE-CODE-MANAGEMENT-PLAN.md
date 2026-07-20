@@ -1,6 +1,11 @@
 # Claude Code Management + Literacy Tool — Feature Plan
 ## TaylorMade Agent Monitor Extension
 
+> Status: provider-neutral Claude + Codex monitoring, authenticated hook ingestion,
+> atomic user-hook install/repair/remove, provider health, and Codex trust guidance are
+> implemented. This document covers the deferred configuration-management layer and
+> is no longer a description of the current live-monitor architecture.
+
 > ⚠️ **Verify config specifics before building.** This plan blends official Claude Code
 > docs with third-party guides. Re-check against the live docs at the moment of
 > implementation — especially: the **hook handler types** (current Claude Code hooks are

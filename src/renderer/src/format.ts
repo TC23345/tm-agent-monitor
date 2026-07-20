@@ -18,7 +18,28 @@ export function resetsIn(resetsAt: number | null, now = Date.now()): string {
   const m = Math.floor(s / 60)
   if (d > 0) return `resets in ${d}d`
   if (h > 0) return `resets in ${h}h ${m}m`
-  return `resets in ${m}m`
+  if (m > 0) return `resets in ${m}m`
+  return 'resets soon'
+}
+
+/** ms epoch -> "3:40 PM" (user locale). */
+export function clockTime(at: number): string {
+  return new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+/** "claude-fable-5" -> "fable 5", "claude-opus-4-8" -> "opus 4.8". */
+export function modelShort(model?: string): string | undefined {
+  if (!model) return undefined
+  const m = model.match(/(fable|mythos|opus|sonnet|haiku)[-.]?(\d+(?:[-.]\d+)?)?/i)
+  if (!m) return model.replace(/^claude-/, '')
+  return m[2] ? `${m[1]} ${m[2].replace(/-/g, '.')}` : m[1]
+}
+
+/** 3.238 -> "$3.24", 32.4 -> "$32.40" -> "$32.4", 132 -> "$132". */
+export function money(usd: number): string {
+  if (usd >= 100) return `$${Math.round(usd)}`
+  if (usd >= 10) return `$${(Math.round(usd * 10) / 10).toFixed(1)}`
+  return `$${usd.toFixed(2)}`
 }
 
 /** 1_200_000 -> "1.2M", 31_000 -> "31K", 540 -> "540". */

@@ -1,7 +1,7 @@
 {
   "name": "taylormade-agent-monitor",
-  "version": "0.1.7",
-  "description": "Hotkey-summoned Claude Code agent + API usage monitor for Windows (claude-watch, re-imagined for Win).",
+  "version": "0.2.1",
+  "description": "Hotkey-summoned Claude and Codex agent monitor for Windows.",
   "author": "Taylor",
   "license": "MIT",
   "type": "module",
@@ -12,17 +12,19 @@
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test": "node --test src/native/win32.test.mjs",
+    "test": "node scripts/run-tests.mjs",
     "focus:diag": "node scripts/focus-diag.mjs",
-    "icons": "node scripts/gen-icon.mjs 256 && node scripts/gen-icon.mjs 32 && node scripts/gen-ico.mjs",
+    "icons": "node scripts/build-icon.mjs",
     "hooks:install": "node hooks/install.mjs",
-    "dist": "npm run build && electron-builder --win",
-    "dist:dir": "npm run build && electron-builder --win --dir",
-    "publish": "npm run build && electron-builder --win --publish always"
+    "hooks:codex": "node hooks/install.mjs --provider codex",
+    "dist": "npm run build && npm run icons && electron-builder --win",
+    "dist:dir": "npm run build && npm run icons && electron-builder --win --dir",
+    "publish": "npm run build && npm run icons && electron-builder --win --publish always"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
-    "koffi": "^3.0.2"
+    "koffi": "^3.0.2",
+    "mongodb": "^7.4.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

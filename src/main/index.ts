@@ -1,52 +1,63 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, clipboard, screen } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { Daemon } from './daemon.js'
 import { fetchApiUsage } from './usage.js'
 import { LocalUsage } from './localUsage.js'
+import { UsageHistorySync } from './history.js'
+import { bootstrapConfig } from './config.js'
 import { readPersonalToken, fetchWindow } from './subscriptionUsage.js'
-import { mockSnapshot } from './mock.js'
+import { readCodexAuth, fetchCodexWindow } from './codexSubscriptionUsage.js'
+import { scanCodexUsage, type CodexRateLimits } from './codexUsage.mjs'
+import { scanUsageInsights } from './usageInsightsCore.mjs'
+import { mockSnapshot, mockHistory, mockUsageInsights } from './mock.js'
 import { focusHwnd, focusByPid, available as winAvailable } from '../native/win32.mjs'
+import { estimateCostUsd } from '../shared/pricing.mjs'
 // electron-updater is CommonJS — a *named* ESM import fails at runtime ("Named
 // export 'autoUpdater' not found"), so import the default export and destructure.
 import electronUpdater from 'electron-updater'
-import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage } from '../shared/types.js'
+import { validateMutableSettingsPatch } from './store.js'
+import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type DailyUsageDay, type ProjectUsage, type UsageInsights } from '../shared/types.js'
 
 const { autoUpdater } = electronUpdater
 
+// GUI processes launched from short-lived verification shells can inherit a
+// pipe that closes before delayed logs run. Swallow stream errors so an EPIPE
+// never becomes a user-facing Electron uncaught-exception dialog.
+process.stdout?.on('error', () => {})
+process.stderr?.on('error', () => {})
+
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-// --- minimal .env loader (no dependency) -----------------------------------
-// Reads the project .env (dev) AND %APPDATA%/claude-watch/.env (installed app,
-// whose working dir has no .env). First value wins, so dev .env takes priority.
-function loadEnvFrom(path: string): void {
-  if (!existsSync(path)) return
-  for (const line of readFileSync(path, 'utf8').split('\n')) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i)
-    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '').trim()
-  }
-}
-loadEnvFrom(join(process.cwd(), '.env'))
-try {
-  loadEnvFrom(join(app.getPath('appData'), 'claude-watch', '.env'))
-} catch {
-  /* app.getPath unavailable — non-fatal */
-}
-
-const PORT = Number(process.env.CLAUDE_WATCH_PORT) || DEFAULTS.port
-const ADMIN_KEY = process.env.ANTHROPIC_ADMIN_KEY || undefined
-const ORG_LABEL = process.env.CLAUDE_WATCH_ORG_NAME || 'Growth Saloon'
-// Where "New project" creates folders. Defaults to ~/Projects (C:\Users\<you>\Projects).
-// Distinct from CLAUDE_WATCH_PROJECTS_DIR, which points at the transcript store.
-const NEW_PROJECT_DIR = process.env.CLAUDE_WATCH_NEW_PROJECT_DIR || join(app.getPath('home'), 'Projects')
+const config = bootstrapConfig({
+  isPackaged: app.isPackaged,
+  userData: app.getPath('userData'),
+  appData: app.getPath('appData'),
+  home: app.getPath('home'),
+  cwd: process.cwd(),
+  argv: process.argv,
+  env: process.env
+})
+const PORT = config.port
+const ADMIN_KEY = config.adminKey
+const ORG_LABEL = config.orgLabel
+const NEW_PROJECT_DIR = config.newProjectDir
 // How often to poll the subscription usage endpoint. The 5h/weekly windows move
 // slowly, and polling too fast trips its rate limit (HTTP 429), so keep it gentle.
 const USAGE_POLL_MS = 120_000
+const CODEX_USAGE_POLL_MS = 5 * 60_000
 
 // Persisted user settings (override env/defaults), edited via the in-app panel.
-interface Settings { hotkey?: string; notifications?: boolean; mock?: boolean }
+interface Settings {
+  hotkey?: string
+  notifications?: boolean
+  mock?: boolean
+  /** Set only after a real Codex hook event reaches this app installation. */
+  codexHookTrustVerified?: boolean
+}
 const settingsFile = () => join(app.getPath('userData'), 'settings.json')
 function loadSettings(): Settings {
   try { return JSON.parse(readFileSync(settingsFile(), 'utf8')) } catch { return {} }
@@ -57,9 +68,10 @@ function saveSettings(): void {
 let settings: Settings = {}
 
 // Effective config: settings.json > env > default. Mutable so the panel changes them live.
-let hotkeyPref = process.env.CLAUDE_WATCH_HOTKEY || DEFAULTS.hotkey
-let notify = process.env.CLAUDE_WATCH_NOTIFICATIONS === '1'
-let mockMode = process.env.CLAUDE_WATCH_MOCK === '1'
+let hotkeyPref = config.hotkey
+let notify = config.notifications
+let mockMode = config.mock
+const mockForced = process.argv.includes('--mock')
 
 const TRAY_FALLBACK =
   'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAYElEQVR42mNgGAWDFdwsD/9PTTyglpPkCFpZTpQjaG05QUeMOmDIOODLx1dYMc0dgMtiUh0yNB1ArOXEOGLUAaMOGJoOGC0HBkVRPFobDn8HDHijdFA0ywdFx2QU0BMAAEtrTpIJNvyqAAAAAElFTkSuQmCC'
@@ -71,15 +83,75 @@ let tray: Tray | null = null
 const HOTKEY_FALLBACKS = ['Alt+Shift+C', 'Control+Shift+Space', 'Alt+Shift+A', 'Alt+Shift+S']
 let activeHotkey: string | null = null
 let updateReady: string | null = null // version string once an update is downloaded
+let installingUpdate = false
 
 let daemon: Daemon
-const localUsage = new LocalUsage()
+const localUsage = new LocalUsage({ projectsDir: config.transcriptDir })
+// Daily-totals sync to MongoDB (token_board.daily_usage). Inert without a URI.
+const history = new UsageHistorySync(
+  config.mongoUri,
+  app.getVersion()
+)
+async function flushHistory(): Promise<void> {
+  if (mockMode) return
+  const days = localUsage
+    .retainedDays()
+    .map((d) => localUsage.dayTotals(d))
+    .filter((d): d is NonNullable<typeof d> => !!d)
+  const codex = [...codexDays.entries()].map(([day, totals]) => ({ day, ...totals, valueComplete: totals.valueComplete !== false, byProject: totals.byProject ?? [], byModel: totals.byModel ?? [] }))
+  const apiDay = api.todayTokensOut !== undefined || api.todayCostUsd !== undefined
+    ? { date: api.sourceDate ?? new Date().toISOString().slice(0, 10), tokensOut: api.todayTokensOut, costUsd: api.todayCostUsd }
+    : undefined
+  await history.flush(
+    days,
+    apiDay,
+    { codex }
+  )
+}
 let personal: PlanWindow = { available: false, label: 'You · Max' }
+let codexPersonal: PlanWindow = { available: false, label: 'Codex' }
 let api: ApiUsage = { available: false, label: ORG_LABEL }
+let codexToday: ProviderUsageTotals = { tokensOut: 0, costUsd: 0, valueComplete: true, byProject: [], byModel: [] }
+let codexRateLimits: CodexRateLimits | undefined
+let codexUsageNote: string | undefined
+let codexDays = new Map<string, ProviderUsageTotals>()
+let codexRefresh: Promise<void> | null = null
+let insightsCache: UsageInsights | undefined
+let insightsRefresh: Promise<UsageInsights> | null = null
 let prevWaiting = new Set<string>()
+const trustPendingSince = new Map<ProviderId, number>()
+
+function rolloutQuota(window: { usedPct?: number; resetsAt?: number; windowMinutes?: number } | undefined, tone: 'amber' | 'blue') {
+  if (!window || window.usedPct === undefined) return undefined
+  const label = window.windowMinutes === 300
+    ? 'Session (5hr)'
+    : window.windowMinutes === 10_080
+      ? 'Weekly (7 day)'
+      : window.windowMinutes ? `${window.windowMinutes} min` : 'Usage'
+  return { label, usedPct: window.usedPct, resetsAt: window.resetsAt ?? null, tone }
+}
 
 function resourcePath(name: string): string {
   return app.isPackaged ? join(process.resourcesPath, name) : join(__dirname, '../../resources', name)
+}
+
+function bridgeToken(): string {
+  try {
+    const raw = JSON.parse(readFileSync(config.endpointFile, 'utf8'))
+    if (typeof raw?.token === 'string' && raw.token.length >= 32) return raw.token
+  } catch { /* first run or invalid legacy file */ }
+  return randomBytes(32).toString('base64url')
+}
+
+function publishEndpoint(): void {
+  try {
+    mkdirSync(dirname(config.endpointFile), { recursive: true })
+    const tmp = `${config.endpointFile}.${process.pid}.tmp`
+    writeFileSync(tmp, `${JSON.stringify({ schemaVersion: 1, port: daemon.getPort(), token: daemon.getAuthToken() }, null, 2)}\n`, { mode: 0o600 })
+    renameSync(tmp, config.endpointFile)
+  } catch (error) {
+    console.error(`[bridge] endpoint discovery write failed: ${error instanceof Error ? error.message : error}`)
+  }
 }
 
 function trayImage() {
@@ -102,8 +174,8 @@ function createWindow(): void {
     fullscreenable: false,
     backgroundColor: '#00000000',
     webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
-      sandbox: false,
+      preload: join(__dirname, '../preload/index.cjs'),
+      sandbox: true,
       contextIsolation: true
     }
   })
@@ -158,19 +230,31 @@ function resolveShell(): string {
 }
 
 /**
- * Open a new terminal in `cwd` (or home if missing) and launch `claude`.
+ * Open a new terminal in `cwd` (or home if missing) and launch the provider CLI.
  * Prefers Windows Terminal; falls back to a fresh PowerShell console window.
  */
-function openTerminal(cwd?: string): void {
+function openTerminal(cwd?: string, provider: ProviderId = 'claude', purpose: 'agent' | 'hook-trust' = 'agent'): void {
   const dir = cwd && existsSync(cwd) ? cwd : app.getPath('home')
   const opts = { detached: true, stdio: 'ignore' as const, windowsHide: false }
   const shellExe = resolveShell()
-  const wt = spawn('wt.exe', ['-d', dir, shellExe, '-NoExit', '-Command', 'claude'], opts)
+  const command = provider === 'codex' ? 'codex' : 'claude'
+  const script = purpose === 'hook-trust'
+    ? [
+        "Write-Host ''",
+        "Write-Host 'TaylorMade Agent Monitor - Codex hook trust' -ForegroundColor Cyan",
+        "Write-Host 'The /hooks command is already copied to your clipboard.'",
+        "Write-Host 'Paste it into Codex, review the TaylorMade Agent Monitor hooks, and trust them.'",
+        "Write-Host 'The monitor will verify trust automatically after the next Codex activity.'",
+        "Write-Host ''",
+        command
+      ].join('; ')
+    : command
+  const wt = spawn('wt.exe', ['-d', dir, shellExe, '-NoExit', '-Command', script], opts)
   wt.on('error', () => {
     // wt.exe unavailable — open a plain PowerShell console window via `start`.
-    const script = `Set-Location -LiteralPath '${dir.replace(/'/g, "''")}'; claude`
+    const fallbackScript = `Set-Location -LiteralPath '${dir.replace(/'/g, "''")}'; ${script}`
     try {
-      const fb = spawn('cmd.exe', ['/c', 'start', '""', shellExe, '-NoExit', '-Command', script], opts)
+      const fb = spawn('cmd.exe', ['/c', 'start', '""', shellExe, '-NoExit', '-Command', fallbackScript], opts)
       fb.on('error', (e) => console.error(`[terminal] open failed: ${e?.message ?? e}`))
       fb.unref()
     } catch (e) {
@@ -251,10 +335,56 @@ function buildSnapshot(): StatusSnapshot {
 
   const agents = daemon.store.snapshot()
   const waiting = agents.filter((a) => a.state === 'waiting')
-
+  const now = Date.now()
+  const health = (provider: ProviderId) => {
+    const lastReportAt = daemon.getProviderLastReport(provider)
+    const hookState = providerHookState(provider)
+    const installed = hookState.installed
+    const reporting = lastReportAt > 0 && now - lastReportAt < DEFAULTS.staleMs
+    if (provider === 'codex' && installed && settings.codexHookTrustVerified !== true && !trustPendingSince.has(provider)) {
+      trustPendingSince.set(provider, 0)
+    }
+    const pendingSince = trustPendingSince.get(provider)
+    if (provider === 'codex' && pendingSince !== undefined && lastReportAt > pendingSince) {
+      trustPendingSince.delete(provider)
+      if (settings.codexHookTrustVerified !== true) {
+        settings.codexHookTrustVerified = true
+        saveSettings()
+      }
+    }
+    return {
+      installed,
+      needsRepair: hookState.needsRepair,
+      awaitingTrust: provider === 'codex' && installed && settings.codexHookTrustVerified !== true,
+      reporting,
+      lastReportAt: lastReportAt || undefined,
+      bridgeVersion: installed ? '1' : undefined,
+      ...(provider === 'codex' && codexUsageNote ? { error: codexUsageNote } : {})
+    }
+  }
+  const rolloutPrimary = rolloutQuota(codexRateLimits?.primary, 'amber')
+  const rolloutSecondary = rolloutQuota(codexRateLimits?.secondary, 'blue')
+  const codexSession = codexPersonal.session ?? [rolloutPrimary, rolloutSecondary].find((quota) => quota?.label.startsWith('Session'))
+  const codexWeek = codexPersonal.week ?? [rolloutPrimary, rolloutSecondary].find((quota) => quota?.label.startsWith('Weekly'))
   const usage: UsageSummary = {
-    personal: { ...personal, todayTokensOut: localUsage.todayTokensOut() },
-    api,
+    accounts: [
+      { id: 'claude-plan', provider: 'claude', kind: 'subscription', provenance: 'api', ...personal },
+      {
+        id: 'claude-local', provider: 'claude', kind: 'local', available: true, label: 'Claude local', provenance: 'transcript',
+        todayTokensOut: localUsage.todayTokensOut(), todayCostUsd: localUsage.todayCostUsd(), todayByProject: localUsage.todayByProject(),
+        valueComplete: localUsage.dayTotals(localDay())?.valueComplete
+      },
+      {
+        id: 'codex-local', provider: 'codex', kind: 'local', available: !codexUsageNote,
+        label: codexPersonal.available ? codexPersonal.label.replace(/^Codex/, 'Codex local') : 'Codex local', provenance: 'rollout',
+        todayTokensOut: codexToday.tokensOut, todayCostUsd: codexToday.costUsd, todayByProject: codexToday.byProject,
+        valueComplete: codexToday.valueComplete, note: codexUsageNote,
+        ...(codexSession ? { session: codexSession } : {}),
+        ...(codexWeek ? { week: codexWeek } : {}),
+        ...(codexPersonal.quotas ? { quotas: codexPersonal.quotas } : {}),
+      },
+      { id: 'anthropic-api', provider: 'claude', kind: 'api', provenance: 'api', actualSpend: true, ...api }
+    ],
     mock: false
   }
 
@@ -262,9 +392,119 @@ function buildSnapshot(): StatusSnapshot {
     agents,
     usage,
     waitingCount: waiting.length,
-    daemonConnected: daemon.isConnected(),
+    providers: { claude: health('claude'), codex: health('codex') },
     mock: false,
-    generatedAt: Date.now()
+    generatedAt: now
+  }
+}
+
+function localDay(timestamp = Date.now()): string {
+  const d = new Date(timestamp)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const PROVIDER_HOOK_EVENTS: Record<ProviderId, string[]> = {
+  claude: [
+    'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PermissionRequest',
+    'PostToolUse', 'Notification', 'Stop', 'SubagentStart', 'SubagentStop',
+    'PreCompact', 'PostCompact', 'SessionEnd'
+  ],
+  codex: ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PermissionRequest', 'Stop', 'SubagentStart', 'SubagentStop']
+}
+const HOOK_OWNER = 'tm-agent-monitor-hook-v1'
+
+function packagedHookRoot(): string {
+  return join(app.getPath('userData'), 'bridge-runtime')
+}
+
+function hookBridgePath(): string {
+  return app.isPackaged
+    ? join(packagedHookRoot(), 'hooks', 'bridge.mjs')
+    : join(__dirname, '../../hooks/bridge.mjs')
+}
+
+/** Copy the external-Node bridge to a stable location that survives portable extraction/update paths. */
+function stagePackagedHookRuntime(): string {
+  const bridge = hookBridgePath()
+  if (!app.isPackaged) return bridge
+  const root = packagedHookRoot()
+  mkdirSync(join(root, 'hooks'), { recursive: true })
+  cpSync(join(process.resourcesPath, 'hooks', 'bridge.mjs'), bridge, { force: true })
+  cpSync(join(process.resourcesPath, 'hooks', 'focus-worker.mjs'), join(root, 'hooks', 'focus-worker.mjs'), { force: true })
+  cpSync(join(process.resourcesPath, 'native'), join(root, 'native'), { recursive: true, force: true })
+  return bridge
+}
+
+function providerHookState(provider: ProviderId): { installed: boolean; needsRepair: boolean } {
+  const path = provider === 'claude'
+    ? join(app.getPath('home'), '.claude', 'settings.json')
+    : join(app.getPath('home'), '.codex', 'hooks.json')
+  try {
+    const config = JSON.parse(readFileSync(path, 'utf8')) as { hooks?: Record<string, unknown> }
+    const normalize = (value: unknown) => String(value ?? '').trim().replace(/\s+/g, ' ')
+    const expected = normalize(`node "${hookBridgePath()}" --provider ${provider} --owner ${HOOK_OWNER}`)
+    const allOwned: Array<{ event: string; command: string; async?: boolean }> = []
+    for (const [event, rawGroups] of Object.entries(config.hooks ?? {})) {
+      if (!Array.isArray(rawGroups)) continue
+      for (const group of rawGroups) {
+        if (!group || typeof group !== 'object') continue
+        const hooks = (group as { hooks?: unknown }).hooks
+        if (!Array.isArray(hooks)) continue
+        for (const raw of hooks) {
+          if (!raw || typeof raw !== 'object') continue
+          const handler = raw as { type?: unknown; command?: unknown; async?: unknown }
+          const command = normalize(handler.command)
+          const owned = handler.type === 'command' && (
+            command.includes(`--owner ${HOOK_OWNER}`) ||
+            command.includes(`--owner=${HOOK_OWNER}`) ||
+            (provider === 'claude' && /(?:^|[\\/])hooks[\\/]report\.mjs(?:"|\s|$)/i.test(command))
+          )
+          if (owned) allOwned.push({ event, command, async: handler.async === true })
+        }
+      }
+    }
+    const correct = PROVIDER_HOOK_EVENTS[provider].every((event) => {
+      const handlers = allOwned.filter((handler) => handler.event === event)
+      return handlers.length === 1 && handlers[0].command === expected && (provider !== 'claude' || handlers[0].async === true)
+    })
+    const noUnexpected = allOwned.every((handler) => PROVIDER_HOOK_EVENTS[provider].includes(handler.event))
+    const installed = correct && noUnexpected && allOwned.length === PROVIDER_HOOK_EVENTS[provider].length
+    return { installed, needsRepair: allOwned.length > 0 && !installed }
+  } catch { return { installed: false, needsRepair: false } }
+}
+
+function mergeProjectUsage(items: ProjectUsage[]): ProjectUsage[] {
+  const out = new Map<string, ProjectUsage>()
+  for (const item of items) {
+    const current = out.get(item.project)
+    if (current) {
+      current.tokensOut += item.tokensOut
+      current.costUsd += item.costUsd
+      current.valueComplete = current.valueComplete !== false && item.valueComplete !== false
+    } else out.set(item.project, { ...item })
+  }
+  return [...out.values()].sort((a, b) => b.costUsd - a.costUsd)
+}
+
+function liveHistoryDay(date: string, previous?: DailyUsageDay): DailyUsageDay | undefined {
+  const claudeDay = localUsage.dayTotals(date)
+  const claude = claudeDay ? {
+    tokensOut: claudeDay.tokensOut, costUsd: claudeDay.costUsd, valueComplete: claudeDay.valueComplete,
+    byProject: claudeDay.byProject, byModel: claudeDay.byModel
+  } : undefined
+  const codex = codexDays.get(date)
+  if (!claude && !codex) return undefined
+  const providers = [claude, codex].filter((value): value is ProviderUsageTotals => !!value)
+  return {
+    date,
+    tokensOut: providers.reduce((sum, value) => sum + value.tokensOut, 0),
+    costUsd: providers.reduce((sum, value) => sum + value.costUsd, 0),
+    valueComplete: providers.every((value) => value.valueComplete !== false),
+    byProject: mergeProjectUsage(providers.flatMap((value) => value.byProject ?? [])),
+    byModel: providers.flatMap((value) => value.byModel ?? []),
+    byProvider: { ...(claude ? { claude } : {}), ...(codex ? { codex } : {}) },
+    apiCostUsd: previous?.apiCostUsd,
+    apiTokensOut: previous?.apiTokensOut
   }
 }
 
@@ -283,7 +523,8 @@ function updateTray(snap: StatusSnapshot): void {
 }
 
 function notifyTransitions(snap: StatusSnapshot): void {
-  if (!notify || !Notification.isSupported()) return
+  // Mock/capture mode must never generate real desktop interruptions.
+  if (snap.mock || !notify || !Notification.isSupported()) return
   const nowWaiting = new Set(snap.agents.filter((a) => a.state === 'waiting').map((a) => a.id))
   if (win && !win.isVisible()) {
     for (const a of snap.agents) {
@@ -292,12 +533,97 @@ function notifyTransitions(snap: StatusSnapshot): void {
           title: `${a.project} needs input`,
           body: a.question ?? 'Waiting for input'
         })
-        note.on('click', () => { positionNearTrayTopRight(); win?.show(); win?.focus() })
+        // Click jumps straight to that agent's terminal; fall back to the panel.
+        note.on('click', () => {
+          const ok = focusAgentById(a.id)
+          if (!ok) { positionNearTrayTopRight(); win?.show(); win?.focus() }
+        })
         note.show()
       }
     }
   }
   prevWaiting = nowWaiting
+}
+
+function focusAgentById(id: string): boolean {
+  const agent = daemon.store.snapshot().find((candidate) => candidate.id === id)
+  if (!agent) return false
+  if (agent.focusHwnd && agent.focusPid) return focusHwnd(agent.focusHwnd, agent.focusPid)
+  return agent.focusPid ? focusByPid(agent.focusPid) : false
+}
+
+// --- usage threshold alerts ---------------------------------------------------
+// Edge-triggered: notify once when a window climbs into warning/critical, reset
+// when it recovers. Mirrors the prevWaiting pattern for agent notifications.
+const SEV_RANK = { normal: 0, warning: 1, critical: 2 } as const
+type Severity = keyof typeof SEV_RANK
+const prevSeverity: Record<'session' | 'week', Severity> = { session: 'normal', week: 'normal' }
+function notifyUsageThresholds(p: PlanWindow): void {
+  for (const key of ['session', 'week'] as const) {
+    const q = p[key]
+    if (!q) continue
+    const sev: Severity = q.severity ?? 'normal'
+    if (SEV_RANK[sev] > SEV_RANK[prevSeverity[key]] && notify && Notification.isSupported()) {
+      const windowName = key === 'session' ? '5-hour' : 'weekly'
+      const resetTxt = q.resetsAt
+        ? ` · resets ${new Date(q.resetsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+        : ''
+      new Notification({
+        title: sev === 'critical' ? `${q.label} window nearly used up` : `${q.label} usage is high`,
+        body: `${Math.round(q.usedPct)}% of your ${windowName} window used${resetTxt}`
+      }).show()
+    }
+    prevSeverity[key] = sev
+  }
+}
+
+// --- burn-rate projection -------------------------------------------------------
+// Ring buffer of 5h-window samples, persisted across restarts so the slope
+// survives a relaunch. Also the future data source for usage sparklines (C3) —
+// the on-disk format stays generic: { session: [{ t, pct }, ...] }.
+const HISTORY_CAP = 90 // ~3h at the 2-min poll
+const historyFile = () => join(app.getPath('userData'), 'usage-history.json')
+let usageHistory: UsageSample[] = []
+function loadUsageHistory(): void {
+  try {
+    const raw = JSON.parse(readFileSync(historyFile(), 'utf8'))
+    if (Array.isArray(raw?.session)) {
+      usageHistory = raw.session.filter(
+        (s: UsageSample) => typeof s?.t === 'number' && typeof s?.pct === 'number'
+      )
+    }
+  } catch { /* first run */ }
+}
+function recordUsageSample(pct: number): void {
+  const last = usageHistory[usageHistory.length - 1]
+  // A meaningful drop means the 5h window reset — old samples would poison the slope.
+  if (last && pct < last.pct - 5) usageHistory = []
+  usageHistory.push({ t: Date.now(), pct })
+  if (usageHistory.length > HISTORY_CAP) usageHistory.splice(0, usageHistory.length - HISTORY_CAP)
+  try { writeFileSync(historyFile(), JSON.stringify({ session: usageHistory })) } catch { /* non-fatal */ }
+}
+/**
+ * Least-squares slope over the last 45 min of samples. Returns the ms epoch when
+ * usage is projected to hit 100% — only if that lands before the window resets.
+ */
+function projectLimit(resetsAt: number | null): number | undefined {
+  const now = Date.now()
+  const pts = usageHistory.filter((s) => s.t >= now - 45 * 60_000)
+  if (pts.length < 5 || pts[pts.length - 1].t - pts[0].t < 15 * 60_000) return undefined
+  const n = pts.length
+  const mt = pts.reduce((a, p) => a + p.t, 0) / n
+  const mp = pts.reduce((a, p) => a + p.pct, 0) / n
+  let num = 0
+  let den = 0
+  for (const p of pts) { num += (p.t - mt) * (p.pct - mp); den += (p.t - mt) ** 2 }
+  if (den === 0) return undefined
+  const slope = num / den // pct per ms
+  if (slope <= 0) return undefined
+  const latest = pts[pts.length - 1]
+  const eta = latest.t + (100 - latest.pct) / slope
+  if (eta <= now) return undefined
+  if (resetsAt !== null && eta >= resetsAt) return undefined // window resets first
+  return Math.round(eta)
 }
 
 let usageLoaded = false
@@ -313,10 +639,15 @@ async function refreshWindows(): Promise<void> {
   const rateLimited = next.note === 'HTTP 429'
   const terminal = next.note === 'auth expired' || next.note === 'not connected'
   if (next.available) {
+    if (next.session) {
+      recordUsageSample(next.session.usedPct)
+      next.projectedLimitAt = projectLimit(next.session.resetsAt)
+    }
     personal = next
     usageLoaded = true
     usageBackoffMs = USAGE_POLL_MS // recovered — reset backoff
     usageBackoffUntil = 0
+    notifyUsageThresholds(next)
   } else if (rateLimited) {
     // Back off up to 10 min. Keep the last-good meter if we have one; only show a
     // note before the first successful load so it's not a permanent "Checking…".
@@ -332,9 +663,88 @@ async function refreshWindows(): Promise<void> {
   // else: keep the last-good value through transient blips after a good load
 }
 
+let codexWindowLoaded = false
+async function refreshCodexWindow(): Promise<void> {
+  if (mockMode) return
+  const next = await fetchCodexWindow('Codex', readCodexAuth())
+  const terminal = next.note === 'auth expired' || next.note === 'not connected'
+  if (next.available) {
+    codexPersonal = next
+    codexWindowLoaded = true
+  } else if (terminal || !codexWindowLoaded) {
+    codexPersonal = next
+  }
+  // Preserve the last-good window through transient HTTP/network failures.
+}
+
 async function refreshApi(): Promise<void> {
   if (mockMode || !ADMIN_KEY) return
-  api = await fetchApiUsage(ADMIN_KEY)
+  api = await fetchApiUsage(ADMIN_KEY, { label: ORG_LABEL, dailyBudgetUsd: config.dailyBudgetUsd })
+}
+
+function codexTokensCost(tokens: { inputTokens: number; cachedInputTokens: number; outputTokens: number }, model: string): number | undefined {
+  return estimateCostUsd({
+    input: Math.max(0, tokens.inputTokens - tokens.cachedInputTokens),
+    cacheRead: tokens.cachedInputTokens,
+    output: tokens.outputTokens
+  }, model, 'codex')
+}
+
+function codexDayTotals(day: Awaited<ReturnType<typeof scanCodexUsage>>['byDay'][number]): ProviderUsageTotals {
+  let costUsd = 0
+  let valueComplete = true
+  const byModel = day.byModel.map((model) => {
+    const cost = codexTokensCost(model, model.model)
+    if (cost === undefined) valueComplete = false
+    return { model: model.model, tokensOut: model.outputTokens, costUsd: cost ?? 0, valueComplete: cost !== undefined }
+  })
+  costUsd = byModel.reduce((sum, model) => sum + model.costUsd, 0)
+  const byProject = day.byProject.map((project) => {
+    const buckets = day.byProjectModel.filter((bucket) => bucket.project === project.project)
+    const costs = buckets.map((bucket) => codexTokensCost(bucket, bucket.model))
+    const complete = costs.every((cost) => cost !== undefined)
+    const projectCost = costs.reduce<number>((sum, cost) => sum + (cost ?? 0), 0)
+    return {
+      project: project.project,
+      tokensOut: project.outputTokens,
+      costUsd: projectCost,
+      valueComplete: complete
+    }
+  })
+  return { tokensOut: day.outputTokens, costUsd, valueComplete, byProject, byModel }
+}
+
+async function refreshCodexUsage(): Promise<void> {
+  if (mockMode) return
+  if (codexRefresh) return codexRefresh
+  codexRefresh = (async () => {
+    const result = await scanCodexUsage()
+    codexRateLimits = result.rateLimits
+    if (result.schemaDrift) {
+      codexUsageNote = 'Local usage schema changed; live monitoring is still active.'
+      codexToday = { tokensOut: 0, costUsd: 0, valueComplete: false, byProject: [], byModel: [] }
+      // Keep the last verified seven-day ledger for history sync. Replacing it
+      // with an empty map would make the next Claude-only flush overwrite
+      // persisted Codex provider totals after a rollout-schema change.
+      return
+    }
+    codexUsageNote = undefined
+    codexDays = new Map(result.byDay.map((day) => [day.date, codexDayTotals(day)]))
+    codexToday = codexDays.get(localDay()) ?? { tokensOut: 0, costUsd: 0, valueComplete: true, byProject: [], byModel: [] }
+  })().catch((error) => {
+    codexUsageNote = `Codex usage unavailable: ${error instanceof Error ? error.message : String(error)}`
+  }).finally(() => { codexRefresh = null })
+  return codexRefresh
+}
+
+async function getUsageInsights(): Promise<UsageInsights> {
+  if (mockMode) return mockUsageInsights()
+  if (insightsCache && Date.now() - insightsCache.generatedAt < 5 * 60_000) return insightsCache
+  if (insightsRefresh) return insightsRefresh
+  insightsRefresh = scanUsageInsights({ claudeRoot: config.transcriptDir })
+    .then((value) => (insightsCache = value))
+    .finally(() => { insightsRefresh = null })
+  return insightsRefresh
 }
 
 // Auto-update from the public release feed (packaged builds only). Downloads in
@@ -362,16 +772,76 @@ function settingsView() {
     mock: mockMode,
     hasAdminKey: !!ADMIN_KEY,
     port: PORT,
-    version: app.getVersion()
+    version: app.getVersion(),
+    providers: buildSnapshot().providers,
+    historySync: history.status()
   }
 }
 
 function registerIpc(): void {
   ipcMain.handle('status:get', () => buildSnapshot())
-  ipcMain.handle('mock:toggle', (_e, on: boolean) => { mockMode = on; pushStatus(); return mockMode })
-  ipcMain.handle('mock:state', () => mockMode)
   ipcMain.handle('settings:get', () => settingsView())
-  ipcMain.handle('settings:set', (_e, patch: Partial<{ hotkey: string; notifications: boolean; launchAtLogin: boolean; mock: boolean }>) => {
+  ipcMain.handle('hooks:manage', async (_e, provider: ProviderId, action: string) => {
+    if ((provider !== 'claude' && provider !== 'codex') || !['install', 'repair', 'remove', 'status'].includes(action)) {
+      throw new Error('Invalid hook operation')
+    }
+    const script = app.isPackaged ? join(process.resourcesPath, 'hooks', 'install.mjs') : join(__dirname, '../../hooks/install.mjs')
+    const args = [script, '--provider', provider, ...(action === 'install' ? [] : [`--${action}`])]
+    let bridgePath: string
+    try {
+      bridgePath = action === 'install' || action === 'repair' ? stagePackagedHookRuntime() : hookBridgePath()
+    } catch (error) {
+      return { ok: false, message: `Could not stage hook runtime: ${error instanceof Error ? error.message : String(error)}`, settings: settingsView() }
+    }
+    const result = await new Promise<{ ok: boolean; message: string }>((resolve) => {
+      const child = spawn(process.execPath, args, {
+        windowsHide: true,
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', TM_AGENT_MONITOR_BRIDGE_PATH: bridgePath },
+        stdio: ['ignore', 'pipe', 'pipe']
+      })
+      let output = ''
+      let settled = false
+      const finish = (value: { ok: boolean; message: string }) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(value)
+      }
+      const append = (data: unknown) => { if (output.length < 65_536) output += String(data).slice(0, 65_536 - output.length) }
+      child.stdout?.on('data', append)
+      child.stderr?.on('data', append)
+      child.on('error', (error) => finish({ ok: false, message: error.message }))
+      child.on('close', (code) => finish({ ok: code === 0, message: output.trim() || `installer exited ${code}` }))
+      const timer = setTimeout(() => {
+        child.kill()
+        finish({ ok: false, message: 'Hook operation timed out.' })
+      }, 5_000)
+    })
+    if (result.ok && provider === 'codex') {
+      if (action === 'install' || action === 'repair') {
+        settings.codexHookTrustVerified = false
+        trustPendingSince.set('codex', Date.now())
+      } else if (action === 'remove') {
+        delete settings.codexHookTrustVerified
+        trustPendingSince.delete('codex')
+      }
+      saveSettings()
+    }
+    return { ...result, settings: settingsView() }
+  })
+  // Codex intentionally owns the trust decision. We can guide the user to its
+  // interactive reviewer, but must not edit or spoof Codex's persisted trust.
+  ipcMain.handle('hooks:review-codex-trust', () => {
+    clipboard.writeText('/hooks')
+    openTerminal(undefined, 'codex', 'hook-trust')
+    return {
+      ok: true,
+      message: 'Opened Codex and copied /hooks. Paste it, then trust the TaylorMade Agent Monitor hooks.'
+    }
+  })
+  ipcMain.handle('settings:set', (_e, rawPatch: AppSettingsPatch) => {
+    const patch = validateMutableSettingsPatch(rawPatch)
+    if (!patch) throw new Error('Invalid settings patch')
     if (patch.hotkey && patch.hotkey !== hotkeyPref) {
       hotkeyPref = patch.hotkey
       settings.hotkey = patch.hotkey
@@ -379,21 +849,39 @@ function registerIpc(): void {
       registerHotkey()
     }
     if (typeof patch.notifications === 'boolean') { notify = patch.notifications; settings.notifications = patch.notifications }
-    if (typeof patch.mock === 'boolean') { mockMode = patch.mock; settings.mock = patch.mock; pushStatus() }
+    if (typeof patch.mock === 'boolean' && !mockForced) { mockMode = patch.mock; settings.mock = patch.mock; pushStatus() }
     if (typeof patch.launchAtLogin === 'boolean') app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin, args: ['--hidden'] })
     saveSettings()
     return settingsView()
   })
-  ipcMain.on('agent:focus', (_e, _id: string, hwnd?: string, pid?: number) => {
-    if (!hwnd && !pid) return // nothing to focus (e.g. mock data)
-    // Bring the terminal to the foreground but keep the panel open. The panel is
-    // sticky now — it only closes on the hotkey (or tray / Escape), never a click.
-    const ok = hwnd ? focusHwnd(hwnd) : false
-    if (!ok && pid) focusByPid(pid)
+  ipcMain.on('agent:focus', (_e, id: string) => {
+    if (typeof id !== 'string' || id.length > 5_000) return
+    focusAgentById(id)
   })
-  ipcMain.on('path:open', (_e, p: string) => { if (p) shell.openPath(p) })
-  ipcMain.on('text:copy', (_e, t: string) => { if (t) clipboard.writeText(t) })
-  ipcMain.on('terminal:open', (_e, cwd?: string) => openTerminal(cwd))
+  ipcMain.on('path:open', (_e, p: string) => { if (typeof p === 'string' && p.length <= 32_767 && existsSync(p)) void shell.openPath(p) })
+  ipcMain.on('projects:open', () => {
+    try { mkdirSync(NEW_PROJECT_DIR, { recursive: true }) } catch { /* exists */ }
+    shell.openPath(NEW_PROJECT_DIR)
+  })
+  ipcMain.on('config:open', () => shell.openPath(app.getPath('userData')))
+  ipcMain.handle('update:check', async (): Promise<string> => {
+    if (!app.isPackaged) return 'dev build — auto-update runs in the installed app only'
+    if (updateReady) return `v${updateReady} downloaded — restart to install`
+    try {
+      const r = await autoUpdater.checkForUpdates()
+      const v = r?.updateInfo?.version
+      if (v && v !== app.getVersion()) return `v${v} found — downloading in the background`
+      return `up to date (v${app.getVersion()})`
+    } catch (e) {
+      return `check failed: ${(e as Error).message}`
+    }
+  })
+  ipcMain.on('text:copy', (_e, t: string) => { if (typeof t === 'string' && t.length <= 100_000) clipboard.writeText(t) })
+  ipcMain.on('terminal:open', (_e, cwd?: string, provider?: ProviderId) => {
+    if (cwd !== undefined && (typeof cwd !== 'string' || cwd.length > 32_767)) return
+    if (provider !== undefined && provider !== 'claude' && provider !== 'codex') return
+    openTerminal(cwd, provider)
+  })
   ipcMain.on('cursor:open', () => openInCursor())
   ipcMain.handle('project:create', (_e, rawName: string) => {
     const name = sanitizeProjectName(rawName)
@@ -407,9 +895,22 @@ function registerIpc(): void {
       return { ok: false, error: (e as Error).message }
     }
   })
+  ipcMain.handle('history:recent', async () => {
+    if (mockMode) return mockHistory()
+    // Mongo history first, then overlay the locally-retained days — LocalUsage
+    // is 30s fresh vs the 5-min flush cadence, so today reads live.
+    const byDate = new Map((await history.recentDays(30)).map((d) => [d.date, d]))
+    const liveDates = new Set([...localUsage.retainedDays(), ...codexDays.keys()])
+    for (const day of liveDates) {
+      const live = liveHistoryDay(day, byDate.get(day))
+      if (live) byDate.set(day, live)
+    }
+    return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
+  })
+  ipcMain.handle('usage:insights', () => getUsageInsights())
   ipcMain.on('window:hide', () => win?.hide())
   ipcMain.on('window:content-height', (_e, h: number) => {
-    if (!win || win.isDestroyed()) return
+    if (!win || win.isDestroyed() || !Number.isFinite(h)) return
     const b = win.getBounds()
     const disp = screen.getDisplayNearestPoint({ x: b.x, y: b.y })
     const max = disp.workArea.height - 24
@@ -430,7 +931,7 @@ function buildTrayMenu(): Menu {
     { label: 'Mock data', type: 'checkbox', checked: mockMode, click: (i) => { mockMode = i.checked; pushStatus() } }
   ]
   if (updateReady) {
-    items.push({ type: 'separator' }, { label: `Restart to update (v${updateReady})`, click: () => autoUpdater.quitAndInstall() })
+    items.push({ type: 'separator' }, { label: `Restart to update (v${updateReady})`, click: () => { installingUpdate = true; autoUpdater.quitAndInstall() } })
   }
   items.push({ type: 'separator' }, { label: 'Quit', click: () => app.quit() })
   return Menu.buildFromTemplate(items)
@@ -454,14 +955,24 @@ if (!gotLock) {
     if (process.platform === 'win32') app.setAppUserModelId('com.taylormade.agent-monitor')
 
     settings = loadSettings()
+    loadUsageHistory()
     if (settings.hotkey) hotkeyPref = settings.hotkey
     if (typeof settings.notifications === 'boolean') notify = settings.notifications
-    if (typeof settings.mock === 'boolean') mockMode = settings.mock
+    if (typeof settings.mock === 'boolean' && !mockForced) mockMode = settings.mock
+
+    if (app.isPackaged) {
+      try { stagePackagedHookRuntime() }
+      catch (error) { console.error(`[hooks] runtime staging failed: ${error instanceof Error ? error.message : String(error)}`) }
+    }
+    if (providerHookState('codex').installed && settings.codexHookTrustVerified !== true) {
+      trustPendingSince.set('codex', Date.now())
+    }
 
     if (process.env.CLAUDE_WATCH_SELFTEST) console.log(`[selftest] win32 native focus available: ${winAvailable()}`)
 
-    daemon = new Daemon(PORT)
-    await daemon.start()
+    daemon = new Daemon(PORT, { token: bridgeToken() })
+    const daemonStarted = await daemon.start()
+    if (daemonStarted) publishEndpoint()
 
     createWindow()
     registerHotkey()
@@ -471,17 +982,22 @@ if (!gotLock) {
 
     // Subscription windows (real, OAuth), API usage (admin), and the local
     // today-tokens scan all refresh in the background on their own cadence.
-    await Promise.all([localUsage.refresh(), refreshWindows(), refreshApi()])
+    await Promise.all([localUsage.refresh(), refreshWindows(), refreshCodexWindow(), refreshApi(), refreshCodexUsage()])
     if (process.env.CLAUDE_WATCH_SELFTEST)
       console.log(
         `[selftest] personal=${personal.available} 5h=${personal.session?.usedPct ?? '-'}% wk=${personal.week?.usedPct ?? '-'}% | ` +
         `api=${api.available} | todayOut=${localUsage.todayTokensOut() ?? '-'}`
       )
     setInterval(refreshWindows, USAGE_POLL_MS)
+    setInterval(refreshCodexWindow, CODEX_USAGE_POLL_MS)
     setInterval(refreshApi, 60_000)
-    setInterval(() => localUsage.refresh(), 30_000)
+    setInterval(() => { void localUsage.refresh() }, 30_000)
+    setInterval(() => { void refreshCodexUsage() }, 30_000)
     setInterval(pushStatus, DEFAULTS.pollMs)
     pushStatus()
+    // Daily-history sync: first flush now that the initial scan is done, then 5-min cadence.
+    void flushHistory()
+    setInterval(() => { void flushHistory() }, 5 * 60_000)
 
     // Show once on first launch so it's discoverable — unless started at login.
     const startedHidden = process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAtLogin
@@ -495,6 +1011,14 @@ if (!gotLock) {
       const out = process.env.CLAUDE_WATCH_CAPTURE
       setTimeout(async () => {
         try {
+          if (process.env.CLAUDE_WATCH_CAPTURE_VIEW?.startsWith('insights')) {
+            await win!.webContents.executeJavaScript(`document.querySelector('[aria-label="Open Usage Insights"]')?.click()`)
+            await new Promise((resolve) => setTimeout(resolve, 250))
+            if (process.env.CLAUDE_WATCH_CAPTURE_VIEW === 'insights-week') {
+              await win!.webContents.executeJavaScript(`document.querySelector('#insights-week-tab')?.click()`)
+            }
+            await new Promise((resolve) => setTimeout(resolve, 250))
+          }
           const img = await win!.webContents.capturePage()
           writeFileSync(out, img.toPNG())
           console.log(`[capture] wrote ${out}`)
@@ -504,6 +1028,29 @@ if (!gotLock) {
         app.quit()
       }, 1600)
     }
+  })
+
+  let finalizingQuit = false
+  let quitReady = false
+  app.on('before-quit', (event) => {
+    if (quitReady) return
+    event.preventDefault()
+    if (finalizingQuit) return
+    finalizingQuit = true
+    const timeout = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+    void (async () => {
+      try {
+        await Promise.race([Promise.all([localUsage.refresh(), refreshCodexUsage()]), timeout(5_000)])
+        await Promise.race([flushHistory(), timeout(1_500)])
+        await Promise.race([history.close(), timeout(500)])
+      } catch (error) {
+        console.error(`[shutdown] final flush failed: ${error instanceof Error ? error.message : String(error)}`)
+      } finally {
+        quitReady = true
+        if (installingUpdate) autoUpdater.quitAndInstall()
+        else app.quit()
+      }
+    })()
   })
 
   app.on('will-quit', () => {
