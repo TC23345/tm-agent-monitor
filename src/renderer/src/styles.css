@@ -103,59 +103,15 @@ html, body, #root {
 .needs--active { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--st-question); }
 .needs:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* ---- usage (collapsible) ---- */
-.usage { margin-bottom: 2px; }
-.usage-toggle {
-  -webkit-app-region: no-drag;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  background: none;
-  border: none;
-  padding: 5px 4px;
-  border-radius: 8px;
-  cursor: pointer;
-  font: inherit;
-  transition: background 0.12s ease;
-}
-.usage-toggle:hover { background: var(--elev); }
-.usage-chevron { width: 15px; height: 15px; color: var(--faint); flex: 0 0 auto; }
-.usage-title { font-size: 11px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted); }
-.usage-summary { font-size: 12px; color: var(--faint); margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.usage-body { padding: 14px 4px 2px; }
+/* ---- usage: limit bars only, one stack per provider, nothing collapsible.
+   Token counts and spend moved to the spend view so this stays scannable. ---- */
+.usage { margin-bottom: 2px; padding-top: 4px; }
 
-/* Provider groups: Claude and Codex are separated so their zones read as two
-   comparable stacks rather than one flat list. The badge lives here, not on
-   each zone, since the group already establishes the provider. */
-.uprov { margin-bottom: 18px; }
-.uprov:last-child { margin-bottom: 2px; }
-.uprov + .uprov { border-top: 1px solid var(--hairline); padding-top: 16px; }
-.uprov-toggle {
-  -webkit-app-region: no-drag;
-  display: flex; align-items: center; gap: 8px;
-  width: 100%; background: none; border: none; padding: 0; margin: 0 0 12px;
-  cursor: pointer; text-align: left; color: inherit;
-}
-.uprov-chevron { width: 14px; height: 14px; color: var(--faint); flex: 0 0 auto; }
-.uprov-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--text); }
-.uprov-toggle:hover .uprov-label { color: var(--accent-bright); }
-.uprov-summary { font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--faint); margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.uprov-body { padding-left: 3px; }
-
-.uzone { margin-bottom: 16px; }
-.uzone:last-child { margin-bottom: 2px; }
-.uzone-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--faint); margin: 0 0 9px; }
-.uzone-toggle {
-  -webkit-app-region: no-drag;
-  display: flex; align-items: center; gap: 7px;
-  width: 100%; background: none; border: none; padding: 0; margin: 0 0 9px;
-  cursor: pointer; text-align: left; color: inherit;
-}
-.uzone-toggle .uzone-label { margin: 0; }
-.uzone-toggle:hover .uzone-label { color: var(--muted); }
-.uzone-chevron { width: 13px; height: 13px; color: var(--faint); flex: 0 0 auto; }
-.uzone-summary { font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--faint); margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ulim { margin-bottom: 16px; }
+.ulim:last-child { margin-bottom: 2px; }
+.ulim + .ulim { border-top: 1px solid var(--hairline); padding-top: 14px; }
+.ulim-head { display: flex; align-items: center; gap: 8px; margin: 0 0 11px; }
+.ulim-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--text); }
 .uzone-note { font-size: 13px; color: var(--muted); padding: 2px 0 4px; }
 .provider-badge {
   display: inline-flex; align-items: center; justify-content: center;
@@ -185,15 +141,23 @@ html, body, #root {
 .pace.sev-warning { color: var(--st-permission); }
 .pace.sev-critical { color: var(--st-question); }
 
-.today { display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px; }
-.today-label { font-size: 13px; font-weight: 600; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
-.today-val { font-size: 13px; font-weight: 600; color: var(--text); }
-/* Today row as a breakdown toggle (button reset, same look as the plain row). */
-.today--toggle { width: 100%; background: none; border: none; padding: 0; font: inherit; cursor: pointer; }
-.today--toggle:disabled { cursor: default; }
-.today--toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.today-chevron { width: 13px; height: 13px; color: var(--faint); }
-.today-projects { margin: 4px 0 2px 14px; border-left: 1px solid var(--hairline); padding-left: 10px; }
+/* ---- spend view: today's tokens and value, per provider and project ---- */
+.spend { padding: 2px 0 4px; }
+.spend-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 10px; margin-bottom: 14px; border-bottom: 1px solid var(--hairline); }
+.spend-head-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--muted); }
+.spend-head-total { font-size: 13px; font-weight: 600; color: var(--text); text-align: right; }
+.spend-prov { margin-bottom: 18px; }
+.spend-prov-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.spend-prov-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--text); }
+.spend-zone { margin-bottom: 12px; }
+.spend-zone:last-child { margin-bottom: 0; }
+.spend-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.spend-name { font-size: 10.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--faint); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spend-total { font-size: 13px; font-weight: 600; color: var(--text); text-align: right; white-space: nowrap; }
+.spend-foot { margin: 18px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--faint); }
+.spend-star { color: var(--muted); font-weight: 700; }
+
+.today-projects { margin: 6px 0 2px 0; border-left: 1px solid var(--hairline); padding-left: 10px; }
 .tproj { display: flex; align-items: baseline; gap: 10px; padding: 2px 0; font-size: 12px; }
 .tproj-name { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tproj-tokens { color: var(--muted); font-weight: 600; }

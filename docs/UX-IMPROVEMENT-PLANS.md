@@ -1,9 +1,16 @@
 # TaylorMade Agent Monitor — UX/UX Improvement Plans (for approval)
 
-> Status (provider-neutral iteration): window auto-sizing, threshold alerts, per-session
-> tokens, loading/offline states, nested indent rails, bulk collapse, settings,
+> Status (provider-neutral iteration): threshold alerts, per-session tokens,
+> loading/offline states, nested indent rails, bulk collapse, settings,
 > launch-at-login, auto-update, and provider-aware connection states are implemented.
 > Remaining items below are backlog, not descriptions of current gaps.
+>
+> **Superseded:** window auto-sizing (§B) shipped and was then removed. The panel is
+> now a fixed full-height left sidebar, so there is no dead gap to size away and no
+> content-height IPC. Do not reimplement §B.
+>
+> Usage was also split: the top block is limit bars only (Claude and Codex separately)
+> and token/spend detail moved to its own footer view.
 
 Synthesized from three parallel design reviews (visual design · interaction/IA · feature/utility).
 Effort: **S** ≈ ½–1 day · **M** ≈ 2–4 days · **L** ≈ 1 week+.
@@ -18,10 +25,10 @@ currently uses an **orange** accent, Segoe UI, rounded corners + shadows. Decide
 - **A2 — Interface font → Geist Mono** (headings/labels), Geist for body. **M**
 - **A3 — Sharper, terminal-flat aesthetic** (reduce radius, lean on 1px hairlines, less shadow). **M**
 
-## B. Window auto-sizing to content (consensus #1)
-Replace the fixed `height: 680` with content-driven sizing (ResizeObserver → IPC → `setContentSize`,
-clamped to the display, grow downward, agents region scrolls past the max). Kills the dead gap when
-few agents are present. **M** · risk: transparent-resize flicker / multi-DPI math.
+## B. Window auto-sizing to content (consensus #1) — ~~shipped~~, then **superseded**
+Originally: replace the fixed `height: 680` with content-driven sizing (ResizeObserver → IPC →
+`setContentSize`). This shipped, then was removed when the panel became a fixed full-height left
+sidebar — the sidebar has no dead gap to collapse, and the agents list absorbs overflow instead.
 
 ## C. Usage safety (high "saves your day" value; data already exists)
 - **C1 — Threshold alerts** when the 5h/weekly window crosses warning→critical (edge-triggered notify
@@ -34,8 +41,9 @@ few agents are present. **M** · risk: transparent-resize flicker / multi-DPI ma
 - **D1 — In-app settings panel** (hotkey rebind, notifications on/off + per-event, mock toggle, admin-key
   status) backed by `userData/settings.json`. Replaces env-only config + the misleading gear. **L**
 - **D2 — Launch at login** (`setLoginItemSettings`, start hidden). **S**
-- **D3 — Real auto-update** (`electron-updater` + a publish feed; build already emits `latest.yml`).
-  Lock appId first (done). Signing caveat. **M**
+- ~~**D3 — Real auto-update**~~ — shipped. `electron-updater` reads `latest.yml` from GitHub
+  Releases; see the publishing section in `README.md` for the release race that can silently
+  omit that feed. Builds remain unsigned.
 
 ## E. Interaction & accessibility
 - **E1 — Loading / empty / offline states** (stop showing "No active agents" before first data loads;
@@ -69,6 +77,10 @@ few agents are present. **M** · risk: transparent-resize flicker / multi-DPI ma
 ---
 
 ### Consensus "do these first"
-1. **B** window auto-sizing  2. **C1** threshold alerts  3. **C2** per-session tokens
-4. **E1** loading/empty/offline states  5. **F2 + F3** contrast + color semantics
-6. **A1** brand cyan accent (cohesion with the new logo)
+Recorded at review time. **B**, **C1**, **C2**, and **E1** have since been resolved (B by
+superseding it with the fixed sidebar), leaving the visual-cohesion items as the live backlog:
+
+1. ~~**B** window auto-sizing~~ · ~~**C1** threshold alerts~~ · ~~**C2** per-session tokens~~
+2. ~~**E1** loading/empty/offline states~~
+3. **F2 + F3** contrast + color semantics
+4. **A1** brand cyan accent (cohesion with the new logo)

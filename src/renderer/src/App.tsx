@@ -9,7 +9,8 @@ import { Settings } from './Icons'
 import { SettingsPanel } from './SettingsPanel'
 import { COLLAPSE_ALL_EVENT } from './useCollapse'
 import { UsageInsightsView } from './UsageInsightsView'
-import { Folder, FolderOpen, FolderPlus, ChevronsDownUp, ChevronsUpDown, ChartColumn } from 'lucide-react'
+import { SpendView } from './SpendView'
+import { Folder, FolderOpen, FolderPlus, ChevronsDownUp, ChevronsUpDown, ChartColumn, Coins } from 'lucide-react'
 import logo from './assets/logo.png'
 
 export function App() {
@@ -21,7 +22,7 @@ export function App() {
   const [folderMenu, setFolderMenu] = useState(false)
   const [waitingOnly, setWaitingOnly] = useState(false)
   const [allCollapsed, setAllCollapsed] = useState(false)
-  const [view, setView] = useState<'agents' | 'insights'>('agents')
+  const [view, setView] = useState<'agents' | 'insights' | 'spend'>('agents')
 
   useEffect(() => {
     window.watch.getStatus().then(setSnap)
@@ -43,7 +44,7 @@ export function App() {
       if (menu) setMenu(null)
       else if (folderMenu) setFolderMenu(false)
       else if (newProjectOpen) setNewProjectOpen(false)
-      else if (view === 'insights') setView('agents')
+      else if (view !== 'agents') setView('agents')
       else if (!settingsOpen) window.watch.hide()
     }
     window.addEventListener('keydown', onKey)
@@ -103,6 +104,8 @@ export function App() {
         <div className="agents-inner">
           {view === 'insights' ? (
             <UsageInsightsView />
+          ) : view === 'spend' ? (
+            snap ? <SpendView usage={snap.usage} now={now} /> : <div className="empty">Connecting…</div>
           ) : !snap ? (
             <div className="empty">Connecting…</div>
           ) : groups.length === 0 ? (
@@ -141,6 +144,14 @@ export function App() {
                 : <ChevronsDownUp className="gear" strokeWidth={2} />}
             </button>
           )}
+          <button
+            className={`iconbtn ${view === 'spend' ? 'iconbtn--active' : ''}`}
+            aria-label={view === 'spend' ? 'Back to agent monitor' : 'Open today’s usage and spend'}
+            title={view === 'spend' ? 'Back to agent monitor' : 'Today’s tokens and value — per provider and project'}
+            onClick={() => setView((v) => (v === 'spend' ? 'agents' : 'spend'))}
+          >
+            <Coins className="gear" strokeWidth={2} />
+          </button>
           <button
             className={`iconbtn ${view === 'insights' ? 'iconbtn--active' : ''}`}
             aria-label={view === 'insights' ? 'Back to agent monitor' : 'Open Usage Insights'}

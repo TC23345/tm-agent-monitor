@@ -1,11 +1,15 @@
 # TaylorMade Agent Monitor (Windows)
 
-A hotkey-summoned Electron panel for local **Claude Code and Codex** work. It groups live roots by project, nests subagents, shows provider health and local usage, and keeps optional daily history. The default toggle is **Ctrl+Alt+W**.
+A hotkey-summoned Electron sidebar for local **Claude Code and Codex** work. It groups live roots by project, nests subagents, shows provider health and local usage, and keeps optional daily history. The default toggle is **Ctrl+Alt+W**.
+
+The panel opens as a full-height sidebar pinned to the left edge of whichever display the cursor is on. It is sticky — it stays open until the hotkey or tray toggles it closed, a terminal is focused, or `Escape` is pressed.
 
 ## Current capabilities
 
 - Provider-neutral live lifecycle model with collision-safe identities (`provider:sessionId[:actorId]`).
 - Claude and Codex roots grouped together by canonical project path, with provider badges and expandable child rows.
+- Three views switched from the footer: **agents** (live sessions, with limit bars above), **spend** (today's tokens and value per provider and project), and **insights** (local usage patterns).
+- The usage block at the top shows limit bars only — Claude and Codex separately — so it stays scannable; token counts and spend live in the spend view.
 - Per-provider install/reporting/trust health. Codex user hooks require an explicit review in `/hooks`.
 - Claude subscription windows, deduplicated local Claude transcript totals, best-effort isolated Codex rollout totals, and actual Anthropic organization API spend.
 - Provider/model-specific API-equivalent value. Unknown models retain tokens and mark combined value partial; estimates are not subscription bills.
@@ -102,6 +106,28 @@ Every distribution/publish command regenerates `build/icon.ico` offline from tra
 ```powershell
 Start-Process (Get-ChildItem .\dist\tm-agent-monitor-*-x64.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
 ```
+
+Add `/S` to install silently without the wizard.
+
+### Publishing a release
+
+Auto-update reads `latest.yml` from GitHub Releases, so the repo must stay public.
+
+```powershell
+$env:GH_TOKEN = gh auth token
+git tag --no-sign v0.0.0; git push origin v0.0.0   # tags here are lightweight
+npm run publish
+```
+
+The tag **and** the release must exist before publishing. electron-builder starts one publisher per artifact and they race to create the release; the loser gets `422`, and that abort skips the `latest.yml` upload — producing a release with installers but no update feed, which clients see as a 404. If that happens, simply run `npm run publish` again against the now-existing release: it uploads all four assets and overwrites the binaries so the feed and the exe stay consistent.
+
+Verify against GitHub rather than the exit code (a pipe masks npm's status):
+
+```powershell
+gh release view v0.0.0 --json assets    # expect latest.yml, both .exe, and .blockmap
+```
+
+`latest.yml`'s `size:` must equal the hosted `*-x64.exe` asset size, or the updater downloads the installer and fails its sha512 check.
 
 ```powershell
 npm run typecheck

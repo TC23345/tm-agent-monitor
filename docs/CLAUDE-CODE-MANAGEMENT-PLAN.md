@@ -16,7 +16,7 @@
 > shapes/flags as "confirm first."
 
 **Target user:** single owner — a personal "Claude Code administration & literacy" dashboard.
-**Current app:** Electron tray monitor showing live Claude Code agents (via hooks) + token usage.
+**Current app:** Electron tray/sidebar monitor showing live Claude Code **and Codex** agents (via hooks) + token usage.
 
 ---
 

@@ -4,7 +4,7 @@ Repository guidance for every coding agent.
 
 ## What this is
 
-TaylorMade Agent Monitor is a Windows-only Electron + TypeScript + React tray panel for local Claude Code and Codex activity. It uses stable lifecycle hooks for live state, provider-qualified identities, provider-specific usage/value, optional MongoDB history, and native Win32 focus.
+TaylorMade Agent Monitor is a Windows-only Electron + TypeScript + React tray app for local Claude Code and Codex activity, presented as a hotkey-summoned full-height left sidebar. It uses stable lifecycle hooks for live state, provider-qualified identities, provider-specific usage/value, optional MongoDB history, and native Win32 focus.
 
 ## Commands
 
@@ -15,6 +15,8 @@ npm run typecheck
 npm test
 npm run build
 npm run dist:dir
+npm run dist
+npm run publish
 npm run hooks:install
 npm run hooks:codex
 npm run icons
@@ -42,7 +44,8 @@ AgentStore + usage + history -> StatusSnapshot -> preload IPC -> React
 - `src/main/usageCore.mjs` parses Anthropic Admin usage/cost pagination, including decimal-string cents and UTC buckets.
 - `src/main/history.ts` serializes Mongo operations, writes schema v2 `byProvider`, reads legacy documents as Claude, attributes API spend to its exact UTC date, and is optional/failure-isolated.
 - `src/native/win32.mjs` loads system DLLs through koffi. Main resolves focus by agent ID and passes the stored PID so HWND ownership is checked before foreground calls.
-- `src/renderer` groups roots by canonical cwd, nests children, renders provider badges/health/usage, and labels trends against real local calendar dates.
+- `src/renderer` groups roots by canonical cwd, nests children, renders provider badges/health/usage, and labels trends against real local calendar dates. It has three exclusive views — agents, spend, insights — switched from the footer; `Escape` returns any non-agent view to agents.
+- `src/renderer/src/usageShared.tsx` owns provider grouping for usage: fixed provider order, accounts sorted plan → local → API spend, and the shared quota bar. `UsageDashboard` renders limit bars only; `SpendView` owns token counts, per-project breakdowns, and budget/actual spend.
 
 ## Configuration
 
@@ -67,5 +70,8 @@ The daemon publishes `%APPDATA%/taylormade-agent-monitor/hook-endpoint.json` by 
 - The renderer is sandboxed. Expose the smallest preload API and runtime-validate mutable IPC.
 - `koffi` remains `asarUnpack`'d. Packaged hook resources and native focus resources must stay in `electron-builder.yml`.
 - Icon generation is offline and deterministic: `scripts/build-icon.mjs` derives ignored `build/icon.ico` from tracked `resources/icon.png`. Distribution commands run it automatically.
+- The panel is a fixed full-height sidebar pinned to the left edge of the cursor's display work area (`positionSidebarLeft`). Height no longer tracks content: there is deliberately no content-height IPC, no `setContentSize` call, and no renderer `ResizeObserver`. The `.app` card fills the window and `.agents` absorbs overflow. Do not reintroduce content-driven window sizing.
+- Releasing requires the tag **and** the GitHub release to exist before `npm run publish`. electron-builder starts one publisher per artifact; they race to create the release, the loser returns 422, and that abort skips the `latest.yml` upload — leaving installers with no update feed. Re-running publish against an existing release uploads all four assets and overwrites the binaries so feed and exe stay consistent. Verify with `gh release view <tag> --json assets`; never trust the exit code through a pipe.
+- Tags in this repo are lightweight. `tag.gpgsign=true` makes even a bare `git tag` fail on a passphrase-protected key, so use `git tag --no-sign`.
 - MongoDB absence/failure must never block live monitoring. Quit performs a bounded awaited final flush.
 - Verification commands may create ignored output, but must not modify tracked files.
