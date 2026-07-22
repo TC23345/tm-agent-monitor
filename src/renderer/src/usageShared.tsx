@@ -34,8 +34,12 @@ export function zoneLabel(label: string): string {
   return stripped.length > 0 ? stripped : label
 }
 
-export function ProviderBadge({ provider }: { provider: ProviderId }) {
-  return <span className={`provider-badge provider-badge--${provider}`}>{provider === 'claude' ? 'C' : 'X'}</span>
+// Section headings carry a provider-coloured dot rather than the C/X letter
+// badge: the heading already spells the provider out, so the letter was only
+// repeating it. Row-level badges elsewhere still use the lettered variant,
+// where there is no room to name the provider.
+export function ProviderDot({ provider }: { provider: ProviderId }) {
+  return <span className={`prov-dot prov-dot--${provider}`} aria-hidden="true" />
 }
 
 export function QuotaBar({ q, now, hint }: { q: Quota; now: number; hint?: string }) {

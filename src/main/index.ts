@@ -774,6 +774,8 @@ function setupAutoUpdate(): void {
 
 // --- IPC --------------------------------------------------------------------
 function settingsView() {
+  const userData = app.getPath('userData')
+  const home = app.getPath('home')
   return {
     hotkey: activeHotkey ?? hotkeyPref,
     notifications: notify,
@@ -783,13 +785,86 @@ function settingsView() {
     port: PORT,
     version: app.getVersion(),
     providers: buildSnapshot().providers,
-    historySync: history.status()
+    historySync: history.status(),
+    apiConfigs: [
+      { id: 'anthropic-admin', label: 'Anthropic Admin API', value: ADMIN_KEY ? 'configured' : 'not configured', detail: 'ANTHROPIC_ADMIN_KEY · organization usage and actual API spend', configured: !!ADMIN_KEY },
+      { id: 'org-label', label: 'Organization label', value: ORG_LABEL, detail: 'CLAUDE_WATCH_ORG_NAME · display name for organization spend', configured: !!config.orgLabel },
+      { id: 'daily-budget', label: 'Daily API budget', value: config.dailyBudgetUsd ? `$${config.dailyBudgetUsd.toFixed(2)}` : 'not configured', detail: 'CLAUDE_WATCH_DAILY_BUDGET_USD · adds a spend budget meter', configured: !!config.dailyBudgetUsd },
+      { id: 'mongodb', label: 'MongoDB history', value: config.mongoUri ? history.status().state : 'not configured', detail: 'MONGODB_URI · optional durable daily usage history', configured: !!config.mongoUri },
+      { id: 'claude-oauth', label: 'Claude subscription', value: readPersonalToken() ? 'connected' : 'not connected', detail: 'OAuth usage windows, including model-scoped weekly limits', configured: !!readPersonalToken() },
+      { id: 'codex-auth', label: 'Codex subscription', value: existsSync(join(home, '.codex', 'auth.json')) ? 'connected' : 'not connected', detail: 'Local Codex rate limits and usage', configured: existsSync(join(home, '.codex', 'auth.json')) }
+    ],
+    systemPaths: [
+      { id: 'config-env', label: 'API environment', path: config.configFile, detail: 'Secrets and optional service configuration', exists: existsSync(config.configFile) },
+      { id: 'settings-json', label: 'App preferences', path: settingsFile(), detail: 'Hotkey, notifications, mock mode, and Codex trust state', exists: existsSync(settingsFile()) },
+      { id: 'endpoint', label: 'Hook endpoint', path: config.endpointFile, detail: 'Daemon port and per-install bridge token', exists: existsSync(config.endpointFile) },
+      { id: 'history', label: 'Usage history cache', path: join(userData, 'usage-history.json'), detail: 'Local daily totals used when durable history is unavailable', exists: existsSync(join(userData, 'usage-history.json')) },
+      { id: 'bridge', label: 'Bridge runtime', path: packagedHookRoot(), detail: 'Stable hook scripts and native focus helper used by installed providers', exists: existsSync(packagedHookRoot()) },
+      { id: 'claude-config', label: 'Claude hook config', path: join(home, '.claude', 'settings.json'), detail: 'Claude Code lifecycle hook registrations', exists: existsSync(join(home, '.claude', 'settings.json')) },
+      { id: 'codex-config', label: 'Codex hook config', path: join(home, '.codex', 'hooks.json'), detail: 'Codex lifecycle hook registrations and trust entry point', exists: existsSync(join(home, '.codex', 'hooks.json')) }
+    ]
   }
+}
+
+async function systemDiagnostics(requested?: string) {
+  const now = Date.now()
+  const check = async (id: string, label: string, run: () => Promise<{ ok: boolean; detail: string }>) => {
+    if (requested && requested !== id) return undefined
+    try {
+      const result = await run()
+      return { id, label, state: result.ok ? 'success' as const : 'failure' as const, detail: result.detail, testedAt: now }
+    } catch (error) {
+      return { id, label, state: 'failure' as const, detail: error instanceof Error ? error.message : String(error), testedAt: now }
+    }
+  }
+  const checks = await Promise.all([
+    check('daemon', 'Local daemon', async () => {
+      if (!daemon.isConnected()) return { ok: false, detail: 'Daemon is not listening' }
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 2_000)
+      try {
+        const response = await fetch(`http://127.0.0.1:${daemon.getPort()}/health`, {
+          headers: { authorization: `Bearer ${daemon.getAuthToken()}` },
+          signal: controller.signal
+        })
+        return { ok: response.ok, detail: response.ok ? `Authenticated health check passed on port ${daemon.getPort()}` : `Health check returned HTTP ${response.status}` }
+      } finally {
+        clearTimeout(timer)
+      }
+    }),
+    check('endpoint', 'Hook endpoint file', async () => {
+      const raw = JSON.parse(readFileSync(config.endpointFile, 'utf8')) as { port?: unknown; token?: unknown }
+      const ok = raw.port === daemon.getPort() && typeof raw.token === 'string' && raw.token.length > 0
+      return { ok, detail: ok ? `Discovery file matches port ${raw.port}` : 'Discovery file is missing or does not match the daemon' }
+    }),
+    ...(['claude', 'codex'] as const).map((provider) => check(`${provider}-hooks`, `${provider === 'claude' ? 'Claude Code' : 'Codex'} hooks`, async () => {
+      const state = providerHookState(provider)
+      const reporting = daemon.getProviderLastReport(provider)
+      return { ok: state.installed && !state.needsRepair, detail: state.needsRepair ? 'Installed configuration needs repair' : !state.installed ? 'Hooks are not installed' : reporting ? `Installed; last event ${new Date(reporting).toLocaleString()}` : 'Installed; no event received yet' }
+    })),
+    check('claude-usage', 'Claude usage connection', async () => {
+      const result = await fetchWindow('You · Max', readPersonalToken())
+      return { ok: result.available, detail: result.available ? 'OAuth usage endpoint responded successfully' : result.note ?? 'Usage endpoint unavailable' }
+    }),
+    check('codex-auth', 'Codex local auth', async () => {
+      const path = join(app.getPath('home'), '.codex', 'auth.json')
+      return { ok: existsSync(path), detail: existsSync(path) ? 'Local auth file is available' : 'Local auth file was not found' }
+    }),
+    check('history', 'History storage', async () => {
+      const status = history.status()
+      return { ok: status.state === 'ok' || status.state === 'off', detail: status.state === 'off' ? 'Local history active; MongoDB is optional and not configured' : status.detail ?? `MongoDB history is ${status.state}` }
+    })
+  ])
+  return checks.filter((value): value is NonNullable<typeof value> => value !== undefined)
 }
 
 function registerIpc(): void {
   ipcMain.handle('status:get', () => buildSnapshot())
   ipcMain.handle('settings:get', () => settingsView())
+  ipcMain.handle('system:diagnose', (_e, id?: unknown) => {
+    if (id !== undefined && (typeof id !== 'string' || id.length > 80)) throw new Error('Invalid diagnostic id')
+    return systemDiagnostics(id as string | undefined)
+  })
   ipcMain.handle('hooks:manage', async (_e, provider: ProviderId, action: string) => {
     if ((provider !== 'claude' && provider !== 'codex') || !['install', 'repair', 'remove', 'status'].includes(action)) {
       throw new Error('Invalid hook operation')

@@ -1,7 +1,7 @@
 import { Fragment } from 'react'
 import type { ProviderId, UsageAccount, UsageSummary } from '@shared/types'
 import { clockTime } from './format'
-import { PROVIDER_NAME, ProviderBadge, QuotaBar, byProvider } from './usageShared'
+import { PROVIDER_NAME, ProviderDot, QuotaBar, byProvider } from './usageShared'
 
 /**
  * The at-a-glance block: limit bars only, one stack per provider, and nothing
@@ -20,8 +20,8 @@ function ProviderLimits({ provider, accounts, now }: { provider: ProviderId; acc
   return (
     <div className="ulim">
       <div className="ulim-head" title={`${PROVIDER_NAME[provider]} usage limits`}>
-        <ProviderBadge provider={provider} />
-        <span className="ulim-label">{PROVIDER_NAME[provider]}</span>
+        <ProviderDot provider={provider} />
+        <span className="titletype">{PROVIDER_NAME[provider]}</span>
       </div>
       {total === 0 ? (
         <div className="uzone-note">{note}</div>

@@ -81,7 +81,7 @@ export function App() {
   return (
     <div className="app">
       <header className="header" title="Claude and Codex agent monitor · drag here to move">
-        <span className="appname">Agent Monitor</span>
+        <img className="brand" src={logo} alt="TaylorMade Solutions" draggable={false} />
         <div className="header-right">
           {waiting > 0 && (
             <button
@@ -92,7 +92,6 @@ export function App() {
               {waiting} waiting
             </button>
           )}
-          <img className="brand" src={logo} alt="TaylorMade Solutions" draggable={false} />
         </div>
       </header>
 

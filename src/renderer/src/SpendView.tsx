@@ -1,6 +1,6 @@
 import type { UsageAccount, UsageSummary } from '@shared/types'
 import { compactNumber, money } from './format'
-import { PROVIDER_NAME, ProviderBadge, QuotaBar, byProvider, hasSpendDetail, zoneLabel } from './usageShared'
+import { PROVIDER_NAME, ProviderDot, QuotaBar, byProvider, hasSpendDetail, zoneLabel } from './usageShared'
 
 /**
  * Today's tokens and value, broken out per provider and per project. Split out
@@ -61,8 +61,8 @@ export function SpendView({ usage, now }: { usage: UsageSummary; now: number }) 
       {groups.map((group) => (
         <div className="spend-prov" key={group.provider}>
           <div className="spend-prov-head">
-            <ProviderBadge provider={group.provider} />
-            <span className="spend-prov-label">{PROVIDER_NAME[group.provider]}</span>
+            <ProviderDot provider={group.provider} />
+            <span className="titletype">{PROVIDER_NAME[group.provider]}</span>
           </div>
           {group.accounts.map((account) => (
             <AccountSpend key={account.id} account={account} now={now} />

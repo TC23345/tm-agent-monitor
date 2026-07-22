@@ -240,6 +240,32 @@ export interface AppSettings {
   version: string
   providers: Record<ProviderId, ProviderHealth>
   historySync: { state: 'off' | 'connecting' | 'ok' | 'error'; detail?: string; lastFlushAt?: number }
+  apiConfigs: ApiConfigItem[]
+  systemPaths: SystemPathItem[]
+}
+
+export interface ApiConfigItem {
+  id: string
+  label: string
+  value: string
+  detail: string
+  configured: boolean
+}
+
+export interface SystemPathItem {
+  id: string
+  label: string
+  path: string
+  detail: string
+  exists: boolean
+}
+
+export interface SystemDiagnostic {
+  id: string
+  label: string
+  state: 'success' | 'failure' | 'warning'
+  detail: string
+  testedAt: number
 }
 
 export const DEFAULTS = {

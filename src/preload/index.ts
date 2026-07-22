@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { StatusSnapshot, AppSettings, AppSettingsPatch, DailyUsageDay, ProviderId, UsageInsights } from '../shared/types.js'
+import type { StatusSnapshot, AppSettings, AppSettingsPatch, DailyUsageDay, ProviderId, SystemDiagnostic, UsageInsights } from '../shared/types.js'
 
 const api = {
   getStatus: (): Promise<StatusSnapshot> => ipcRenderer.invoke('status:get'),
@@ -28,6 +28,7 @@ const api = {
   getHistory: (): Promise<DailyUsageDay[]> => ipcRenderer.invoke('history:recent'),
   getUsageInsights: (): Promise<UsageInsights> => ipcRenderer.invoke('usage:insights'),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
+  diagnoseSystem: (id?: string): Promise<SystemDiagnostic[]> => ipcRenderer.invoke('system:diagnose', id),
   setSettings: (patch: AppSettingsPatch): Promise<AppSettings> => ipcRenderer.invoke('settings:set', patch),
   quit: () => ipcRenderer.send('app:quit')
 }

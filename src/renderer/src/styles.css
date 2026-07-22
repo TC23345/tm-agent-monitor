@@ -64,8 +64,9 @@ html, body, #root {
   gap: 10px;
   margin-bottom: 18px;
 }
-.appname {
-  -webkit-app-region: drag;
+/* Section headings (provider names) share the app title's type so the panel
+   reads as one voice instead of a title plus uppercase micro-labels. */
+.titletype {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.2px;
@@ -110,8 +111,13 @@ html, body, #root {
 .ulim { margin-bottom: 16px; }
 .ulim:last-child { margin-bottom: 2px; }
 .ulim + .ulim { border-top: 1px solid var(--hairline); padding-top: 14px; }
-.ulim-head { display: flex; align-items: center; gap: 8px; margin: 0 0 11px; }
-.ulim-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--text); }
+.ulim-head { display: flex; align-items: center; gap: 9px; margin: 0 0 12px; }
+
+/* Provider identity is carried by colour, not a lettered badge — the heading
+   beside it already names the provider. */
+.prov-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.prov-dot--claude { background: #e8906b; box-shadow: 0 0 0 3px rgba(218, 119, 75, 0.2); }
+.prov-dot--codex { background: #6ab0e8; box-shadow: 0 0 0 3px rgba(75, 157, 218, 0.2); }
 .uzone-note { font-size: 13px; color: var(--muted); padding: 2px 0 4px; }
 .provider-badge {
   display: inline-flex; align-items: center; justify-content: center;
@@ -147,8 +153,7 @@ html, body, #root {
 .spend-head-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--muted); }
 .spend-head-total { font-size: 13px; font-weight: 600; color: var(--text); text-align: right; }
 .spend-prov { margin-bottom: 18px; }
-.spend-prov-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.spend-prov-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--text); }
+.spend-prov-head { display: flex; align-items: center; gap: 9px; margin-bottom: 11px; }
 .spend-zone { margin-bottom: 12px; }
 .spend-zone:last-child { margin-bottom: 0; }
 .spend-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
@@ -466,6 +471,9 @@ html, body, #root {
   border-radius: 14px;
   box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
   overflow: hidden;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
 }
 .settings-head {
   display: flex;
@@ -474,7 +482,10 @@ html, body, #root {
   padding: 12px 14px;
   border-bottom: 1px solid var(--hairline);
 }
-.settings-title { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+.settings-title { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.settings-back { border: 0; background: transparent; color: var(--muted); padding: 2px; margin: -2px; display: flex; cursor: pointer; border-radius: 5px; }
+.settings-back:hover { color: var(--text); background: var(--card); }
+.settings-back svg { width: 15px; height: 15px; }
 .settings-x {
   -webkit-app-region: no-drag;
   background: none; border: none; cursor: pointer; color: var(--muted);
@@ -484,7 +495,8 @@ html, body, #root {
 .settings-x:hover { color: var(--text); background: var(--card); }
 .settings-x .ic-svg { width: 16px; height: 16px; }
 .settings-loading { padding: 24px; text-align: center; color: var(--muted); font-size: 13px; }
-.settings-body { padding: 4px 14px 10px; }
+.settings-body { padding: 4px 14px 10px; overflow-y: auto; min-height: 0; }
+.settings-body--api, .settings-body--system { padding-top: 10px; }
 
 /* ---- new project modal ---- */
 .np-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
@@ -546,6 +558,34 @@ html, body, #root {
 .hotkey-btn.is-capturing { color: var(--accent); border-color: var(--accent); }
 .hotkey-btn:disabled { opacity: 0.55; cursor: default; }
 .sactions { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+.settings-intro, .settings-note { font-size: 11px; line-height: 1.5; color: var(--muted); padding: 8px 0 10px; }
+.settings-intro strong { color: var(--text); font-weight: 600; }
+.settings-note { color: var(--faint); }
+.settings-actions { display: flex; justify-content: flex-end; padding: 10px 0 2px; }
+.config-state { max-width: 135px; text-align: right; font-size: 11px; color: var(--faint); }
+.config-state.is-set, .path-state.is-set { color: var(--st-complete); }
+.section-head { display: flex; align-items: center; justify-content: space-between; color: var(--text); font-size: 11px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; padding: 2px 0 7px; border-bottom: 1px solid var(--hairline); }
+.section-head--spaced { margin-top: 16px; }
+.icon-text-btn { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 10px; text-transform: none; letter-spacing: 0; display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 3px; }
+.icon-text-btn:hover { color: var(--text); }
+.icon-text-btn svg, .diag-retest svg { width: 13px; height: 13px; }
+.diag-row { display: flex; align-items: center; gap: 9px; padding: 9px 0; border-bottom: 1px solid var(--hairline); }
+.diag-icon { display: flex; color: var(--faint); }
+.diag-icon svg { width: 15px; height: 15px; }
+.diag-icon.is-success { color: var(--st-complete); }
+.diag-icon.is-failure { color: var(--st-question); }
+.diag-icon.is-warning { color: var(--st-permission); }
+.diag-copy, .path-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; font-size: 12px; color: var(--text); }
+.diag-copy small, .path-copy small { color: var(--faint); font-size: 10.5px; line-height: 1.3; }
+.diag-retest { border: 0; background: transparent; color: var(--faint); display: flex; padding: 5px; cursor: pointer; border-radius: 5px; }
+.diag-retest:hover { color: var(--text); background: var(--card); }
+.hook-block .srow { padding-block: 10px; }
+.path-row { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; padding: 9px 0; border: 0; border-bottom: 1px solid var(--hairline); background: transparent; font: inherit; cursor: pointer; }
+.path-row:hover .path-copy > span { color: var(--accent-bright); }
+.path-row:disabled { cursor: default; opacity: .65; }
+.path-copy code { color: var(--muted); font-family: ui-monospace, Consolas, monospace; font-size: 9.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.path-state { color: var(--faint); font-size: 10px; font-weight: 600; }
+.is-spinning { animation: spin .8s linear infinite; }
 .toggle {
   -webkit-app-region: no-drag;
   width: 38px; height: 22px; border-radius: 999px; border: none;
