@@ -84,7 +84,7 @@ export function LauncherPane({ context, onNewProject }: { context: LaunchContext
  * native window (electron/electron#10547 is still open), so this switches to them
  * with Win32 focus rather than embedding them.
  */
-export function useDesktopWindows() {
+export function useDesktopWindows(enabled: boolean) {
   const [windows, setWindows] = useState<DesktopWindow[] | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -96,10 +96,15 @@ export function useDesktopWindows() {
       .finally(() => setRefreshing(false))
   }, [])
 
-  // Poll only while the workspace is actually on screen — Electron marks the
-  // document hidden the moment the window hides, so a dismissed workspace stops
-  // enumerating windows instead of burning Win32 calls in the background.
+  // Poll only when a pane is actually showing the list AND the workspace is on
+  // screen. Each poll is a full EnumWindows plus a process-table snapshot, so
+  // running it for a closed pane — or a dismissed window — is pure waste.
+  // Electron marks the document hidden the moment the window hides.
   useEffect(() => {
+    if (!enabled) {
+      setWindows(null)
+      return
+    }
     let timer: ReturnType<typeof setInterval> | null = null
     const start = () => {
       if (timer !== null) return
@@ -118,7 +123,7 @@ export function useDesktopWindows() {
       stop()
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [refresh])
+  }, [enabled, refresh])
 
   return { windows, refreshing, refresh }
 }

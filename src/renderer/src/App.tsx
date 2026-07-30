@@ -36,7 +36,8 @@ export function App() {
   // Drives the slide-up / slide-down transition. Starts closed so the very first
   // painted frame is already off-screen and the card rises into place.
   const [open, setOpen] = useState(false)
-  const desktop = useDesktopWindows()
+  // Only enumerate windows while a pane is showing them.
+  const desktop = useDesktopWindows(panes.includes('windows'))
 
   useEffect(() => {
     window.watch.getStatus().then(setSnap)

@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 
-/** Fired by the footer collapse-all button; detail = desired collapsed state. */
+/** Fired by the top bar's collapse-all button; detail = desired collapsed state. */
 export const COLLAPSE_ALL_EVENT = 'cw-collapse-all'
+
+/**
+ * Fired whenever one hook instance changes a key. The same group can be on
+ * screen twice (the agent sidebar and an `agents` pane), and each instance holds
+ * its own React state over the shared localStorage key — without this, toggling
+ * one leaves the other stale until it remounts.
+ */
+const COLLAPSE_SYNC_EVENT = 'cw-collapse-sync'
 
 /**
  * Boolean collapse state persisted in localStorage, keyed per group/panel.
@@ -26,10 +34,27 @@ export function useCollapse(key: string, defaultCollapsed = false, bulk = false)
       } catch {
         /* private mode / quota — non-fatal */
       }
+      window.dispatchEvent(new CustomEvent(COLLAPSE_SYNC_EVENT, { detail: storageKey }))
     },
     [storageKey]
   )
   const toggle = useCallback(() => set(!collapsed), [set, collapsed])
+
+  // Adopt a change made by another instance of the same key. This reads back the
+  // stored value rather than re-setting it, so it never re-dispatches.
+  useEffect(() => {
+    const onSync = (e: Event) => {
+      if ((e as CustomEvent<string>).detail !== storageKey) return
+      try {
+        const v = localStorage.getItem(storageKey)
+        setCollapsed(v === null ? defaultCollapsed : v === '1')
+      } catch {
+        /* non-fatal */
+      }
+    }
+    window.addEventListener(COLLAPSE_SYNC_EVENT, onSync)
+    return () => window.removeEventListener(COLLAPSE_SYNC_EVENT, onSync)
+  }, [storageKey, defaultCollapsed])
 
   useEffect(() => {
     if (!bulk) return
