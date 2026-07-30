@@ -4,7 +4,7 @@ Repository guidance for every coding agent.
 
 ## What this is
 
-TaylorMade Agent Monitor is a Windows-only Electron + TypeScript + React tray app for local Claude Code and Codex activity, presented as a hotkey-summoned full-height left sidebar. It uses stable lifecycle hooks for live state, provider-qualified identities, provider-specific usage/value, optional MongoDB history, and native Win32 focus.
+TaylorMade Agent Monitor is a Windows-only Electron + TypeScript + React tray app for local Claude Code and Codex activity, presented as a hotkey-summoned full-screen multi-pane workspace. It uses stable lifecycle hooks for live state, provider-qualified identities, provider-specific usage/value, optional MongoDB history, and native Win32 launch/focus for the terminals, editors, and browsers you drive agents from.
 
 ## Commands
 
@@ -44,7 +44,12 @@ AgentStore + usage + history -> StatusSnapshot -> preload IPC -> React
 - `src/main/usageCore.mjs` parses Anthropic Admin usage/cost pagination, including decimal-string cents and UTC buckets.
 - `src/main/history.ts` serializes Mongo operations, writes schema v2 `byProvider`, reads legacy documents as Claude, attributes API spend to its exact UTC date, and is optional/failure-isolated.
 - `src/native/win32.mjs` loads system DLLs through koffi. Main resolves focus by agent ID and passes the stored PID so HWND ownership is checked before foreground calls.
-- `src/renderer` groups roots by canonical cwd, nests children, renders provider badges/health/usage, and labels trends against real local calendar dates. It has three exclusive views — agents, spend, insights — switched from the footer; `Escape` returns any non-agent view to agents.
+- `src/renderer` groups roots by canonical cwd, nests children, renders provider badges/health/usage, and labels trends against real local calendar dates. Layout is a fixed agent sidebar plus a main pane grid; `Escape` closes an open menu or dialog, otherwise hides the workspace.
+- `src/renderer/src/panes.ts` owns the pane contract: six kinds, `MAX_PANES = 6`, three columns by default, and localStorage persistence. Each kind may appear at most once, which is also what keeps `windows:list` from being polled twice.
+- `src/renderer/src/TopBar.tsx` owns every app action (waiting filter, connection health, collapse, add pane, projects, settings, hide, quit). The sidebar and panes stay pure content — do not reintroduce a footer action strip.
+- `src/renderer/src/WorkspacePanes.tsx` holds the launch pane and the open-windows switcher. `useDesktopWindows` polls `windows:list` only while the document is visible, so a dismissed workspace stops enumerating.
+- Panes render this app's own content. Electron cannot host a foreign native window (electron/electron#10547 is open with no API), and reparenting a live HWND via `SetParent` breaks input/focus/DPI in the captured window — so the switcher raises real windows instead. `WebContentsView` (Electron 30+) is the supported route if a pane ever needs embedded *web* content.
+- `src/shared/windows.mjs` is the pure classification layer: which executables the switcher shows, their display names, title cleanup, and grouping. `src/native/win32.mjs` only reads Win32 and stays dumb about presentation.
 - `src/renderer/src/usageShared.tsx` owns provider grouping for usage: fixed provider order, accounts sorted plan → local → API spend, and the shared quota bar. `UsageDashboard` renders limit bars only; `SpendView` owns token counts, per-project breakdowns, and budget/actual spend.
 
 ## Configuration
@@ -70,7 +75,9 @@ The daemon publishes `%APPDATA%/taylormade-agent-monitor/hook-endpoint.json` by 
 - The renderer is sandboxed. Expose the smallest preload API and runtime-validate mutable IPC.
 - `koffi` remains `asarUnpack`'d. Packaged hook resources and native focus resources must stay in `electron-builder.yml`.
 - Icon generation is offline and deterministic: `scripts/build-icon.mjs` derives ignored `build/icon.ico` from tracked `resources/icon.png`. Distribution commands run it automatically.
-- The panel is a fixed full-height sidebar pinned to the left edge of the cursor's display work area (`positionSidebarLeft`). Height no longer tracks content: there is deliberately no content-height IPC, no `setContentSize` call, and no renderer `ResizeObserver`. The `.app` card fills the window and `.agents` absorbs overflow. Do not reintroduce content-driven window sizing.
+- The window fills the work area of the cursor's display (`positionWorkspace`) — full screen minus the taskbar. Bounds never track content: there is deliberately no content-size IPC, no `setContentSize` call, and no renderer `ResizeObserver`. The `.app` card fills the window and each scroll region (`.pane-scroll`, `.gpane-body`) absorbs its own overflow. Do not reintroduce content-driven window sizing.
+- Show/hide is animated in the renderer, not by moving the window. Main shows first and sends `window:phase` `enter`; on hide it sends `exit` and hides after `EXIT_MS` via a timeout that fires even if the renderer never responds. The `.app` card transitions a `translateY` — an animated `setBounds` loop is not smooth on Windows and must not replace it.
+- Actions that surface another window (`agent:focus`, `windows:focus`, terminal/Cursor/Chrome/Explorer launches) call `stepAside()` — a full-screen always-on-top workspace would otherwise cover what it just opened.
 - Releasing requires the tag **and** the GitHub release to exist before `npm run publish`. electron-builder starts one publisher per artifact; they race to create the release, the loser returns 422, and that abort skips the `latest.yml` upload — leaving installers with no update feed. Re-running publish against an existing release uploads all four assets and overwrites the binaries so feed and exe stay consistent. Verify with `gh release view <tag> --json assets`; never trust the exit code through a pipe.
 - Tags in this repo are lightweight. `tag.gpgsign=true` makes even a bare `git tag` fail on a passphrase-protected key, so use `git tag --no-sign`.
 - MongoDB absence/failure must never block live monitoring. Quit performs a bounded awaited final flush.

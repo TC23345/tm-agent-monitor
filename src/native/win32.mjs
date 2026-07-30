@@ -28,6 +28,7 @@ function load() {
       IsWindowVisible: user32.func('int __stdcall IsWindowVisible(uintptr_t hwnd)'),
       IsIconic: user32.func('int __stdcall IsIconic(uintptr_t hwnd)'),
       GetWindowTextLengthW: user32.func('int __stdcall GetWindowTextLengthW(uintptr_t hwnd)'),
+      GetWindowTextW: user32.func('int __stdcall GetWindowTextW(uintptr_t hwnd, _Out_ uint16 *text, int count)'),
       GetWindowThreadProcessId: user32.func('uint32 __stdcall GetWindowThreadProcessId(uintptr_t hwnd, _Out_ uint32 *pid)'),
       GetForegroundWindow: user32.func('uintptr_t __stdcall GetForegroundWindow()'),
       SetForegroundWindow: user32.func('int __stdcall SetForegroundWindow(uintptr_t hwnd)'),
@@ -205,6 +206,42 @@ export function debugWindows() {
   if (!load()) return []
   const { exeOf } = processSnapshot()
   return listWindows().map((w) => ({ hwnd: w.hwnd.toString(), pid: w.pid, exe: exeOf.get(w.pid) ?? '?' }))
+}
+
+const TITLE_MAX = 512
+
+/** Title of a window, or '' when it has none / the read fails. */
+function windowTitle(fns, hwnd) {
+  try {
+    const buf = new Uint16Array(TITLE_MAX)
+    const n = fns.GetWindowTextW(hwnd, buf, TITLE_MAX)
+    if (!n || n < 0) return ''
+    return String.fromCharCode(...buf.subarray(0, Math.min(n, TITLE_MAX - 1))).replace(/\0.*$/, '')
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Every visible titled top-level window with its title and owning exe — the raw
+ * feed for the workspace window switcher. Classification and filtering live in
+ * src/main/windowsCore.mjs; this only reads Win32. Never throws.
+ */
+export function listDesktopWindows() {
+  const a = load()
+  if (!a) return []
+  try {
+    const { exeOf } = processSnapshot()
+    return listWindows().map((w) => ({
+      hwnd: w.hwnd.toString(),
+      pid: w.pid,
+      exe: exeOf.get(w.pid) ?? '',
+      title: windowTitle(a.fns, w.hwnd)
+    }))
+  } catch (err) {
+    if (process.env.CLAUDE_WATCH_DEBUG) console.error('[win32] window list failed:', err.message)
+    return []
+  }
 }
 
 /**

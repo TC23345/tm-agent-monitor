@@ -1,6 +1,7 @@
 import type { Agent } from '@shared/types'
 import type { MenuState } from './AgentContextMenu'
 import { AgentIcon, RunningSpinner, ArrowUp } from './Icons'
+import { ProviderBadge } from './ProviderBadge'
 import { shortDuration, contextTone, compactNumber, modelShort, money } from './format'
 
 /** Short chip label + class for a non-default permission mode. */
@@ -70,7 +71,7 @@ export function AgentRow({
     >
       <button className="row-focus" onClick={() => window.watch.focusAgent(agent.id)}>
         <AgentIcon agent={agent} />
-        <span className={`provider-badge provider-badge--${agent.provider}`} title={`${agent.provider} agent`}>{agent.provider === 'claude' ? 'C' : 'X'}</span>
+        <ProviderBadge provider={agent.provider} />
         <span className="row-text">{text}</span>
         {mode && (
           <span className={`row-mode ${mode.cls}`} title={`Permission mode: ${agent.permissionMode}`}>

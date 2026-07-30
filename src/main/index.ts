@@ -13,14 +13,15 @@ import { readPersonalToken, fetchWindow } from './subscriptionUsage.js'
 import { readCodexAuth, fetchCodexWindow } from './codexSubscriptionUsage.js'
 import { scanCodexUsage, type CodexRateLimits } from './codexUsage.mjs'
 import { scanUsageInsights } from './usageInsightsCore.mjs'
-import { mockSnapshot, mockHistory, mockUsageInsights } from './mock.js'
-import { focusHwnd, focusByPid, available as winAvailable } from '../native/win32.mjs'
+import { mockSnapshot, mockHistory, mockUsageInsights, mockWindows } from './mock.js'
+import { focusHwnd, focusByPid, listDesktopWindows, available as winAvailable } from '../native/win32.mjs'
+import { buildWindowList } from '../shared/windows.mjs'
 import { estimateCostUsd } from '../shared/pricing.mjs'
 // electron-updater is CommonJS — a *named* ESM import fails at runtime ("Named
 // export 'autoUpdater' not found"), so import the default export and destructure.
 import electronUpdater from 'electron-updater'
 import { validateMutableSettingsPatch } from './store.js'
-import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type DailyUsageDay, type ProjectUsage, type UsageInsights } from '../shared/types.js'
+import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type UsageInsights } from '../shared/types.js'
 
 const { autoUpdater } = electronUpdater
 
@@ -135,6 +136,24 @@ function resourcePath(name: string): string {
   return app.isPackaged ? join(process.resourcesPath, name) : join(__dirname, '../../resources', name)
 }
 
+const PROVIDER_TOAST_LABEL: Record<ProviderId, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex'
+}
+
+/** PNG path for desktop notifications; falls back to the app icon when missing. */
+function notificationIcon(provider?: ProviderId): string | undefined {
+  const candidates = [
+    provider === 'claude' ? resourcePath('providers/claude-code.png') : undefined,
+    provider === 'codex' ? resourcePath('providers/codex.png') : undefined,
+    resourcePath('icon.png')
+  ]
+  for (const path of candidates) {
+    if (path && existsSync(path)) return path
+  }
+  return undefined
+}
+
 function bridgeToken(): string {
   try {
     const raw = JSON.parse(readFileSync(config.endpointFile, 'utf8'))
@@ -162,13 +181,15 @@ function trayImage() {
 
 function createWindow(): void {
   win = new BrowserWindow({
-    width: SIDEBAR_WIDTH,
-    height: 800, // placeholder; positionSidebarLeft() sets real bounds before every show
+    // Placeholders; positionWorkspace() sets the real work-area bounds before every show.
+    width: 1280,
+    height: 800,
     show: false,
     frame: false,
     transparent: true,
     resizable: false,
     skipTaskbar: true,
+    icon: notificationIcon(),
     alwaysOnTop: true,
     hasShadow: false,
     fullscreenable: false,
@@ -188,38 +209,63 @@ function createWindow(): void {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  // Sticky panel: it stays open until the hotkey/tray toggles it closed, a
-  // terminal is focused, or Escape is pressed — no auto-hide on blur.
+  // Sticky workspace: it stays open until the hotkey/tray toggles it closed,
+  // Escape is pressed, or it steps aside for a window it launched or focused —
+  // no auto-hide on blur.
   win.on('closed', () => { win = null })
 }
 
-// The panel is a full-height sidebar pinned to the left edge of the work area on
-// whichever display the cursor is on. Height always spans the work area, so the
-// agent list — not the window — absorbs overflow.
-const SIDEBAR_WIDTH = 440
-const SIDEBAR_MARGIN = 16
-
-function positionSidebarLeft(): void {
+// The workspace fills the work area of whichever display the cursor is on — the
+// full screen minus the taskbar, so the card can rise from the taskbar edge and
+// never covers it. Panes, not the window, absorb overflow.
+function positionWorkspace(): void {
   if (!win) return
   const cursor = screen.getCursorScreenPoint()
   const { x, y, width, height } = screen.getDisplayNearestPoint(cursor).workArea
-  win.setBounds({
-    x: x + SIDEBAR_MARGIN,
-    y: y + SIDEBAR_MARGIN,
-    width: Math.min(SIDEBAR_WIDTH, width - SIDEBAR_MARGIN * 2),
-    height: height - SIDEBAR_MARGIN * 2
-  })
+  win.setBounds({ x, y, width, height })
+}
+
+// Show/hide are animated in the renderer (a GPU-composited transform, which stays
+// smooth in a way an animated setBounds loop does not). Main only sequences it:
+// show first and let the card slide up; on hide, let it slide back down to the
+// taskbar before the window actually disappears.
+const EXIT_MS = 190
+let pendingHide: NodeJS.Timeout | null = null
+
+function sendPhase(phase: 'enter' | 'exit'): void {
+  if (win && !win.isDestroyed()) win.webContents.send('window:phase', phase)
+}
+
+function showWindow(): void {
+  if (!win) return
+  if (pendingHide) { clearTimeout(pendingHide); pendingHide = null }
+  positionWorkspace()
+  win.show()
+  win.focus()
+  // After show, so the transition runs against painted frames.
+  sendPhase('enter')
+}
+
+function hideWindow(): void {
+  if (!win || !win.isVisible() || pendingHide) return
+  sendPhase('exit')
+  // Fires regardless of what the renderer does, so an unresponsive page can
+  // never strand the workspace on screen.
+  pendingHide = setTimeout(() => {
+    pendingHide = null
+    win?.hide()
+  }, EXIT_MS)
+}
+
+/** Dismiss the workspace so the window it just launched or focused is visible. */
+function stepAside(): void {
+  hideWindow()
 }
 
 function toggleWindow(): void {
   if (!win) return
-  if (win.isVisible()) {
-    win.hide()
-  } else {
-    positionSidebarLeft()
-    win.show()
-    win.focus()
-  }
+  if (win.isVisible() && !pendingHide) hideWindow()
+  else showWindow()
 }
 
 /**
@@ -238,15 +284,19 @@ function resolveShell(): string {
   return candidates.find((p) => existsSync(p)) || 'powershell.exe'
 }
 
+/** What a new terminal starts: a provider CLI, or nothing but the shell itself. */
+type TerminalTarget = ProviderId | 'shell'
+
 /**
  * Open a new terminal in `cwd` (or home if missing) and launch the provider CLI.
- * Prefers Windows Terminal; falls back to a fresh PowerShell console window.
+ * `shell` opens a bare prompt instead. Prefers Windows Terminal; falls back to a
+ * fresh PowerShell console window.
  */
-function openTerminal(cwd?: string, provider: ProviderId = 'claude', purpose: 'agent' | 'hook-trust' = 'agent'): void {
+function openTerminal(cwd?: string, provider: TerminalTarget = 'claude', purpose: 'agent' | 'hook-trust' = 'agent'): void {
   const dir = cwd && existsSync(cwd) ? cwd : app.getPath('home')
   const opts = { detached: true, stdio: 'ignore' as const, windowsHide: false }
   const shellExe = resolveShell()
-  const command = provider === 'codex' ? 'codex' : 'claude'
+  const command = provider === 'codex' ? 'codex' : provider === 'shell' ? null : 'claude'
   const script = purpose === 'hook-trust'
     ? [
         "Write-Host ''",
@@ -258,10 +308,15 @@ function openTerminal(cwd?: string, provider: ProviderId = 'claude', purpose: 'a
         command
       ].join('; ')
     : command
-  const wt = spawn('wt.exe', ['-d', dir, shellExe, '-NoExit', '-Command', script], opts)
+  // A bare shell gets no -Command at all, so it lands on a normal prompt.
+  const wtArgs = script
+    ? ['-d', dir, shellExe, '-NoExit', '-Command', script]
+    : ['-d', dir, shellExe, '-NoExit']
+  const wt = spawn('wt.exe', wtArgs, opts)
   wt.on('error', () => {
     // wt.exe unavailable — open a plain PowerShell console window via `start`.
-    const fallbackScript = `Set-Location -LiteralPath '${dir.replace(/'/g, "''")}'; ${script}`
+    const cd = `Set-Location -LiteralPath '${dir.replace(/'/g, "''")}'`
+    const fallbackScript = script ? `${cd}; ${script}` : cd
     try {
       const fb = spawn('cmd.exe', ['/c', 'start', '""', shellExe, '-NoExit', '-Command', fallbackScript], opts)
       fb.on('error', (e) => console.error(`[terminal] open failed: ${e?.message ?? e}`))
@@ -301,6 +356,38 @@ function cursorViaPath(dir?: string): void {
     c.unref()
   } catch (e) {
     console.error(`[cursor] fallback failed: ${e}`)
+  }
+}
+
+/**
+ * Open a fresh Chrome window. Resolves the installed exe first (so `--new-window`
+ * is honoured even when Chrome is already running), then falls back to the shell's
+ * `start chrome`, and finally to the default browser.
+ */
+function openChrome(): void {
+  const opts = { detached: true, stdio: 'ignore' as const }
+  const local = process.env.LOCALAPPDATA || join(app.getPath('home'), 'AppData', 'Local')
+  const candidates = [
+    join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    join(local, 'Google', 'Chrome', 'Application', 'chrome.exe')
+  ]
+  const exe = candidates.find((p) => existsSync(p))
+  if (exe) {
+    const c = spawn(exe, ['--new-window'], opts)
+    c.on('error', () => chromeViaShell())
+    c.unref()
+  } else {
+    chromeViaShell()
+  }
+}
+function chromeViaShell(): void {
+  try {
+    const c = spawn('cmd.exe', ['/c', 'start', '""', 'chrome', '--new-window'], { detached: true, stdio: 'ignore' })
+    c.on('error', () => { void shell.openExternal('https://www.google.com') })
+    c.unref()
+  } catch (e) {
+    console.error(`[chrome] open failed: ${e}`)
   }
 }
 
@@ -539,13 +626,14 @@ function notifyTransitions(snap: StatusSnapshot): void {
     for (const a of snap.agents) {
       if (a.state === 'waiting' && !prevWaiting.has(a.id)) {
         const note = new Notification({
-          title: `${a.project} needs input`,
-          body: a.question ?? 'Waiting for input'
+          title: `${PROVIDER_TOAST_LABEL[a.provider]} · ${a.project} needs input`,
+          body: a.question ?? 'Waiting for input',
+          icon: notificationIcon(a.provider)
         })
         // Click jumps straight to that agent's terminal; fall back to the panel.
         note.on('click', () => {
           const ok = focusAgentById(a.id)
-          if (!ok) { positionSidebarLeft(); win?.show(); win?.focus() }
+          if (!ok) showWindow()
         })
         note.show()
       }
@@ -579,7 +667,8 @@ function notifyUsageThresholds(p: PlanWindow): void {
         : ''
       new Notification({
         title: sev === 'critical' ? `${q.label} window nearly used up` : `${q.label} usage is high`,
-        body: `${Math.round(q.usedPct)}% of your ${windowName} window used${resetTxt}`
+        body: `${Math.round(q.usedPct)}% of your ${windowName} window used${resetTxt}`,
+        icon: notificationIcon()
       }).show()
     }
     prevSeverity[key] = sev
@@ -763,7 +852,7 @@ function setupAutoUpdate(): void {
     updateReady = info.version
     tray?.setToolTip(`TaylorMade Agent Monitor — update ${info.version} ready (right-click → Restart to update)`)
     if (Notification.isSupported()) {
-      new Notification({ title: 'Update ready', body: `Version ${info.version} — right-click the tray icon → Restart to update (or it installs on quit).` }).show()
+      new Notification({ title: 'Update ready', body: `Version ${info.version} — right-click the tray icon → Restart to update (or it installs on quit).`, icon: notificationIcon() }).show()
     }
   })
   autoUpdater.on('error', (e) => console.error(`[update] ${e?.message ?? e}`))
@@ -940,12 +1029,17 @@ function registerIpc(): void {
   })
   ipcMain.on('agent:focus', (_e, id: string) => {
     if (typeof id !== 'string' || id.length > 5_000) return
-    focusAgentById(id)
+    if (focusAgentById(id)) stepAside()
   })
-  ipcMain.on('path:open', (_e, p: string) => { if (typeof p === 'string' && p.length <= 32_767 && existsSync(p)) void shell.openPath(p) })
+  ipcMain.on('path:open', (_e, p: string) => {
+    if (typeof p !== 'string' || p.length > 32_767 || !existsSync(p)) return
+    void shell.openPath(p)
+    stepAside()
+  })
   ipcMain.on('projects:open', () => {
     try { mkdirSync(NEW_PROJECT_DIR, { recursive: true }) } catch { /* exists */ }
     shell.openPath(NEW_PROJECT_DIR)
+    stepAside()
   })
   ipcMain.on('config:open', () => shell.openPath(app.getPath('userData')))
   ipcMain.handle('update:check', async (): Promise<string> => {
@@ -961,12 +1055,36 @@ function registerIpc(): void {
     }
   })
   ipcMain.on('text:copy', (_e, t: string) => { if (typeof t === 'string' && t.length <= 100_000) clipboard.writeText(t) })
-  ipcMain.on('terminal:open', (_e, cwd?: string, provider?: ProviderId) => {
+  ipcMain.on('terminal:open', (_e, cwd?: string, provider?: TerminalTarget) => {
     if (cwd !== undefined && (typeof cwd !== 'string' || cwd.length > 32_767)) return
-    if (provider !== undefined && provider !== 'claude' && provider !== 'codex') return
+    if (provider !== undefined && provider !== 'claude' && provider !== 'codex' && provider !== 'shell') return
     openTerminal(cwd, provider)
+    stepAside()
   })
-  ipcMain.on('cursor:open', () => openInCursor())
+  ipcMain.on('cursor:open', (_e, cwd?: string) => {
+    if (cwd !== undefined && (typeof cwd !== 'string' || cwd.length > 32_767 || !existsSync(cwd))) return
+    openInCursor(cwd)
+    stepAside()
+  })
+  ipcMain.on('chrome:open', () => {
+    openChrome()
+    stepAside()
+  })
+  // Workspace switcher: every visible window we know how to present, tagged with
+  // the tracked session that reported it.
+  ipcMain.handle('windows:list', (): DesktopWindow[] => {
+    if (mockMode) return mockWindows()
+    return buildWindowList(listDesktopWindows(), {
+      agents: daemon.store.snapshot(),
+      excludePids: [process.pid]
+    }) as DesktopWindow[]
+  })
+  ipcMain.on('windows:focus', (_e, hwnd: string, pid: number) => {
+    if (typeof hwnd !== 'string' || hwnd.length > 32 || !/^\d+$/.test(hwnd)) return
+    if (!Number.isInteger(pid) || pid <= 0 || pid > 0xffffffff) return
+    // focusHwnd re-checks that the HWND still belongs to this pid before it acts.
+    if (focusHwnd(hwnd, pid)) stepAside()
+  })
   ipcMain.handle('project:create', (_e, rawName: string) => {
     const name = sanitizeProjectName(rawName)
     if (!name) return { ok: false, error: 'Enter a valid project name.' }
@@ -992,7 +1110,7 @@ function registerIpc(): void {
     return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
   })
   ipcMain.handle('usage:insights', () => getUsageInsights())
-  ipcMain.on('window:hide', () => win?.hide())
+  ipcMain.on('window:hide', () => hideWindow())
   ipcMain.on('app:quit', () => { app.quit() })
 }
 
@@ -1027,6 +1145,7 @@ if (!gotLock) {
   app.on('second-instance', () => toggleWindow())
 
   app.whenReady().then(async () => {
+    app.setName('TaylorMade Agents')
     if (process.platform === 'win32') app.setAppUserModelId('com.taylormade.agent-monitor')
 
     settings = loadSettings()
@@ -1076,23 +1195,32 @@ if (!gotLock) {
 
     // Show once on first launch so it's discoverable — unless started at login.
     const startedHidden = process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAtLogin
-    if (!startedHidden) {
-      positionSidebarLeft()
-      win?.show()
-    }
+    if (!startedHidden) showWindow()
 
     // Dev: capture the panel to a PNG then exit (CLAUDE_WATCH_CAPTURE=<path>).
+    // CLAUDE_WATCH_CAPTURE_DELAY_MS shortens the wait to catch the show animation
+    // mid-flight instead of at rest.
     if (process.env.CLAUDE_WATCH_CAPTURE && win) {
       const out = process.env.CLAUDE_WATCH_CAPTURE
+      const delay = Number(process.env.CLAUDE_WATCH_CAPTURE_DELAY_MS) || 1600
       setTimeout(async () => {
         try {
-          if (process.env.CLAUDE_WATCH_CAPTURE_VIEW?.startsWith('insights')) {
-            await win!.webContents.executeJavaScript(`document.querySelector('[aria-label="Open Usage Insights"]')?.click()`)
-            await new Promise((resolve) => setTimeout(resolve, 250))
-            if (process.env.CLAUDE_WATCH_CAPTURE_VIEW === 'insights-week') {
+          const captureView = process.env.CLAUDE_WATCH_CAPTURE_VIEW
+          if (captureView === 'settings' || captureView === 'projects') {
+            const label = captureView === 'settings' ? 'Settings' : 'Projects'
+            await win!.webContents.executeJavaScript(`document.querySelector('[aria-label="${label}"]')?.click()`)
+            await new Promise((resolve) => setTimeout(resolve, 300))
+          } else if (captureView) {
+            // Pane layouts are renderer state: seed the stored layout, then reload.
+            const kinds = captureView.startsWith('insights') ? ['insights'] : captureView.split(',')
+            await win!.webContents.executeJavaScript(
+              `localStorage.setItem('tm.panes.v1', ${JSON.stringify(JSON.stringify(kinds))}); location.reload()`
+            )
+            await new Promise((resolve) => setTimeout(resolve, 900))
+            if (captureView === 'insights-week') {
               await win!.webContents.executeJavaScript(`document.querySelector('#insights-week-tab')?.click()`)
+              await new Promise((resolve) => setTimeout(resolve, 250))
             }
-            await new Promise((resolve) => setTimeout(resolve, 250))
           }
           const img = await win!.webContents.capturePage()
           writeFileSync(out, img.toPNG())
@@ -1101,7 +1229,7 @@ if (!gotLock) {
           console.error('[capture] failed', e)
         }
         app.quit()
-      }, 1600)
+      }, delay)
     }
   })
 

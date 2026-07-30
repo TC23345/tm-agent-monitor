@@ -35,34 +35,281 @@ html, body, #root {
   cursor: default;
 }
 
-/* Floating rounded dark card inside the transparent, frameless window. The card
-   fills the window's full height — the window is a fixed full-height sidebar, so
-   the agent list (flex: 1) absorbs the slack and scrolls. */
+/* Floating rounded dark card inside the transparent, frameless window. The window
+   spans the display's work area, so the card is effectively full screen and the
+   panes — not the window — absorb overflow.
+
+   Show/hide is a GPU-composited slide from the taskbar edge: the card starts
+   translated a full height down (off the bottom of the work area) and rises into
+   place when main signals 'enter'. Main waits out the reverse before hiding. */
 .app {
   position: fixed;
-  top: 10px;
-  left: 10px;
-  right: 10px;
-  bottom: 10px;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
   display: flex;
   flex-direction: column;
-  padding: 20px 20px 14px;
-  border-radius: 18px;
+  border-radius: 16px;
   background: var(--card);
   border: 1px solid var(--border);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   overflow: hidden;
+  transform: translateY(100%);
+  opacity: 0;
+  transition: transform 0.28s cubic-bezier(0.16, 0.84, 0.28, 1), opacity 0.18s ease-out;
+  will-change: transform;
 }
-/* Header/usage/footer stay put; only the agent list absorbs overflow + scrolls. */
-.header, .usage, .rule, .footer { flex: 0 0 auto; }
+.app.is-open {
+  transform: translateY(0);
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app { transition: opacity 0.12s linear; transform: none; }
+}
 
-/* ---- header ---- */
-.header {
-  -webkit-app-region: drag;
+/* ---- top bar: views, state, and every app action ---- */
+.topbar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
+  gap: 18px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+.topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.tb-sep { width: 1px; height: 20px; background: var(--hairline); }
+
+/* ---- frame: agent sidebar + main pane grid ---- */
+.frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+/* Coding-agent details live here, always visible whatever the panes show. */
+.sidebar {
+  /* Matches the width the agent rows were designed against — narrower and the
+     activity text truncates before the meta chips are reached. */
+  flex: 0 0 400px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  padding: 14px 12px 10px;
+  border-right: 1px solid var(--hairline);
+  background: rgba(0, 0, 0, 0.16);
+}
+/* Up to six panes: three vertical columns, growing to a second row. Column count
+   is set inline from the pane count so one or two panes still fill the frame. */
+.grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
   gap: 10px;
-  margin-bottom: 18px;
+  padding: 10px;
+}
+.gpane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.16);
+  overflow: hidden;
+}
+.gpane-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px 9px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.gpane-ic { width: 14px; height: 14px; flex: 0 0 14px; color: var(--muted); }
+/* Native select, restyled — the pane title doubles as its content picker. */
+.gpane-select {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  cursor: pointer;
+  appearance: none;
+}
+.gpane-select:hover { color: var(--text); border-color: var(--hairline); }
+.gpane-select:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.gpane-select option { background: var(--elev); color: var(--text); font-size: 13px; letter-spacing: 0; text-transform: none; }
+.gpane-caret { width: 12px; height: 12px; flex: 0 0 12px; margin-left: -4px; color: var(--faint); }
+.gpane-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.gpane-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--track) transparent;
+}
+.gpane-body::-webkit-scrollbar { width: 6px; }
+.gpane-body::-webkit-scrollbar-thumb { background: var(--track); border-radius: 999px; }
+.gpane-body::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.16); }
+.pane-count { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--faint); }
+.pane-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.pane-title {
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+/* Which folder launches open in — always visible, one click to change. */
+.pane-context {
+  margin-left: auto;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--faint);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.pane-context:hover { color: var(--text); border-color: var(--border); }
+.pane-context.is-project { color: var(--accent-bright); border-color: rgba(217, 119, 87, 0.4); }
+.pane-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 4px;
+  margin: 0 -4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--track) transparent;
+}
+.pane-scroll::-webkit-scrollbar { width: 6px; }
+.pane-scroll::-webkit-scrollbar-thumb { background: var(--track); border-radius: 999px; }
+.pane-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.16); }
+/* ---- launchpad: start a terminal, editor, or browser ---- */
+.launchwrap { display: flex; flex-direction: column; gap: 10px; }
+.launchpad {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+}
+.launch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  background: var(--elev);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.launch:hover { background: var(--card); border-color: var(--border); }
+.launch:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.launch-ic { width: 15px; height: 15px; flex: 0 0 15px; color: var(--muted); }
+
+/* ---- open-window switcher ---- */
+.wlist { padding-bottom: 4px; }
+.wlist-empty { padding: 14px 2px; font-size: 12px; line-height: 1.5; color: var(--faint); }
+.wgroup { margin-bottom: 12px; }
+.wgroup:last-child { margin-bottom: 0; }
+.wgroup-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.wgroup-ic { width: 13px; height: 13px; }
+.wgroup-count { margin-left: auto; font-weight: 600; letter-spacing: 0; }
+.wrow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.wrow:hover { background: var(--elev); }
+.wrow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.wrow--agent { border-left-color: var(--accent); background: rgba(217, 119, 87, 0.07); }
+.wrow-app { flex: 0 0 auto; font-size: 10.5px; font-weight: 700; letter-spacing: 0.3px; color: var(--faint); }
+.wrow-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.wrow:hover .wrow-title { color: var(--text); }
+.linkbtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.linkbtn:hover { color: var(--text); background: var(--elev); }
+.linkbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Narrow displays: fewer columns before anything gets crushed, then the sidebar
+   yields the last of its width rather than the panes disappearing. */
+@media (max-width: 1400px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+@media (max-width: 1040px) {
+  .grid { grid-template-columns: minmax(0, 1fr) !important; }
+  .sidebar { flex-basis: 280px; }
 }
 /* Section headings (provider names) share the app title's type so the panel
    reads as one voice instead of a title plus uppercase micro-labels. */
@@ -72,22 +319,13 @@ html, body, #root {
   letter-spacing: -0.2px;
   color: var(--text);
 }
-.header-right {
-  -webkit-app-region: drag;
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-}
 .brand {
-  height: 26px;
+  height: 24px;
   width: auto;
   display: block;
-  margin: 1px 0 0 1px;
-  -webkit-app-region: drag;
+  flex: 0 0 auto;
 }
 .needs {
-  -webkit-app-region: no-drag;
   font-size: 12px;
   font-weight: 600;
   font-family: inherit;
@@ -122,8 +360,9 @@ html, body, #root {
 .provider-badge {
   display: inline-flex; align-items: center; justify-content: center;
   width: 16px; height: 16px; border-radius: 5px; flex: 0 0 auto;
-  font-size: 9px; font-weight: 800; line-height: 1; letter-spacing: 0;
+  line-height: 1;
 }
+.provider-badge-svg { width: 11px; height: 11px; display: block; }
 .provider-badge--claude { color: #f0a77b; background: rgba(218, 119, 75, 0.16); border: 1px solid rgba(218, 119, 75, 0.32); }
 .provider-badge--codex { color: var(--accent-bright); background: rgba(75, 157, 218, 0.14); border: 1px solid rgba(75, 157, 218, 0.32); }
 
@@ -168,16 +407,9 @@ html, body, #root {
 .tproj-tokens { color: var(--muted); font-weight: 600; }
 .tproj-cost { color: var(--faint); font-weight: 600; min-width: 44px; text-align: right; }
 
-/* ---- dividers ---- */
-.rule { height: 1px; background: var(--hairline); margin: 14px 0; }
-
 /* ---- agents / project groups ---- */
-.agents { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 -6px; padding: 2px 6px; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
-/* Breathing room under the last row so it never sits flush against the divider. */
+/* Breathing room under the last row so it never sits flush against the edge. */
 .agents-inner { padding-bottom: 6px; }
-.agents::-webkit-scrollbar { width: 6px; }
-.agents::-webkit-scrollbar-thumb { background: var(--track); border-radius: 999px; }
-.agents::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.16); }
 .empty { padding: 28px 8px; font-size: 13px; color: var(--muted); text-align: center; line-height: 1.5; }
 
 .group { margin-bottom: 4px; }
@@ -276,29 +508,20 @@ html, body, #root {
 .trow--provider { font-size: 12px; padding-left: 8px; }
 .trow--provider .trow-day { display: flex; align-items: center; gap: 6px; text-transform: capitalize; }
 
-/* ---- footer ---- */
-.footer {
-  -webkit-app-region: no-drag;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-top: 14px;
-  margin-top: 6px;
-}
-.conn { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--muted); }
+/* ---- connection pill (top bar) ---- */
+.conn { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
 .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: #6b645d; }
 .conn.is-on .conn-dot { background: var(--st-complete); box-shadow: 0 0 6px rgba(68, 196, 128, 0.6); }
 .conn.is-warn .conn-dot { background: var(--st-permission); box-shadow: 0 0 6px rgba(233, 162, 60, 0.6); }
 .conn.is-off .conn-dot { background: var(--st-question); }
-.footer-actions { display: flex; align-items: center; gap: 16px; }
 .iconbtn {
-  -webkit-app-region: no-drag;
-  background: none; border: none; padding: 4px; margin: -4px;
+  background: none; border: none; padding: 5px; margin: -1px;
   cursor: pointer; color: var(--muted); display: flex; border-radius: 7px;
   transition: background 0.12s ease, color 0.12s ease;
 }
 .iconbtn:hover { color: var(--text); background: var(--elev); }
 .iconbtn--active { color: var(--accent); background: var(--elev); }
+.iconbtn--sm { padding: 3px; margin: -3px; }
 
 /* ---- usage insights tab ---- */
 .insights { padding: 2px 4px 16px; }
@@ -379,8 +602,8 @@ html, body, #root {
   .ins-period-summary strong { text-align: left; }
 }
 .gear { width: 18px; height: 18px; }
+.gear--sm { width: 14px; height: 14px; }
 .quit {
-  -webkit-app-region: no-drag;
   background: none; border: none; cursor: pointer;
   font-size: 13px; font-weight: 500; color: var(--muted);
   font-family: inherit; padding: 4px 6px; margin: -4px -6px; border-radius: 7px;
@@ -425,8 +648,8 @@ html, body, #root {
   border-radius: 11px;
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
 }
-/* The footer projects menu opens up from its button, pinned above the footer. */
-.ctxmenu--footer { left: auto; top: auto; right: 14px; bottom: 48px; }
+/* The projects menu drops from its top-bar button, pinned under the bar. */
+.ctxmenu--topbar { left: auto; bottom: auto; right: 96px; top: 52px; }
 /* Nested group (Folder actions) expands in place, indented with a rail. */
 .ctxmenu-sub { margin-left: 14px; border-left: 1px solid var(--hairline); padding-left: 3px; }
 .ctxmenu-chevron { width: 14px; height: 14px; margin-left: auto; color: var(--faint); }
@@ -466,6 +689,8 @@ html, body, #root {
 }
 .settings-card {
   width: 100%;
+  /* Full screen behind it — the dialog stays a dialog. */
+  max-width: 470px;
   background: var(--elev);
   border: 1px solid var(--border);
   border-radius: 14px;

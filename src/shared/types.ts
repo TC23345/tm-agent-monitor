@@ -137,6 +137,25 @@ export interface UsageInsights {
 export type PlanWindow = Omit<UsageAccount, 'id' | 'provider' | 'kind'>
 export type ApiUsage = Omit<UsageAccount, 'id' | 'provider' | 'kind'>
 
+/** Desktop windows the workspace pane can switch to, grouped by what they are. */
+export type DesktopWindowKind = 'terminal' | 'editor' | 'browser' | 'assistant' | 'explorer'
+
+export interface DesktopWindow {
+  /** Decimal HWND string — the same shape agents report for focus. */
+  hwnd: string
+  pid: number
+  /** Lowercased owning executable, e.g. `cursor.exe`. */
+  exe: string
+  /** Window title with the app's own suffix trimmed off. */
+  title: string
+  /** Display name of the owning app, e.g. `Cursor`. */
+  app: string
+  kind: DesktopWindowKind
+  /** Provider-qualified agent id when a tracked session reported this window. */
+  agentId?: string
+  agentProvider?: ProviderId
+}
+
 export interface ProviderHealth {
   installed: boolean
   needsRepair?: boolean

@@ -1,15 +1,26 @@
 # TaylorMade Agent Monitor (Windows)
 
-A hotkey-summoned Electron sidebar for local **Claude Code and Codex** work. It groups live roots by project, nests subagents, shows provider health and local usage, and keeps optional daily history. The default toggle is **Ctrl+Alt+W**.
+A hotkey-summoned Electron workspace for local **Claude Code and Codex** work. It groups live roots by project, nests subagents, shows provider health and local usage, launches and switches the windows you drive agents from, and keeps optional daily history. The default toggle is **Ctrl+Alt+W**.
 
-The panel opens as a full-height sidebar pinned to the left edge of whichever display the cursor is on. It is sticky — it stays open until the hotkey or tray toggles it closed, a terminal is focused, or `Escape` is pressed.
+The workspace fills the work area of whichever display the cursor is on and slides up from the taskbar when summoned. It is sticky — it stays open until the hotkey or tray toggles it closed, `Escape` is pressed, or it steps aside for a window it just launched or focused.
+
+A control strip, an agent sidebar, and a pane grid:
+
+- **Top bar** — waiting count, provider connection, collapse all, add pane, projects, settings, hide, and quit.
+- **Sidebar (left)** — coding agent details: live Claude and Codex sessions grouped by project, with nested subagents. Always visible, whatever the panes show.
+- **Main frame** — up to **six panes**, laid out as three vertical columns that grow to a second row. Each pane's title is its content picker, and each kind appears at most once: **Launch**, **Open windows**, **Limits**, **Spend**, **Insights**, **Agents**. The layout persists across summons.
+
+**Launch** starts a Claude Code, Codex, or plain terminal, Cursor, Chrome, or a new project — in the active project's folder or your home folder, switchable from the chip in the pane header. **Open windows** lists your open terminals, editors, browsers, and Explorer windows; click one to bring it to the front. Windows owned by a tracked session are marked with that provider's badge.
+
+Panes host this app's own content and *switch to* your real windows rather than embedding them: Electron has no supported way to host a foreign native window ([electron/electron#10547](https://github.com/electron/electron/issues/10547) is still open), and reparenting a live HWND breaks input, focus, and DPI in the window being captured.
 
 ## Current capabilities
 
 - Provider-neutral live lifecycle model with collision-safe identities (`provider:sessionId[:actorId]`).
 - Claude and Codex roots grouped together by canonical project path, with provider badges and expandable child rows.
-- Three views switched from the footer: **agents** (live sessions, with limit bars above), **spend** (today's tokens and value per provider and project), and **insights** (local usage patterns).
-- The usage block at the top shows limit bars only — Claude and Codex separately — so it stays scannable; token counts and spend live in the spend view.
+- Six pane kinds — launch, open windows, limits, spend, insights, agents — composed into up to six panes and remembered between summons.
+- The limits pane shows limit bars only — Claude and Codex separately — so it stays scannable; token counts and spend live in the spend pane.
+- Workspace launchers and a Win32 window switcher for terminals, editors, browsers, and Explorer, launched in the active project's folder or your home folder.
 - Per-provider install/reporting/trust health. Codex user hooks require an explicit review in `/hooks`.
 - Claude subscription windows, deduplicated local Claude transcript totals, best-effort isolated Codex rollout totals, and actual Anthropic organization API spend.
 - Provider/model-specific API-equivalent value. Unknown models retain tokens and mark combined value partial; estimates are not subscription bills.

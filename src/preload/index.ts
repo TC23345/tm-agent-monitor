@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { StatusSnapshot, AppSettings, AppSettingsPatch, DailyUsageDay, ProviderId, SystemDiagnostic, UsageInsights } from '../shared/types.js'
+import type { StatusSnapshot, AppSettings, AppSettingsPatch, DailyUsageDay, DesktopWindow, ProviderId, SystemDiagnostic, UsageInsights } from '../shared/types.js'
 
 const api = {
   getStatus: (): Promise<StatusSnapshot> => ipcRenderer.invoke('status:get'),
@@ -13,8 +13,19 @@ const api = {
   focusAgent: (id: string) => ipcRenderer.send('agent:focus', id),
   openPath: (p: string) => ipcRenderer.send('path:open', p),
   copyText: (t: string) => ipcRenderer.send('text:copy', t),
-  openTerminal: (cwd?: string, provider?: ProviderId) => ipcRenderer.send('terminal:open', cwd, provider),
-  openCursor: () => ipcRenderer.send('cursor:open'),
+  openTerminal: (cwd?: string, provider?: ProviderId | 'shell') => ipcRenderer.send('terminal:open', cwd, provider),
+  openCursor: (cwd?: string) => ipcRenderer.send('cursor:open', cwd),
+  openChrome: () => ipcRenderer.send('chrome:open'),
+  listWindows: (): Promise<DesktopWindow[]> => ipcRenderer.invoke('windows:list'),
+  focusWindow: (hwnd: string, pid: number) => ipcRenderer.send('windows:focus', hwnd, pid),
+  /** Show/hide animation cue from main, so the workspace can slide in and out. */
+  onWindowPhase: (cb: (phase: 'enter' | 'exit') => void) => {
+    const listener = (_e: unknown, phase: 'enter' | 'exit') => cb(phase)
+    ipcRenderer.on('window:phase', listener)
+    return () => {
+      ipcRenderer.removeListener('window:phase', listener)
+    }
+  },
   openProjectsDir: () => ipcRenderer.send('projects:open'),
   openConfigDir: () => ipcRenderer.send('config:open'),
   checkUpdates: (): Promise<string> => ipcRenderer.invoke('update:check'),

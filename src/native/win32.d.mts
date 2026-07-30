@@ -1,4 +1,5 @@
 export function listWindows(): { hwnd: bigint; pid: number }[]
+export function listDesktopWindows(): { hwnd: string; pid: number; exe: string; title: string }[]
 export function findTerminalWindow(startPid: number): { hwnd: string; pid: number } | null
 export function findTerminalWindowForCurrentProcess(): { hwnd: string; pid: number } | null
 export function focusOwnershipMatches(expectedPid: number, actualPid: number): boolean

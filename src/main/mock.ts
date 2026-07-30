@@ -1,4 +1,18 @@
-import type { StatusSnapshot, DailyUsageDay, UsageInsights } from '../shared/types.js'
+import type { StatusSnapshot, DailyUsageDay, DesktopWindow, UsageInsights } from '../shared/types.js'
+
+/** Sample desktop windows so the workspace switcher is populated in mock mode. */
+export function mockWindows(): DesktopWindow[] {
+  return [
+    { hwnd: '101', pid: 4101, exe: 'windowsterminal.exe', title: 'claude-watch', app: 'Windows Terminal', kind: 'terminal', agentId: 'claude:a3', agentProvider: 'claude' },
+    { hwnd: '102', pid: 4102, exe: 'windowsterminal.exe', title: 'api-gateway — codex', app: 'Windows Terminal', kind: 'terminal', agentId: 'codex:a2', agentProvider: 'codex' },
+    { hwnd: '103', pid: 4103, exe: 'pwsh.exe', title: 'PowerShell 7', app: 'PowerShell', kind: 'terminal' },
+    { hwnd: '201', pid: 4201, exe: 'cursor.exe', title: 'styles.css - claude-watch', app: 'Cursor', kind: 'editor' },
+    { hwnd: '202', pid: 4202, exe: 'cursor.exe', title: 'index.ts - growth-saloon', app: 'Cursor', kind: 'editor' },
+    { hwnd: '301', pid: 4301, exe: 'chrome.exe', title: 'TaylorMade Solutions', app: 'Chrome', kind: 'browser' },
+    { hwnd: '302', pid: 4302, exe: 'chrome.exe', title: 'Anthropic Console — Usage', app: 'Chrome', kind: 'browser' },
+    { hwnd: '401', pid: 4401, exe: 'explorer.exe', title: 'C:\\Projects', app: 'File Explorer', kind: 'explorer' }
+  ]
+}
 
 export function mockUsageInsights(): UsageInsights {
   const rows = (items: Array<[string, number, ('claude' | 'codex')[]]>) => items.map(([name, usedPct, providers]) => ({ name, usedPct, providers, tokens: Math.round(1_640_000 * usedPct / 100) }))

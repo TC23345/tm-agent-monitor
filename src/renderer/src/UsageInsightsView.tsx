@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ProviderId, UsageInsightMetric, UsageInsightPeriod, UsageInsightRow, UsageInsights } from '@shared/types'
 import { compactNumber } from './format'
+import { ProviderBadge } from './ProviderBadge'
 
 type PeriodKey = 'day' | 'week'
 
@@ -28,7 +29,7 @@ function ProviderBadges({ providers }: { providers: ProviderId[] }) {
   return (
     <span className="ins-provider-badges" aria-label={providers.join(' and ')}>
       {providers.map((provider) => (
-        <span key={provider} className={`provider-badge provider-badge--${provider}`}>{provider === 'claude' ? 'C' : 'X'}</span>
+        <ProviderBadge key={provider} provider={provider} />
       ))}
     </span>
   )
@@ -74,7 +75,7 @@ function Period({ data, kind }: { data: UsageInsightPeriod; kind: PeriodKey }) {
       <div className="ins-provider-totals">
         {(['claude', 'codex'] as const).filter((provider) => (data.byProvider[provider] ?? 0) > 0).map((provider) => (
           <span key={provider}>
-            <span className={`provider-badge provider-badge--${provider}`}>{provider === 'claude' ? 'C' : 'X'}</span>
+            <ProviderBadge provider={provider} />
             <span>{provider === 'claude' ? 'Claude' : 'Codex'} · {compactNumber(data.byProvider[provider] ?? 0)}</span>
           </span>
         ))}
