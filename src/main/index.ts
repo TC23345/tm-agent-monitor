@@ -1031,10 +1031,13 @@ function registerIpc(): void {
     if (typeof id !== 'string' || id.length > 5_000) return
     if (focusAgentById(id)) stepAside()
   })
-  ipcMain.on('path:open', (_e, p: string) => {
+  // `keepOpen` is set by callers that live inside a dialog (Settings), where
+  // dismissing the whole workspace would also tear down what you were reading.
+  ipcMain.on('path:open', (_e, p: string, keepOpen?: boolean) => {
     if (typeof p !== 'string' || p.length > 32_767 || !existsSync(p)) return
+    if (keepOpen !== undefined && typeof keepOpen !== 'boolean') return
     void shell.openPath(p)
-    stepAside()
+    if (!keepOpen) stepAside()
   })
   ipcMain.on('projects:open', () => {
     try { mkdirSync(NEW_PROJECT_DIR, { recursive: true }) } catch { /* exists */ }

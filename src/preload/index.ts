@@ -11,7 +11,8 @@ const api = {
     }
   },
   focusAgent: (id: string) => ipcRenderer.send('agent:focus', id),
-  openPath: (p: string) => ipcRenderer.send('path:open', p),
+  /** `keepOpen` leaves the workspace on screen — for callers inside a dialog. */
+  openPath: (p: string, keepOpen?: boolean) => ipcRenderer.send('path:open', p, keepOpen),
   copyText: (t: string) => ipcRenderer.send('text:copy', t),
   openTerminal: (cwd?: string, provider?: ProviderId | 'shell') => ipcRenderer.send('terminal:open', cwd, provider),
   openCursor: (cwd?: string) => ipcRenderer.send('cursor:open', cwd),

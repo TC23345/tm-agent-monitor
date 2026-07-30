@@ -88,5 +88,48 @@ round-trip through main:
 - no settings-schema migration,
 - and the layout is per-view preference, not app configuration.
 
-Keep each pane kind unique (`MAX_PANES = 6`, one pane per kind). That is what
-guarantees an expensive poller like `windows:list` can never run twice.
+Keep each pane kind unique (`MAX_PANES = 6`, one pane per kind). That stops an
+expensive poller like `windows:list` running *twice*.
+
+**It does not stop it running at all.** The hook lives in the parent, so it
+keeps polling after the pane is closed — a full `EnumWindows` plus a
+process-table snapshot every 4 seconds for a pane nobody is looking at. Gate it
+on the consumer as well as on visibility:
+
+```tsx
+// App.tsx — only enumerate windows while a pane is showing them.
+const desktop = useDesktopWindows(panes.includes('windows'))
+```
+
+```tsx
+// the hook
+useEffect(() => {
+  if (!enabled) { setWindows(null); return }
+  // …visibilitychange-gated interval…
+}, [enabled, refresh])
+```
+
+Same trap for any parent-owned subscription behind a togglable child.
+
+## Two places, one state
+
+A pane layout lets one view appear twice — here the agent list is both the
+sidebar and an optional `agents` pane. Any state held *per instance* over a
+shared key then desyncs: collapsing a project group in the sidebar left the pane
+showing it expanded until remount, because `useCollapse` keeps React state per
+instance over one `localStorage` key.
+
+Broadcast on change and let the other instances read the stored value back:
+
+```ts
+const set = useCallback((next: boolean) => {
+  setCollapsed(next)
+  localStorage.setItem(storageKey, next ? '1' : '0')
+  window.dispatchEvent(new CustomEvent(COLLAPSE_SYNC_EVENT, { detail: storageKey }))
+}, [storageKey])
+
+// listener calls setCollapsed (not set), so it cannot re-dispatch and loop
+```
+
+Before shipping a pane layout, ask of every view: can this be on screen twice?
+If yes, its state must be shared or synced.

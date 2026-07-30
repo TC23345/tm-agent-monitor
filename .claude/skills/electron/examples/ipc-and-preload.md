@@ -94,6 +94,34 @@ typeof api`) and surfaced on `Window` in `src/preload/index.d.ts`, so steps 3
 and 4 typecheck against each other automatically. Forgetting step 3 is the
 usual cause of `window.watch.x is not a function` at runtime.
 
+## Side effects belong to the caller, not the channel
+
+A route that hides the window is doing two things, and the second one is not
+always wanted. `path:open` opens a folder **and** dismissed the workspace so
+Explorer was visible — correct from the agent list, wrong from inside the
+Settings dialog, where it tore down what the user was reading.
+
+Main cannot know: only the renderer knows a modal is open. So the flag is an
+argument, defaulted to the common case, and validated like any other input:
+
+```ts
+// main — keepOpen is optional, and still type-checked
+ipcMain.on('path:open', (_e, p: string, keepOpen?: boolean) => {
+  if (typeof p !== 'string' || p.length > 32_767 || !existsSync(p)) return
+  if (keepOpen !== undefined && typeof keepOpen !== 'boolean') return
+  void shell.openPath(p)
+  if (!keepOpen) stepAside()
+})
+```
+
+```ts
+// preload
+openPath: (p: string, keepOpen?: boolean) => ipcRenderer.send('path:open', p, keepOpen)
+```
+
+Optional arguments still need validation — `undefined` is allowed, anything
+else of the wrong type is rejected, exactly as for required fields.
+
 ## Choosing the channel type
 
 | Need | Use |

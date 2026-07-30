@@ -61,22 +61,73 @@ These defy assumption. Each one cost real debugging time here.
 8. **Renderer feature detection lies about visibility.** `document.hidden`
    *does* flip when a window hides — use it to stop polling, but never assume
    the window is visible just because the renderer is alive.
+9. **Gate a poller on its consumer, not just on uniqueness.** In a pane layout
+   the hook usually lives in the parent, so it keeps running after the pane
+   showing it is closed. Uniqueness stops it running *twice*; only an explicit
+   `enabled` flag stops it running *at all*. Cheap-looking polls are not cheap:
+   the window list is a full `EnumWindows` plus a process-table snapshot.
+10. **The same component can be mounted twice.** A pane layout lets one view
+    appear in two places (here: the agent sidebar and an `agents` pane). State
+    held per instance over a shared `localStorage` key then desyncs — toggling
+    one leaves the other stale until remount. Broadcast changes on a custom
+    event and have instances read the stored value back (never re-set it, or
+    they loop). See `useCollapse` in this repo.
+11. **A window that steps aside must not do it under a dialog.** An always-on-top
+    full-screen window should hide when it launches or focuses something — but
+    not when the action came from inside a modal the user is still reading. Give
+    those callers an opt-out (`openPath(path, keepOpen)`), decided by the
+    renderer, which is the only side that knows a dialog is open.
+12. **A new skill is not discoverable mid-session.** Adding
+    `<repo>/.claude/skills/<name>/` does not register it in a running session —
+    `Skill(name)` fails with "Unknown skill". Install it to
+    `~/.claude/skills/<name>/` (see "Maintaining this skill") and it resolves
+    immediately.
 
 ## Recipes
 
 ### Verify a packaged build before handing it over
 
-Building is not verifying. Run all three:
+Building is not verifying. Script paths below are relative to this skill's base
+directory, which is printed when the skill loads (the repo copy lives at
+`.claude/skills/electron/`, the installed copy at `~/.claude/skills/electron/`):
 
 ```bash
-node .claude/skills/electron/scripts/verify-asar-deps.mjs dist/win-unpacked
-node .claude/skills/electron/scripts/capture-window.mjs --packaged --out /tmp/shot.png
+node <skill>/scripts/verify-asar-deps.mjs dist/win-unpacked
+node <skill>/scripts/capture-window.mjs --packaged --out /tmp/shot.png
 ```
 
 `verify-asar-deps` walks the production dependency closure from `package.json`
 and fails if any package is missing from the asar — the exact failure in gotcha
-2. `capture-window` boots the app with an isolated user-data dir (gotcha 3) and
+2. It parses the asar header directly, so it needs no network and no `npx`.
+`capture-window` boots the app with an isolated user-data dir (gotcha 3) and
 proves it renders.
+
+Check exit codes **without a pipe**. In PowerShell, `$LASTEXITCODE` reflects the
+last command in a pipeline, so `script | Select-Object` reports 0 even when the
+script failed:
+
+```powershell
+node <skill>/scripts/verify-asar-deps.mjs dist\win-unpacked > $null 2>&1
+"exit=$LASTEXITCODE"
+```
+
+### Review an existing app
+
+Audit against the gotchas above — most are a one-line grep, and the ones that
+are not are where the bugs live:
+
+| Gotcha | How to check |
+| --- | --- |
+| 2 packaging | `scripts/verify-asar-deps.mjs`; confirm `node_modules` is not a link |
+| 4 updater | `grep -n "electron-updater" src/main/*.ts` — must be a default import |
+| 5 animation | `grep -rn "setBounds" src/main` — none inside a timer/loop |
+| 7 native | `ls dist/win-unpacked/resources/app.asar.unpacked/node_modules` |
+| 8, 9 polling | find every `setInterval` in the renderer: is it gated on both `document.hidden` **and** its consumer being mounted? |
+| 10 duplicates | can any view render in two places at once? then no per-instance state over a shared key |
+| 11 step-aside | every caller that hides the window — is any of them reachable from a dialog? |
+
+Then run the gates below. Finish with a screenshot, because typecheck passing
+says nothing about whether the UI renders.
 
 ### Position a window on the right display
 
@@ -97,6 +148,20 @@ validation shape this repo uses.
 `CLAUDE_WATCH_CAPTURE_VIEW`, and `CLAUDE_WATCH_CAPTURE_DELAY_MS` — the last one
 lets you catch an animation mid-flight rather than at rest, which is the only
 way to actually verify a transition.
+
+Beware *when* the capture timer starts. Here it is registered after the startup
+awaits, so by the time it fires the summon animation is long finished and a
+short delay still yields a resting frame. To catch a transition, drive a real
+hide → show cycle and capture ~90 ms in.
+
+## Maintaining this skill
+
+The canonical copy is committed at `.claude/skills/electron/`; the invocable
+copy is `~/.claude/skills/electron/`. They drift. After editing the repo copy:
+
+```bash
+cp -r .claude/skills/electron/. ~/.claude/skills/electron/
+```
 
 ## Examples
 

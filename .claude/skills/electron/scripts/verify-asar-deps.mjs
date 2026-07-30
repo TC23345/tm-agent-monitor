@@ -7,8 +7,7 @@
 // dependencies but none of theirs. The app dies on its first import, before any
 // window appears. This script turns that silent warning into a failed check.
 
-import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 const HELP = `Verify a packaged Electron app contains its full production dependency closure.
@@ -88,26 +87,54 @@ function productionClosure(projectRoot) {
   return { closure: seen, unresolved }
 }
 
+/**
+ * Read an asar's directory header without any dependency — no npx, no network.
+ *
+ * The format is two Chromium "pickles", each prefixed with its own payload size:
+ *   [0..4)  payload size of the size-pickle (always 4)
+ *   [4..8)  value: byte length of the header pickle that follows
+ * then, inside the header pickle:
+ *   [0..4)  its own payload size
+ *   [4..8)  byte length of the JSON string
+ *   [8..)   the JSON directory tree
+ */
+function readAsarHeader(asarPath) {
+  const fd = openSync(asarPath, 'r')
+  try {
+    const sizes = Buffer.alloc(8)
+    if (readSync(fd, sizes, 0, 8, 0) !== 8) fail(`${asarPath} is too small to be an asar archive.`)
+    const picklePayload = sizes.readUInt32LE(4)
+    if (picklePayload <= 4 || picklePayload > 512 * 1024 * 1024) {
+      fail(`${asarPath} does not look like an asar archive (bad header size ${picklePayload}).`)
+    }
+    const header = Buffer.alloc(picklePayload)
+    readSync(fd, header, 0, picklePayload, 8)
+    const jsonSize = header.readUInt32LE(4)
+    try {
+      return JSON.parse(header.toString('utf8', 8, 8 + jsonSize))
+    } catch (err) {
+      fail(`Could not parse the asar header in ${asarPath}: ${err.message}`)
+    }
+  } finally {
+    closeSync(fd)
+  }
+}
+
 /** Top-level package names present inside the asar (and the unpacked sidecar). */
 function packagedModules(unpackedDir) {
   const asar = join(unpackedDir, 'resources', 'app.asar')
   if (!existsSync(asar)) fail(`No asar at ${asar}. Is ${unpackedDir} an electron-builder output directory?`)
 
-  let listing
-  try {
-    listing = execFileSync('npx', ['--yes', '@electron/asar@4', 'list', asar], {
-      encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, shell: process.platform === 'win32'
-    })
-  } catch (err) {
-    fail(`Could not list ${asar}: ${err.message}`)
-  }
-
   const present = new Set()
-  for (const raw of listing.split(/\r?\n/)) {
-    const p = raw.replace(/\\/g, '/')
-    // /node_modules/name  or  /node_modules/@scope/name
-    const m = p.match(/^\/node_modules\/(@[^/]+\/[^/]+|[^/]+)(\/|$)/)
-    if (m) present.add(m[1])
+  const root = readAsarHeader(asar)
+  const modules = root?.files?.node_modules?.files
+  if (modules) {
+    for (const [name, entry] of Object.entries(modules)) {
+      if (name.startsWith('@')) {
+        // Scoped packages nest one level deeper: @scope/name
+        for (const scoped of Object.keys(entry?.files ?? {})) present.add(`${name}/${scoped}`)
+      } else present.add(name)
+    }
   }
 
   // asarUnpack'd packages live beside the archive and are equally valid.
