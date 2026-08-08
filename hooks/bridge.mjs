@@ -151,20 +151,45 @@ const EVENT_MAP = {
     PreToolUse: 'tool_started',
     PermissionRequest: 'attention_required',
     PostToolUse: 'tool_finished',
+    PostToolUseFailure: 'tool_finished',
     Stop: 'turn_completed',
     SubagentStart: 'subagent_started',
     SubagentStop: 'subagent_completed',
     PreCompact: 'context_compacting',
-    PostCompact: 'context_compacted'
+    PostCompact: 'context_compacted',
+    SessionEnd: 'session_ended'
+  },
+  cursor: {
+    sessionStart: 'session_started',
+    beforeSubmitPrompt: 'prompt_submitted',
+    preToolUse: 'tool_started',
+    postToolUse: 'tool_finished',
+    postToolUseFailure: 'tool_finished',
+    stop: 'turn_completed',
+    subagentStart: 'subagent_started',
+    subagentStop: 'subagent_completed',
+    preCompact: 'context_compacting',
+    sessionEnd: 'session_ended'
   }
+}
+
+function notificationEvent(hook) {
+  const type = String(hook?.notification_type || hook?.type || '').toLowerCase()
+  if (['permission_prompt', 'idle_prompt', 'elicitation_dialog'].includes(type)) return 'attention_required'
+  return null
 }
 
 /** Normalize either provider's hook JSON into the daemon's v1 event envelope. */
 export function mapHookInput(provider, hook, { env = process.env, now = Date.now() } = {}) {
-  if (provider !== 'claude' && provider !== 'codex') return null
+  if (!EVENT_MAP[provider]) return null
+  // Cursor imports compatible entries from ~/.claude/settings.json. Those
+  // invocations carry Cursor metadata and must not be double-counted as Claude.
+  if (provider === 'claude' && hook?.cursor_version) return null
   const providerEvent = hook?.hook_event_name
-  const event = EVENT_MAP[provider][providerEvent]
-  const sessionId = hook?.session_id
+  const event = provider === 'claude' && providerEvent === 'Notification'
+    ? notificationEvent(hook)
+    : EVENT_MAP[provider][providerEvent]
+  const sessionId = hook?.session_id || hook?.conversation_id
   if (!event || typeof sessionId !== 'string' || !sessionId) return null
 
   const tail = provider === 'claude' ? readClaudeTail(hook.transcript_path, env) : undefined
@@ -175,11 +200,12 @@ export function mapHookInput(provider, hook, { env = process.env, now = Date.now
   const message = hook.message || hook.notification || hook.reason ||
     (providerEvent === 'PermissionRequest' ? `permission requested for ${hook.tool_name || 'a tool'}` : undefined)
   const timestamp = Number.isFinite(Number(hook.timestamp_ms)) ? Number(hook.timestamp_ms) : now
-  const actor = event === 'subagent_started' || event === 'subagent_completed'
-    ? { kind: 'subagent', ...(hook.agent_id ? { id: String(hook.agent_id) } : {}) }
+  const subagentId = hook.agent_id || hook.subagent_id
+  const actor = subagentId
+    ? { kind: 'subagent', id: String(subagentId) }
     : { kind: 'root' }
   const rawEventId = hook.uuid || hook.event_id
-  const dedupePart = hook.tool_use_id || hook.agent_id || hook.turn_id || tail?.messageId || timestamp
+  const dedupePart = hook.tool_use_id || subagentId || hook.turn_id || hook.generation_id || tail?.messageId || timestamp
 
   return {
     schemaVersion: BRIDGE_SCHEMA_VERSION,
@@ -192,7 +218,7 @@ export function mapHookInput(provider, hook, { env = process.env, now = Date.now
     actor,
     kind: event,
     timestamp,
-    ...(hook.cwd ? { cwd: String(hook.cwd) } : {}),
+    ...(hook.cwd || hook.workspace_roots?.[0] ? { cwd: String(hook.cwd || hook.workspace_roots[0]) } : {}),
     ...(hook.tool_name ? { toolName: String(hook.tool_name) } : {}),
     ...(activity ? { activity } : {}),
     ...(event === 'attention_required' ? {
@@ -311,11 +337,15 @@ export async function runBridge({ provider: forcedProvider, stdin = readStdin() 
     const deadlineAt = Date.now() + DEFAULT_TIMEOUT_MS
     const args = process.argv.slice(2)
     const i = args.indexOf('--provider')
+    const endpointIndex = args.indexOf('--endpoint-file')
     const provider = forcedProvider || (i >= 0 ? args[i + 1] : undefined)
-    if (provider !== 'claude' && provider !== 'codex') return false
+    if (!EVENT_MAP[provider]) return false
     let hook
     try { hook = JSON.parse(stdin || '{}') } catch { return false }
-    return await deliverHook(provider, hook, { deadlineAt })
+    return await deliverHook(provider, hook, {
+      deadlineAt,
+      ...(endpointIndex >= 0 && args[endpointIndex + 1] ? { endpointPath: args[endpointIndex + 1] } : {})
+    })
   } catch {
     return false
   }

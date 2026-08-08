@@ -1,6 +1,6 @@
 // Shared between the Electron main process, preload, hooks, and renderer.
 
-export type ProviderId = 'claude' | 'codex'
+export type ProviderId = 'claude' | 'codex' | 'cursor'
 export type AgentState = 'running' | 'waiting' | 'complete' | 'idle'
 export type WaitReason = 'permission' | 'question'
 export type ToolKind = 'bash' | 'edit' | 'read' | 'search' | 'web' | 'task' | 'other'

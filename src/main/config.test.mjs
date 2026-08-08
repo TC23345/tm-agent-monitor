@@ -19,4 +19,7 @@ test('config source precedence and --mock are documented by the pure bootstrap c
   assert.equal(c.port, 8123)
   assert.equal(c.orgLabel, 'User config')
   assert.equal(c.mock, true)
+  assert.equal(c.endpointFile, join(userData, 'hook-endpoint.dev.json'))
+  const packaged = bootstrapConfig({ isPackaged: true, userData, appData, cwd, home: root, env: {}, argv: [] })
+  assert.equal(packaged.endpointFile, join(appData, 'taylormade-agent-monitor', 'hook-endpoint.json'))
 })

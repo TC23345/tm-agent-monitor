@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ButtonHTMLAttributes } from 'react'
 import type { ProjectGroup as Group } from './group'
 import { AgentRow } from './AgentRow'
 import type { MenuState } from './AgentContextMenu'
@@ -11,12 +11,15 @@ export function ProjectGroup({
   group,
   now,
   onRowMenu,
-  forceWaitingOpen = false
+  forceWaitingOpen = false,
+  dragHandle
 }: {
   group: Group
   now: number
   onRowMenu: (menu: MenuState) => void
   forceWaitingOpen?: boolean
+  /** Spread on the header so the group can be dragged into a manual order. */
+  dragHandle?: ButtonHTMLAttributes<HTMLButtonElement>
 }) {
   const [collapsed, toggle] = useCollapse(group.key, false, true)
   const [expandedChildren, setExpandedChildren] = useState<Set<string>>(() => new Set())
@@ -32,14 +35,14 @@ export function ProjectGroup({
   }
 
   const n = group.agents.length
-  const headTitle = `${group.cwd ?? group.project}\n${n} session${n === 1 ? '' : 's'} in this project · click to collapse/expand`
+  const headTitle = `${group.cwd ?? group.project}\n${n} session${n === 1 ? '' : 's'} in this project · click to collapse/expand · drag to reorder`
   // Show the model on the header only when every session here agrees on one.
   const models = new Set(group.agents.map((a) => a.model).filter(Boolean))
   const model = models.size === 1 ? modelShort(group.agents.find((a) => a.model)?.model) : undefined
 
   return (
     <div className={`group ${group.needsInput > 0 ? 'group--alert' : ''}`}>
-      <button className="group-head" onClick={toggle} title={headTitle}>
+      <button className="group-head" onClick={toggle} title={headTitle} {...dragHandle}>
         <Chevron className="group-chevron" strokeWidth={2.5} />
         <span className="group-name">{group.project}</span>
         {model && <span className="group-model">{model}</span>}

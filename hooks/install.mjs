@@ -22,7 +22,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { OWNER_MARKER } from './bridge.mjs'
+import { OWNER_MARKER, defaultEndpointPath } from './bridge.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const bridgePath = resolve(__dirname, 'bridge.mjs')
@@ -35,11 +35,18 @@ export const PROVIDER_EVENTS = {
   ],
   codex: [
     'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PermissionRequest',
-    'Stop', 'SubagentStart', 'SubagentStop'
+    'PostToolUse', 'PostToolUseFailure', 'Stop', 'SubagentStart', 'SubagentStop',
+    'PreCompact', 'PostCompact', 'SessionEnd'
+  ],
+  cursor: [
+    'sessionStart', 'beforeSubmitPrompt', 'preToolUse', 'postToolUse',
+    'postToolUseFailure', 'stop', 'subagentStart', 'subagentStop',
+    'preCompact', 'sessionEnd'
   ]
 }
 export function settingsPathFor(provider, { home = homedir(), project = false, cwd = process.cwd() } = {}) {
   if (provider === 'codex') return join(home, '.codex', 'hooks.json')
+  if (provider === 'cursor') return join(home, '.cursor', 'hooks.json')
   if (provider === 'claude') {
     return project
       ? join(cwd, '.claude', 'settings.json')
@@ -49,7 +56,8 @@ export function settingsPathFor(provider, { home = homedir(), project = false, c
 }
 
 export function commandFor(provider, path = process.env.TM_AGENT_MONITOR_BRIDGE_PATH || bridgePath) {
-  return `node "${path}" --provider ${provider} --owner ${OWNER_MARKER}`
+  const endpoint = process.env.TM_AGENT_MONITOR_ENDPOINT_FILE || defaultEndpointPath()
+  return `node "${path}" --provider ${provider} --owner ${OWNER_MARKER} --endpoint-file "${endpoint}"`
 }
 
 function normalizeCommand(command) {
@@ -73,7 +81,7 @@ function isLegacyOwnedCommand(command) {
 }
 
 export function isOwnedHandler(handler) {
-  return !!handler && handler.type === 'command' &&
+  return !!handler && (handler.type === undefined || handler.type === 'command') &&
     (hasExactOwnerMarker(handler.command) || isLegacyOwnedCommand(handler.command))
 }
 
@@ -98,6 +106,13 @@ function eventGroups(config, event) {
   return Array.isArray(config?.hooks?.[event]) ? config.hooks[event] : []
 }
 
+function eventHandlers(provider, config, event) {
+  const groups = eventGroups(config, event)
+  return provider === 'cursor'
+    ? groups
+    : groups.flatMap((group) => Array.isArray(group?.hooks) ? group.hooks : [])
+}
+
 function inspectConfig(provider, config, path) {
   const expected = commandFor(provider)
   const missing = []
@@ -105,9 +120,7 @@ function inspectConfig(provider, config, path) {
   const outdated = []
   let handlers = 0
   for (const event of PROVIDER_EVENTS[provider]) {
-    const owned = eventGroups(config, event)
-      .flatMap((g) => Array.isArray(g?.hooks) ? g.hooks : [])
-      .filter(isOwnedHandler)
+    const owned = eventHandlers(provider, config, event).filter(isOwnedHandler)
     handlers += owned.length
     if (owned.length === 0) missing.push(event)
     if (owned.length > 1) duplicates.push(event)
@@ -161,18 +174,35 @@ function stripOwned(config) {
   return config
 }
 
+function stripCursorOwned(config) {
+  if (!config.hooks || typeof config.hooks !== 'object' || Array.isArray(config.hooks)) return config
+  for (const [event, handlers] of Object.entries(config.hooks)) {
+    if (!Array.isArray(handlers)) continue
+    const remaining = handlers.filter((handler) => !isOwnedHandler(handler))
+    if (remaining.length) config.hooks[event] = remaining
+    else delete config.hooks[event]
+  }
+  if (Object.keys(config.hooks).length === 0) delete config.hooks
+  return config
+}
+
+function stripProviderOwned(provider, config) {
+  return provider === 'cursor' ? stripCursorOwned(config) : stripOwned(config)
+}
+
 function mergeInstalled(provider, original) {
-  const config = stripOwned(clone(original))
+  const config = stripProviderOwned(provider, clone(original))
   if (!config.hooks || typeof config.hooks !== 'object' || Array.isArray(config.hooks)) config.hooks = {}
+  if (provider === 'cursor') config.version = 1
   const handler = {
-    type: 'command',
+    ...(provider === 'cursor' ? {} : { type: 'command' }),
     command: commandFor(provider),
     timeout: 1,
     ...(provider === 'claude' ? { async: true } : {})
   }
   for (const event of PROVIDER_EVENTS[provider]) {
     const groups = Array.isArray(config.hooks[event]) ? config.hooks[event] : []
-    groups.push({ matcher: '*', hooks: [{ ...handler }] })
+    groups.push(provider === 'cursor' ? { ...handler } : { matcher: '*', hooks: [{ ...handler }] })
     config.hooks[event] = groups
   }
   return config
@@ -184,7 +214,8 @@ function atomicWriteJson(path, value, { backup = true } = {}) {
   const mode = existed ? statSync(path).mode : undefined
   const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
   try {
-    if (existed && backup) copyFileSync(path, `${path}.tm-agent-monitor.bak`)
+    const backupPath = `${path}.tm-agent-monitor.bak`
+    if (existed && backup && !existsSync(backupPath)) copyFileSync(path, backupPath)
     writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode })
     renameSync(tmp, path)
     if (mode !== undefined) chmodSync(path, mode)
@@ -206,7 +237,7 @@ export function reconcileProvider(provider, action = 'install', options = {}) {
   if (action === 'status') return inspectConfig(provider, original, path)
   if (action === 'remove' && !existsSync(path)) return inspectConfig(provider, original, path)
 
-  const next = action === 'remove' ? stripOwned(clone(original)) : mergeInstalled(provider, original)
+  const next = action === 'remove' ? stripProviderOwned(provider, clone(original)) : mergeInstalled(provider, original)
   const changed = JSON.stringify(next) !== JSON.stringify(original)
   if (changed) atomicWriteJson(path, next, { backup: options.backup !== false })
   return { ...inspectConfig(provider, next, path), changed, action }
@@ -227,7 +258,7 @@ function parseCli(argv) {
   const all = argv.includes('--all')
   const p = argv.indexOf('--provider')
   const selected = p >= 0 ? argv[p + 1] : 'claude'
-  const providers = all ? ['claude', 'codex'] : [selected]
+  const providers = all ? ['claude', 'codex', 'cursor'] : [selected]
   const actions = ['status', 'repair', 'remove'].filter((a) => argv.includes(`--${a}`))
   if (actions.length > 1) throw new Error('Choose only one of --status, --repair, or --remove.')
   return {

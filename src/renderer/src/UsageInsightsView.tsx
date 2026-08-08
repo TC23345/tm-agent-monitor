@@ -73,10 +73,10 @@ function Period({ data, kind }: { data: UsageInsightPeriod; kind: PeriodKey }) {
         <strong>{compactNumber(data.totalTokens)} tokens · {data.sessions} {data.sessions === 1 ? 'session' : 'sessions'}</strong>
       </div>
       <div className="ins-provider-totals">
-        {(['claude', 'codex'] as const).filter((provider) => (data.byProvider[provider] ?? 0) > 0).map((provider) => (
+        {(['claude', 'codex', 'cursor'] as const).filter((provider) => (data.byProvider[provider] ?? 0) > 0).map((provider) => (
           <span key={provider}>
             <ProviderBadge provider={provider} />
-            <span>{provider === 'claude' ? 'Claude' : 'Codex'} · {compactNumber(data.byProvider[provider] ?? 0)}</span>
+            <span>{provider === 'claude' ? 'Claude' : provider === 'codex' ? 'Codex' : 'Cursor'} · {compactNumber(data.byProvider[provider] ?? 0)}</span>
           </span>
         ))}
       </div>

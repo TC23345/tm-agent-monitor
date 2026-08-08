@@ -38,6 +38,8 @@ test('Claude install preserves unrelated settings and creates a backup atomicall
       assert.equal(owned.length, 1, event)
       assert.equal(owned[0].command, commandFor('claude'))
     }
+    reconcileProvider('claude', 'remove', { path })
+    assert.deepEqual(JSON.parse(readFileSync(`${path}.tm-agent-monitor.bak`, 'utf8')), original)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -68,6 +70,23 @@ test('repair removes owned duplicates/outdated commands and is idempotent', () =
   }
 })
 
+test('Cursor uses the direct version 1 hooks format and preserves unrelated hooks', () => {
+  const { dir, path } = tempConfig('hooks.json')
+  try {
+    writeFileSync(path, JSON.stringify({ version: 1, hooks: { stop: [{ command: 'node other.mjs' }] } }))
+    const result = reconcileProvider('cursor', 'install', { path })
+    assert.equal(result.installed, true)
+    const installed = JSON.parse(readFileSync(path, 'utf8'))
+    assert.equal(installed.version, 1)
+    assert.equal(installed.hooks.stop[0].command, 'node other.mjs')
+    for (const event of PROVIDER_EVENTS.cursor) {
+      assert.equal(installed.hooks[event].filter(isOwnedHandler).length, 1, event)
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('repair migrates a legacy report hook from an arbitrary old checkout', () => {
   const { dir, path } = tempConfig('settings.json')
   try {
@@ -92,15 +111,19 @@ test('installation fails clearly when Node is missing', () => {
 
 test('packaged installs honor the staged stable bridge path', () => {
   const previous = process.env.TM_AGENT_MONITOR_BRIDGE_PATH
+  const previousEndpoint = process.env.TM_AGENT_MONITOR_ENDPOINT_FILE
   try {
     process.env.TM_AGENT_MONITOR_BRIDGE_PATH = 'C:\\stable\\agent-monitor\\hooks\\bridge.mjs'
+    process.env.TM_AGENT_MONITOR_ENDPOINT_FILE = 'C:\\stable\\agent-monitor\\hook-endpoint.json'
     assert.equal(
       commandFor('codex'),
-      'node "C:\\stable\\agent-monitor\\hooks\\bridge.mjs" --provider codex --owner tm-agent-monitor-hook-v1'
+      'node "C:\\stable\\agent-monitor\\hooks\\bridge.mjs" --provider codex --owner tm-agent-monitor-hook-v1 --endpoint-file "C:\\stable\\agent-monitor\\hook-endpoint.json"'
     )
   } finally {
     if (previous === undefined) delete process.env.TM_AGENT_MONITOR_BRIDGE_PATH
     else process.env.TM_AGENT_MONITOR_BRIDGE_PATH = previous
+    if (previousEndpoint === undefined) delete process.env.TM_AGENT_MONITOR_ENDPOINT_FILE
+    else process.env.TM_AGENT_MONITOR_ENDPOINT_FILE = previousEndpoint
   }
 })
 

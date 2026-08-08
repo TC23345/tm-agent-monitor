@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 
 function collect(dir, out = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name === 'out' || entry.name === 'dist') continue
+    if (entry.name === 'node_modules' || entry.name === 'out' || entry.name === 'dist' || entry.name === '.git' || entry.name === '.claude') continue
     const path = join(dir, entry.name)
     if (entry.isDirectory()) collect(path, out)
     else if (entry.name.endsWith('.test.mjs')) out.push(path)

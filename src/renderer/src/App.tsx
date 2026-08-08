@@ -5,6 +5,7 @@ import { ProjectGroup } from './ProjectGroup'
 import { AgentContextMenu, type MenuState } from './AgentContextMenu'
 import { NewProject } from './NewProject'
 import { groupByProject } from './group'
+import { applyOrder, useGroupOrder } from './useGroupOrder'
 import { SettingsPanel } from './SettingsPanel'
 import { COLLAPSE_ALL_EVENT } from './useCollapse'
 import { UsageInsightsView } from './UsageInsightsView'
@@ -16,7 +17,7 @@ import {
   LaunchContextChip, LauncherPane, WindowsPane, WindowsRefreshButton, useDesktopWindows,
   type LaunchContext
 } from './WorkspacePanes'
-import { Folder, FolderOpen, FolderPlus } from 'lucide-react'
+import { Folder, FolderOpen, FolderPlus, ListRestart } from 'lucide-react'
 
 export function App() {
   const [snap, setSnap] = useState<StatusSnapshot | null>(null)
@@ -27,6 +28,9 @@ export function App() {
   const [folderMenu, setFolderMenu] = useState(false)
   const [waitingOnly, setWaitingOnly] = useState(false)
   const [allCollapsed, setAllCollapsed] = useState(false)
+  const { order, save: saveOrder, clear: clearOrder } = useGroupOrder()
+  const [dragKey, setDragKey] = useState<string | null>(null)
+  const [drop, setDrop] = useState<{ key: string; after: boolean } | null>(null)
   // Main-frame layout: three vertical columns to start, up to six panes, one per
   // kind. Persisted locally so a summoned workspace comes back as you left it.
   const [panes, setPanes] = useState<PaneKind[]>(loadPanes)
@@ -87,7 +91,7 @@ export function App() {
   const visibleAgents = waitingOnly
     ? agents.filter((a) => a.state === 'waiting' || waitingParents.has(a.id))
     : agents
-  const groups = groupByProject(visibleAgents)
+  const groups = applyOrder(groupByProject(visibleAgents), order)
   const waiting = snap?.waitingCount ?? 0
 
   // The root session touched most recently — the default folder for launches.
@@ -106,6 +110,17 @@ export function App() {
     if (waitingOnly && waiting === 0) setWaitingOnly(false)
   }, [waitingOnly, waiting])
 
+  const commitDrop = () => {
+    if (dragKey && drop && dragKey !== drop.key) {
+      const keys = groups.map((group) => group.key).filter((key) => key !== dragKey)
+      const at = keys.indexOf(drop.key)
+      keys.splice(at + (drop.after ? 1 : 0), 0, dragKey)
+      saveOrder([...keys, ...order.filter((key) => !keys.includes(key))])
+    }
+    setDragKey(null)
+    setDrop(null)
+  }
+
   const collapseAll = () => {
     const next = !allCollapsed
     setAllCollapsed(next)
@@ -113,11 +128,12 @@ export function App() {
   }
   const providerHealth = snap ? Object.entries(snap.providers) : []
   const reportingCount = providerHealth.filter(([, health]) => health.reporting).length
+  const providerCount = providerHealth.length
   const awaitingTrust = providerHealth.some(([, health]) => health.awaitingTrust)
   const noHooks = !!snap && !snap.mock && reportingCount === 0
   const conn = {
     state: (noHooks ? 'off' : awaitingTrust ? 'warn' : 'on') as 'on' | 'warn' | 'off',
-    label: snap?.mock ? 'mock data' : noHooks ? 'no reports' : awaitingTrust ? `${reportingCount}/2 · trust` : `${reportingCount}/2 providers`,
+    label: snap?.mock ? 'mock data' : noHooks ? 'no reports' : awaitingTrust ? `${reportingCount}/${providerCount} · trust` : `${reportingCount}/${providerCount} providers`,
     title: snap?.mock
       ? 'Showing sample (mock) data — change in Settings'
       : providerHealth.map(([provider, health]) => `${provider}: ${health.reporting ? 'reporting' : health.awaitingTrust ? 'awaiting trust' : health.installed ? 'installed, silent' : 'not installed'}`).join('\n')
@@ -129,11 +145,47 @@ export function App() {
     <div className="empty">
       {noHooks
         ? 'No provider reports yet. Install hooks and review Codex trust in /hooks.'
-        : 'No active agents. Start Claude Code or Codex in a project.'}
+        : 'No active agents. Start Claude Code, Codex, or Cursor in a project.'}
     </div>
   ) : (
-    groups.map((g) => (
-      <ProjectGroup key={g.key} group={g} now={now} onRowMenu={setMenu} forceWaitingOpen={waitingOnly} />
+    groups.map((group) => (
+      <div
+        key={group.key}
+        className={`group-slot ${dragKey === group.key ? 'is-dragging' : ''} ${
+          drop?.key === group.key && dragKey && dragKey !== group.key ? (drop.after ? 'drop-after' : 'drop-before') : ''
+        }`}
+        onDragOver={(event) => {
+          if (!dragKey) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+          const rect = event.currentTarget.getBoundingClientRect()
+          const after = event.clientY > rect.top + rect.height / 2
+          setDrop((current) => current?.key === group.key && current.after === after ? current : { key: group.key, after })
+        }}
+        onDrop={(event) => {
+          event.preventDefault()
+          commitDrop()
+        }}
+      >
+        <ProjectGroup
+          group={group}
+          now={now}
+          onRowMenu={setMenu}
+          forceWaitingOpen={waitingOnly}
+          dragHandle={{
+            draggable: true,
+            onDragStart: (event) => {
+              event.dataTransfer.effectAllowed = 'move'
+              event.dataTransfer.setData('text/plain', group.key)
+              setDragKey(group.key)
+            },
+            onDragEnd: () => {
+              setDragKey(null)
+              setDrop(null)
+            }
+          }}
+        />
+      </div>
     ))
   )
 
@@ -229,6 +281,12 @@ export function App() {
               <Folder className="ctxmenu-ic" strokeWidth={2} />
               Open Projects folder
             </button>
+            {order.length > 0 && (
+              <button className="ctxmenu-item" title="Forget the dragged order and sort projects by attention again" onClick={() => { setFolderMenu(false); clearOrder() }}>
+                <ListRestart className="ctxmenu-ic" strokeWidth={2} />
+                Reset project order
+              </button>
+            )}
           </div>
         </div>
       )}

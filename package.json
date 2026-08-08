@@ -1,7 +1,7 @@
 {
   "name": "taylormade-agent-monitor",
   "version": "0.3.0",
-  "description": "Hotkey-summoned Claude and Codex agent monitor for Windows.",
+  "description": "Hotkey-summoned Claude Code, Codex, and Cursor agent monitor for Windows.",
   "author": "Taylor",
   "license": "MIT",
   "type": "module",
@@ -17,6 +17,8 @@
     "icons": "node scripts/build-icon.mjs",
     "hooks:install": "node hooks/install.mjs",
     "hooks:codex": "node hooks/install.mjs --provider codex",
+    "hooks:cursor": "node hooks/install.mjs --provider cursor",
+    "hooks:all": "node hooks/install.mjs --all --repair",
     "dist": "npm run build && npm run icons && electron-builder --win",
     "dist:dir": "npm run build && npm run icons && electron-builder --win --dir",
     "publish": "npm run build && npm run icons && electron-builder --win --publish always"

@@ -60,7 +60,41 @@ test('maps Claude lifecycle events without treating SubagentStop as parent compl
   }, { now: 1 }).kind, 'session_ended')
   assert.equal(mapHookInput('codex', {
     hook_event_name: 'SessionEnd', session_id: 's'
+  }, { now: 1 }).kind, 'session_ended')
+})
+
+test('ignores informational Claude notifications and attributes child tools to the child', () => {
+  assert.equal(mapHookInput('claude', {
+    hook_event_name: 'Notification', session_id: 's', notification_type: 'auth_success'
   }, { now: 1 }), null)
+  assert.equal(mapHookInput('claude', {
+    hook_event_name: 'Notification', session_id: 's', notification_type: 'permission_prompt', message: 'Approve?'
+  }, { now: 1 }).kind, 'attention_required')
+  assert.deepEqual(mapHookInput('claude', {
+    hook_event_name: 'PreToolUse', session_id: 's', agent_id: 'child', tool_name: 'Read'
+  }, { now: 1 }).actor, { kind: 'subagent', id: 'child' })
+})
+
+test('maps Cursor conversation hooks into the provider-neutral envelope', () => {
+  const event = mapHookInput('cursor', {
+    hook_event_name: 'beforeSubmitPrompt',
+    conversation_id: 'conversation-1',
+    generation_id: 'generation-2',
+    workspace_roots: ['C:\\repo'],
+    prompt: 'Fix it'
+  }, { now: 10 })
+  assert.equal(event.provider, 'cursor')
+  assert.equal(event.sessionId, 'conversation-1')
+  assert.equal(event.kind, 'prompt_submitted')
+  assert.equal(event.cwd, 'C:\\repo')
+})
+
+test('ignores Claude compatibility hooks invoked by Cursor', () => {
+  assert.equal(mapHookInput('claude', {
+    hook_event_name: 'SessionStart',
+    session_id: 'cursor-session',
+    cursor_version: '3.13.25'
+  }, { now: 10 }), null)
 })
 
 test('rejects malformed endpoint discovery without making a request', async () => {
