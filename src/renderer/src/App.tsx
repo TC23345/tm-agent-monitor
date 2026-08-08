@@ -5,12 +5,13 @@ import { ProjectGroup } from './ProjectGroup'
 import { AgentContextMenu, type MenuState } from './AgentContextMenu'
 import { NewProject } from './NewProject'
 import { groupByProject } from './group'
+import { applyOrder, useGroupOrder } from './useGroupOrder'
 import { Settings } from './Icons'
 import { SettingsPanel } from './SettingsPanel'
 import { COLLAPSE_ALL_EVENT } from './useCollapse'
 import { UsageInsightsView } from './UsageInsightsView'
 import { SpendView } from './SpendView'
-import { Folder, FolderOpen, FolderPlus, ChevronsDownUp, ChevronsUpDown, ChartColumn, Coins } from 'lucide-react'
+import { Folder, FolderOpen, FolderPlus, ChevronsDownUp, ChevronsUpDown, ChartColumn, Coins, ListRestart } from 'lucide-react'
 import logo from './assets/logo.png'
 
 export function App() {
@@ -23,6 +24,9 @@ export function App() {
   const [waitingOnly, setWaitingOnly] = useState(false)
   const [allCollapsed, setAllCollapsed] = useState(false)
   const [view, setView] = useState<'agents' | 'insights' | 'spend'>('agents')
+  const { order, save: saveOrder, clear: clearOrder } = useGroupOrder()
+  const [dragKey, setDragKey] = useState<string | null>(null)
+  const [drop, setDrop] = useState<{ key: string; after: boolean } | null>(null)
 
   useEffect(() => {
     window.watch.getStatus().then(setSnap)
@@ -56,7 +60,7 @@ export function App() {
   const visibleAgents = waitingOnly
     ? agents.filter((a) => a.state === 'waiting' || waitingParents.has(a.id))
     : agents
-  const groups = groupByProject(visibleAgents)
+  const groups = applyOrder(groupByProject(visibleAgents), order)
   const waiting = snap?.waitingCount ?? 0
 
   // When the last waiting session resolves, drop the filter so the list never
@@ -64,6 +68,19 @@ export function App() {
   useEffect(() => {
     if (waitingOnly && waiting === 0) setWaitingOnly(false)
   }, [waitingOnly, waiting])
+
+  // Commit a drag: rebuild the full key order from what's on screen, keeping
+  // any groups hidden by the waiting filter at the end of the saved order.
+  const commitDrop = () => {
+    if (dragKey && drop && dragKey !== drop.key) {
+      const keys = groups.map((g) => g.key).filter((k) => k !== dragKey)
+      const at = keys.indexOf(drop.key)
+      keys.splice(at + (drop.after ? 1 : 0), 0, dragKey)
+      saveOrder([...keys, ...order.filter((k) => !keys.includes(k))])
+    }
+    setDragKey(null)
+    setDrop(null)
+  }
 
   const collapseAll = () => {
     const next = !allCollapsed
@@ -115,7 +132,43 @@ export function App() {
             </div>
           ) : (
             groups.map((g) => (
-              <ProjectGroup key={g.key} group={g} now={now} onRowMenu={setMenu} forceWaitingOpen={waitingOnly} />
+              <div
+                key={g.key}
+                className={`group-slot ${dragKey === g.key ? 'is-dragging' : ''} ${
+                  drop?.key === g.key && dragKey && dragKey !== g.key ? (drop.after ? 'drop-after' : 'drop-before') : ''
+                }`}
+                onDragOver={(e) => {
+                  if (!dragKey) return
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                  const r = e.currentTarget.getBoundingClientRect()
+                  const after = e.clientY > r.top + r.height / 2
+                  setDrop((d) => (d && d.key === g.key && d.after === after ? d : { key: g.key, after }))
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  commitDrop()
+                }}
+              >
+                <ProjectGroup
+                  group={g}
+                  now={now}
+                  onRowMenu={setMenu}
+                  forceWaitingOpen={waitingOnly}
+                  dragHandle={{
+                    draggable: true,
+                    onDragStart: (e) => {
+                      e.dataTransfer.effectAllowed = 'move'
+                      e.dataTransfer.setData('text/plain', g.key)
+                      setDragKey(g.key)
+                    },
+                    onDragEnd: () => {
+                      setDragKey(null)
+                      setDrop(null)
+                    }
+                  }}
+                />
+              </div>
             ))
           )}
         </div>
@@ -184,6 +237,12 @@ export function App() {
               <Folder className="ctxmenu-ic" strokeWidth={2} />
               Open Projects folder
             </button>
+            {order.length > 0 && (
+              <button className="ctxmenu-item" title="Forget the dragged order and sort projects by attention again" onClick={() => { setFolderMenu(false); clearOrder() }}>
+                <ListRestart className="ctxmenu-ic" strokeWidth={2} />
+                Reset project order
+              </button>
+            )}
           </div>
         </div>
       )}

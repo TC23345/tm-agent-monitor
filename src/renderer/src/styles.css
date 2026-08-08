@@ -182,6 +182,23 @@ html, body, #root {
 .empty { padding: 28px 8px; font-size: 13px; color: var(--muted); text-align: center; line-height: 1.5; }
 
 .group { margin-bottom: 4px; }
+/* Drag-to-reorder: wrapper carries the drop indicator so the line spans the full group. */
+.group-slot { position: relative; }
+.group-slot.is-dragging { opacity: 0.45; }
+.group-slot.drop-before::before,
+.group-slot.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 1;
+}
+.group-slot.drop-before::before { top: -3px; }
+.group-slot.drop-after::after { bottom: -1px; }
 .group-head {
   -webkit-app-region: no-drag;
   display: flex;
