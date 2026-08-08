@@ -89,6 +89,7 @@ export function App() {
   }
   const providerHealth = snap ? Object.entries(snap.providers) : []
   const reportingCount = providerHealth.filter(([, health]) => health.reporting).length
+  const providerCount = providerHealth.length
   const awaitingTrust = providerHealth.some(([, health]) => health.awaitingTrust)
   const noHooks = !!snap && !snap.mock && reportingCount === 0
   const connTitle = snap?.mock
@@ -97,7 +98,7 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="header" title="Claude and Codex agent monitor · drag here to move">
+      <header className="header" title="Claude, Codex, and Cursor agent monitor · drag here to move">
         <img className="brand" src={logo} alt="TaylorMade Solutions" draggable={false} />
         <div className="header-right">
           {waiting > 0 && (
@@ -182,7 +183,7 @@ export function App() {
           title={connTitle}
         >
           <span className="conn-dot" />
-          {snap?.mock ? 'mock data' : noHooks ? 'no reports' : awaitingTrust ? `${reportingCount}/2 · trust` : `${reportingCount}/2 providers`}
+          {snap?.mock ? 'mock data' : noHooks ? 'no reports' : awaitingTrust ? `${reportingCount}/${providerCount} · trust` : `${reportingCount}/${providerCount} providers`}
         </div>
         <div className="footer-actions">
           {view === 'agents' && groups.length > 1 && (
@@ -207,7 +208,7 @@ export function App() {
           <button
             className={`iconbtn ${view === 'insights' ? 'iconbtn--active' : ''}`}
             aria-label={view === 'insights' ? 'Back to agent monitor' : 'Open Usage Insights'}
-            title={view === 'insights' ? 'Back to agent monitor' : 'Open Usage Insights — local Claude and Codex patterns'}
+            title={view === 'insights' ? 'Back to agent monitor' : 'Open Usage Insights — local provider patterns'}
             onClick={() => setView((v) => (v === 'insights' ? 'agents' : 'insights'))}
           >
             <ChartColumn className="gear" strokeWidth={2} />

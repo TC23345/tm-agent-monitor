@@ -118,6 +118,7 @@ html, body, #root {
 .prov-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
 .prov-dot--claude { background: #e8906b; box-shadow: 0 0 0 3px rgba(218, 119, 75, 0.2); }
 .prov-dot--codex { background: #6ab0e8; box-shadow: 0 0 0 3px rgba(75, 157, 218, 0.2); }
+.prov-dot--cursor { background: #b58cff; box-shadow: 0 0 0 3px rgba(181, 140, 255, 0.2); }
 .uzone-note { font-size: 13px; color: var(--muted); padding: 2px 0 4px; }
 .provider-badge {
   display: inline-flex; align-items: center; justify-content: center;
@@ -125,8 +126,10 @@ html, body, #root {
   line-height: 1;
 }
 .provider-badge-svg { width: 11px; height: 11px; display: block; }
+.provider-badge-letter { font-size: 10px; font-weight: 800; }
 .provider-badge--claude { color: #f0a77b; background: rgba(218, 119, 75, 0.16); border: 1px solid rgba(218, 119, 75, 0.32); }
 .provider-badge--codex { color: var(--accent-bright); background: rgba(75, 157, 218, 0.14); border: 1px solid rgba(75, 157, 218, 0.32); }
+.provider-badge--cursor { color: #c7a8ff; background: rgba(181, 140, 255, 0.14); border: 1px solid rgba(181, 140, 255, 0.32); }
 
 .quota { margin-bottom: 12px; }
 .quota:last-child { margin-bottom: 0; }

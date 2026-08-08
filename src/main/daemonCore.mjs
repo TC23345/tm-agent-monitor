@@ -3,7 +3,7 @@ const LEGACY_EVENTS = new Set([
   'Notification', 'Stop', 'SubagentStart', 'SubagentStop', 'SessionEnd'
 ])
 
-const PROVIDERS = new Set(['claude', 'codex'])
+const PROVIDERS = new Set(['claude', 'codex', 'cursor'])
 const EVENT_KINDS = new Set([
   'session_started', 'prompt_submitted', 'tool_started', 'tool_finished',
   'attention_required', 'turn_completed', 'session_ended',

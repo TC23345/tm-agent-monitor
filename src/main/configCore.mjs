@@ -45,7 +45,9 @@ export function bootstrapConfig(options) {
     hotkey: merged.CLAUDE_WATCH_HOTKEY || 'Control+Alt+W',
     notifications: merged.CLAUDE_WATCH_NOTIFICATIONS === '1',
     mock: (options.argv ?? process.argv).includes('--mock') || merged.CLAUDE_WATCH_MOCK === '1',
-    endpointFile: merged.TM_AGENT_MONITOR_ENDPOINT_FILE || join(options.appData, 'taylormade-agent-monitor', 'hook-endpoint.json'),
+    endpointFile: merged.TM_AGENT_MONITOR_ENDPOINT_FILE || (options.isPackaged
+      ? join(options.appData, 'taylormade-agent-monitor', 'hook-endpoint.json')
+      : join(options.userData, 'hook-endpoint.dev.json')),
     configFile: join(options.userData, '.env'),
     loadedEnvFiles
   })

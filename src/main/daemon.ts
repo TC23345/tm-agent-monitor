@@ -27,7 +27,7 @@ export class Daemon {
   private server: http.Server
   private bound = false
   private lastReportAt = 0
-  private readonly providerLastReportAt: Record<ProviderId, number> = { claude: 0, codex: 0 }
+  private readonly providerLastReportAt: Record<ProviderId, number> = { claude: 0, codex: 0, cursor: 0 }
   private readonly token: string
   private readonly maxBodyBytes: number
 

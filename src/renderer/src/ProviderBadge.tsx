@@ -26,16 +26,21 @@ function CodexMark() {
   )
 }
 
+function CursorMark() {
+  return <span className="provider-badge-letter" aria-hidden="true">C</span>
+}
+
 const LABELS: Record<ProviderId, string> = {
   claude: 'Claude Code',
-  codex: 'Codex'
+  codex: 'Codex',
+  cursor: 'Cursor'
 }
 
 /** Compact provider brand mark for row/settings/insights chrome. */
 export function ProviderBadge({ provider }: { provider: ProviderId }) {
   return (
     <span className={`provider-badge provider-badge--${provider}`} title={`${LABELS[provider]} agent`}>
-      {provider === 'claude' ? <ClaudeCodeMark /> : <CodexMark />}
+      {provider === 'claude' ? <ClaudeCodeMark /> : provider === 'codex' ? <CodexMark /> : <CursorMark />}
     </span>
   )
 }

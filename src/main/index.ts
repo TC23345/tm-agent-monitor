@@ -137,7 +137,8 @@ function resourcePath(name: string): string {
 
 const PROVIDER_TOAST_LABEL: Record<ProviderId, string> = {
   claude: 'Claude Code',
-  codex: 'Codex'
+  codex: 'Codex',
+  cursor: 'Cursor'
 }
 
 /** PNG path for desktop notifications; falls back to the app icon when missing. */
@@ -165,7 +166,7 @@ function publishEndpoint(): void {
   try {
     mkdirSync(dirname(config.endpointFile), { recursive: true })
     const tmp = `${config.endpointFile}.${process.pid}.tmp`
-    writeFileSync(tmp, `${JSON.stringify({ schemaVersion: 1, port: daemon.getPort(), token: daemon.getAuthToken() }, null, 2)}\n`, { mode: 0o600 })
+    writeFileSync(tmp, `${JSON.stringify({ schemaVersion: 1, port: daemon.getPort(), token: daemon.getAuthToken(), pid: process.pid, updatedAt: Date.now() }, null, 2)}\n`, { mode: 0o600 })
     renameSync(tmp, config.endpointFile)
   } catch (error) {
     console.error(`[bridge] endpoint discovery write failed: ${error instanceof Error ? error.message : error}`)
@@ -263,6 +264,10 @@ function resolveShell(): string {
  */
 function openTerminal(cwd?: string, provider: ProviderId = 'claude', purpose: 'agent' | 'hook-trust' = 'agent'): void {
   const dir = cwd && existsSync(cwd) ? cwd : app.getPath('home')
+  if (provider === 'cursor') {
+    openInCursor(dir)
+    return
+  }
   const opts = { detached: true, stdio: 'ignore' as const, windowsHide: false }
   const shellExe = resolveShell()
   const command = provider === 'codex' ? 'codex' : 'claude'
@@ -420,7 +425,7 @@ function buildSnapshot(): StatusSnapshot {
     agents,
     usage,
     waitingCount: waiting.length,
-    providers: { claude: health('claude'), codex: health('codex') },
+    providers: { claude: health('claude'), codex: health('codex'), cursor: health('cursor') },
     mock: false,
     generatedAt: now
   }
@@ -437,7 +442,16 @@ const PROVIDER_HOOK_EVENTS: Record<ProviderId, string[]> = {
     'PostToolUse', 'Notification', 'Stop', 'SubagentStart', 'SubagentStop',
     'PreCompact', 'PostCompact', 'SessionEnd'
   ],
-  codex: ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PermissionRequest', 'Stop', 'SubagentStart', 'SubagentStop']
+  codex: [
+    'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PermissionRequest',
+    'PostToolUse', 'PostToolUseFailure', 'Stop', 'SubagentStart', 'SubagentStop',
+    'PreCompact', 'PostCompact', 'SessionEnd'
+  ],
+  cursor: [
+    'sessionStart', 'beforeSubmitPrompt', 'preToolUse', 'postToolUse',
+    'postToolUseFailure', 'stop', 'subagentStart', 'subagentStop',
+    'preCompact', 'sessionEnd'
+  ]
 }
 const HOOK_OWNER = 'tm-agent-monitor-hook-v1'
 
@@ -466,23 +480,23 @@ function stagePackagedHookRuntime(): string {
 function providerHookState(provider: ProviderId): { installed: boolean; needsRepair: boolean } {
   const path = provider === 'claude'
     ? join(app.getPath('home'), '.claude', 'settings.json')
-    : join(app.getPath('home'), '.codex', 'hooks.json')
+    : join(app.getPath('home'), provider === 'codex' ? '.codex' : '.cursor', 'hooks.json')
   try {
-    const config = JSON.parse(readFileSync(path, 'utf8')) as { hooks?: Record<string, unknown> }
+    const hookConfig = JSON.parse(readFileSync(path, 'utf8')) as { hooks?: Record<string, unknown> }
     const normalize = (value: unknown) => String(value ?? '').trim().replace(/\s+/g, ' ')
-    const expected = normalize(`node "${hookBridgePath()}" --provider ${provider} --owner ${HOOK_OWNER}`)
+    const expected = normalize(`node "${hookBridgePath()}" --provider ${provider} --owner ${HOOK_OWNER} --endpoint-file "${config.endpointFile}"`)
     const allOwned: Array<{ event: string; command: string; async?: boolean }> = []
-    for (const [event, rawGroups] of Object.entries(config.hooks ?? {})) {
+    for (const [event, rawGroups] of Object.entries(hookConfig.hooks ?? {})) {
       if (!Array.isArray(rawGroups)) continue
       for (const group of rawGroups) {
         if (!group || typeof group !== 'object') continue
-        const hooks = (group as { hooks?: unknown }).hooks
-        if (!Array.isArray(hooks)) continue
+        const nested = (group as { hooks?: unknown }).hooks
+        const hooks = provider === 'cursor' ? [group] : Array.isArray(nested) ? nested : []
         for (const raw of hooks) {
           if (!raw || typeof raw !== 'object') continue
           const handler = raw as { type?: unknown; command?: unknown; async?: unknown }
           const command = normalize(handler.command)
-          const owned = handler.type === 'command' && (
+          const owned = (handler.type === undefined || handler.type === 'command') && (
             command.includes(`--owner ${HOOK_OWNER}`) ||
             command.includes(`--owner=${HOOK_OWNER}`) ||
             (provider === 'claude' && /(?:^|[\\/])hooks[\\/]report\.mjs(?:"|\s|$)/i.test(command))
@@ -822,7 +836,8 @@ function settingsView() {
       { id: 'history', label: 'Usage history cache', path: join(userData, 'usage-history.json'), detail: 'Local daily totals used when durable history is unavailable', exists: existsSync(join(userData, 'usage-history.json')) },
       { id: 'bridge', label: 'Bridge runtime', path: packagedHookRoot(), detail: 'Stable hook scripts and native focus helper used by installed providers', exists: existsSync(packagedHookRoot()) },
       { id: 'claude-config', label: 'Claude hook config', path: join(home, '.claude', 'settings.json'), detail: 'Claude Code lifecycle hook registrations', exists: existsSync(join(home, '.claude', 'settings.json')) },
-      { id: 'codex-config', label: 'Codex hook config', path: join(home, '.codex', 'hooks.json'), detail: 'Codex lifecycle hook registrations and trust entry point', exists: existsSync(join(home, '.codex', 'hooks.json')) }
+      { id: 'codex-config', label: 'Codex hook config', path: join(home, '.codex', 'hooks.json'), detail: 'Codex lifecycle hook registrations and trust entry point', exists: existsSync(join(home, '.codex', 'hooks.json')) },
+      { id: 'cursor-config', label: 'Cursor hook config', path: join(home, '.cursor', 'hooks.json'), detail: 'Cursor lifecycle hook registrations', exists: existsSync(join(home, '.cursor', 'hooks.json')) }
     ]
   }
 }
@@ -854,11 +869,11 @@ async function systemDiagnostics(requested?: string) {
       }
     }),
     check('endpoint', 'Hook endpoint file', async () => {
-      const raw = JSON.parse(readFileSync(config.endpointFile, 'utf8')) as { port?: unknown; token?: unknown }
-      const ok = raw.port === daemon.getPort() && typeof raw.token === 'string' && raw.token.length > 0
+      const raw = JSON.parse(readFileSync(config.endpointFile, 'utf8')) as { port?: unknown; token?: unknown; pid?: unknown }
+      const ok = raw.port === daemon.getPort() && raw.pid === process.pid && raw.token === daemon.getAuthToken()
       return { ok, detail: ok ? `Discovery file matches port ${raw.port}` : 'Discovery file is missing or does not match the daemon' }
     }),
-    ...(['claude', 'codex'] as const).map((provider) => check(`${provider}-hooks`, `${provider === 'claude' ? 'Claude Code' : 'Codex'} hooks`, async () => {
+    ...(['claude', 'codex', 'cursor'] as const).map((provider) => check(`${provider}-hooks`, `${PROVIDER_TOAST_LABEL[provider]} hooks`, async () => {
       const state = providerHookState(provider)
       const reporting = daemon.getProviderLastReport(provider)
       return { ok: state.installed && !state.needsRepair, detail: state.needsRepair ? 'Installed configuration needs repair' : !state.installed ? 'Hooks are not installed' : reporting ? `Installed; last event ${new Date(reporting).toLocaleString()}` : 'Installed; no event received yet' }
@@ -887,7 +902,7 @@ function registerIpc(): void {
     return systemDiagnostics(id as string | undefined)
   })
   ipcMain.handle('hooks:manage', async (_e, provider: ProviderId, action: string) => {
-    if ((provider !== 'claude' && provider !== 'codex') || !['install', 'repair', 'remove', 'status'].includes(action)) {
+    if ((provider !== 'claude' && provider !== 'codex' && provider !== 'cursor') || !['install', 'repair', 'remove', 'status'].includes(action)) {
       throw new Error('Invalid hook operation')
     }
     const script = app.isPackaged ? join(process.resourcesPath, 'hooks', 'install.mjs') : join(__dirname, '../../hooks/install.mjs')
@@ -901,7 +916,7 @@ function registerIpc(): void {
     const result = await new Promise<{ ok: boolean; message: string }>((resolve) => {
       const child = spawn(process.execPath, args, {
         windowsHide: true,
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', TM_AGENT_MONITOR_BRIDGE_PATH: bridgePath },
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', TM_AGENT_MONITOR_BRIDGE_PATH: bridgePath, TM_AGENT_MONITOR_ENDPOINT_FILE: config.endpointFile },
         stdio: ['ignore', 'pipe', 'pipe']
       })
       let output = ''
@@ -984,7 +999,7 @@ function registerIpc(): void {
   ipcMain.on('text:copy', (_e, t: string) => { if (typeof t === 'string' && t.length <= 100_000) clipboard.writeText(t) })
   ipcMain.on('terminal:open', (_e, cwd?: string, provider?: ProviderId) => {
     if (cwd !== undefined && (typeof cwd !== 'string' || cwd.length > 32_767)) return
-    if (provider !== undefined && provider !== 'claude' && provider !== 'codex') return
+    if (provider !== undefined && provider !== 'claude' && provider !== 'codex' && provider !== 'cursor') return
     openTerminal(cwd, provider)
   })
   ipcMain.on('cursor:open', () => openInCursor())
@@ -1069,7 +1084,10 @@ if (!gotLock) {
 
     daemon = new Daemon(PORT, { token: bridgeToken() })
     const daemonStarted = await daemon.start()
-    if (daemonStarted) publishEndpoint()
+    if (daemonStarted) {
+      publishEndpoint()
+      setInterval(publishEndpoint, 15_000)
+    }
 
     createWindow()
     registerHotkey()

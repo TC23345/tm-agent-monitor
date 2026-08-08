@@ -70,7 +70,8 @@ export function mockSnapshot(): StatusSnapshot {
     mock: true,
     providers: {
       claude: { installed: true, awaitingTrust: false, reporting: true, lastReportAt: now, bridgeVersion: '1' },
-      codex: { installed: true, awaitingTrust: false, reporting: true, lastReportAt: now, bridgeVersion: '1' }
+      codex: { installed: true, awaitingTrust: false, reporting: true, lastReportAt: now, bridgeVersion: '1' },
+      cursor: { installed: true, awaitingTrust: false, reporting: true, lastReportAt: now, bridgeVersion: '1' }
     },
     generatedAt: now,
     waitingCount: 2,

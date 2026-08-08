@@ -4,8 +4,8 @@ import { resetsIn } from './format'
 // Providers render in a fixed order, and their accounts always read plan → local
 // → API spend, so Claude and Codex line up row-for-row instead of appearing in
 // whatever order they were discovered in.
-export const PROVIDER_ORDER: ProviderId[] = ['claude', 'codex']
-export const PROVIDER_NAME: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex' }
+export const PROVIDER_ORDER: ProviderId[] = ['claude', 'codex', 'cursor']
+export const PROVIDER_NAME: Record<ProviderId, string> = { claude: 'Claude Code', codex: 'Codex', cursor: 'Cursor' }
 const KIND_ORDER: Record<UsageAccount['kind'], number> = { subscription: 0, local: 1, api: 2 }
 
 export interface ProviderAccounts {
@@ -28,7 +28,7 @@ export function byProvider(accounts: UsageAccount[]): ProviderAccounts[] {
 // The provider header already names the provider, so a leading "Claude "/"Codex "
 // in an account label is redundant ("Codex local · Team" → "local · Team"). Left
 // alone if stripping would empty it, so an unexpected label still shows.
-const PROVIDER_PREFIX = /^(claude|codex)\s+/i
+const PROVIDER_PREFIX = /^(claude|codex|cursor)\s+/i
 export function zoneLabel(label: string): string {
   const stripped = label.replace(PROVIDER_PREFIX, '').trim()
   return stripped.length > 0 ? stripped : label

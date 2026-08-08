@@ -218,13 +218,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               })}
 
               <div className="section-head section-head--spaced"><span>Provider hooks</span></div>
-              {(['claude', 'codex'] as const).map((provider) => {
+              {(['claude', 'codex', 'cursor'] as const).map((provider) => {
                 const health = s.providers[provider]
                 const action = health.needsRepair ? 'repair' : health.installed ? 'remove' : 'install'
                 const result = diagnostics[`${provider}-hooks`]
                 return <div className="hook-block" key={provider}>
                   <div className="srow">
-                    <span className="slabel"><ProviderBadge provider={provider} />{provider === 'claude' ? 'Claude Code hooks' : 'Codex hooks'}<span className="shint">{result?.detail ?? (health.installed ? 'installed' : 'not installed')}</span></span>
+                    <span className="slabel"><ProviderBadge provider={provider} />{provider === 'claude' ? 'Claude Code hooks' : provider === 'codex' ? 'Codex hooks' : 'Cursor hooks'}<span className="shint">{result?.detail ?? (health.installed ? 'installed' : 'not installed')}</span></span>
                     <span className="sactions">
                       {provider === 'codex' && health.awaitingTrust && !health.needsRepair && <button className="hotkey-btn is-primary" disabled={hookBusy !== null} onClick={reviewCodexTrust}>Review trust</button>}
                       <button className="hotkey-btn is-compact" disabled={hookBusy !== null} onClick={() => manageHooks(provider, action)}>{hookBusy === provider ? 'Working…' : action === 'repair' ? 'Repair' : action === 'remove' ? 'Remove' : 'Install'}</button>

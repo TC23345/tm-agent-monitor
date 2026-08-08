@@ -7,7 +7,7 @@ The panel opens as a full-height sidebar pinned to the left edge of whichever di
 ## Current capabilities
 
 - Provider-neutral live lifecycle model with collision-safe identities (`provider:sessionId[:actorId]`).
-- Claude and Codex roots grouped together by canonical project path, with provider badges and expandable child rows.
+- Claude Code, Codex, and Cursor roots grouped together by canonical project path, with provider badges and expandable child rows.
 - Three views switched from the footer: **agents** (live sessions, with limit bars above), **spend** (today's tokens and value per provider and project), and **insights** (local usage patterns).
 - The usage block at the top shows limit bars only — Claude and Codex separately — so it stays scannable; token counts and spend live in the spend view.
 - Per-provider install/reporting/trust health. Codex user hooks require an explicit review in `/hooks`.
@@ -43,7 +43,7 @@ node hooks/install.mjs --all --repair
 node hooks/install.mjs --all --remove
 ```
 
-Installer writes are atomic, preserve unrelated settings, create `*.tm-agent-monitor.bak`, and remove only handlers carrying the exact ownership marker. After installing Codex hooks, use **Settings → Codex hooks → Review trust**. The app copies `/hooks`, opens Codex in a terminal, and keeps the trust warning visible until a real hook event verifies the bridge. Local Codex desktop, CLI, and IDE surfaces that emit hooks are supported; cloud-only tasks are out of scope.
+Installer writes are atomic, preserve unrelated settings, create `*.tm-agent-monitor.bak`, and remove only handlers carrying the exact ownership marker. Claude Code, Codex, and Cursor have separate provider registrations. After installing Codex hooks, use **Settings → Codex hooks → Review trust**. The app copies `/hooks`, opens Codex in a terminal, and keeps the trust warning visible until a real hook event verifies the bridge. Local surfaces that emit hooks are supported; cloud-only tasks are out of scope.
 
 The app publishes `%APPDATA%\taylormade-agent-monitor\hook-endpoint.json` containing `{schemaVersion, port, token}`. This keeps custom ports synchronized without depending on a hook process inheriting Electron environment variables.
 
@@ -51,7 +51,7 @@ The app publishes `%APPDATA%\taylormade-agent-monitor\hook-endpoint.json` contai
 
 | Source | Purpose | Stability |
 |---|---|---|
-| Claude/Codex lifecycle hooks | Authoritative live state | Supported provider surface |
+| Claude/Codex/Cursor lifecycle hooks | Authoritative live state | Supported provider surface |
 | `~/.claude/projects` JSONL | Claude daily tokens/value | Local transcript data |
 | `~/.codex/sessions` rollouts | Codex tokens, context, quota windows | Best effort; parser drift disables only Codex usage |
 | Claude OAuth usage endpoint | Personal subscription windows | Best effort local account data |
@@ -81,7 +81,7 @@ Configuration is bootstrapped before provider services are constructed. Preceden
 ## Architecture
 
 ```text
-Claude/Codex hooks -> hooks/bridge.mjs -> authenticated POST /v1/events
+Claude/Codex/Cursor hooks -> hooks/bridge.mjs -> authenticated POST /v1/events
                                              |
 Claude transcript ledger --------------------+--> provider-neutral AgentStore
 Codex rollout parser ------------------------+--> UsageAccount[] / DailyUsageDay
