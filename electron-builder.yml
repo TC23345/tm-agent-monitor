@@ -1,5 +1,5 @@
 appId: com.taylormade.agent-monitor
-productName: TaylorMade Agent Monitor
+productName: TaylorMade Agents
 directories:
   output: dist
   buildResources: build
@@ -9,10 +9,14 @@ files:
 # koffi is a native module loaded at runtime — it must live outside the asar.
 asarUnpack:
   - "**/node_modules/koffi/**"
-# Ship the tray/app PNGs so the installed app finds them at process.resourcesPath.
+# Ship the tray/app/provider PNGs so the installed app finds them at process.resourcesPath.
 extraResources:
   - from: resources
     to: .
+    filter:
+      - "*.png"
+  - from: resources/providers
+    to: providers
     filter:
       - "*.png"
   - from: hooks
@@ -43,7 +47,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: TaylorMade Agent Monitor
+  shortcutName: TaylorMade Agents
 portable:
   artifactName: tm-agent-monitor-${version}-portable.exe
 # Auto-update feed: GitHub Releases on this repo. The repo must be PUBLIC so the

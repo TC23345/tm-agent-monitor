@@ -135,6 +135,24 @@ function resourcePath(name: string): string {
   return app.isPackaged ? join(process.resourcesPath, name) : join(__dirname, '../../resources', name)
 }
 
+const PROVIDER_TOAST_LABEL: Record<ProviderId, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex'
+}
+
+/** PNG path for desktop notifications; falls back to the app icon when missing. */
+function notificationIcon(provider?: ProviderId): string | undefined {
+  const candidates = [
+    provider === 'claude' ? resourcePath('providers/claude-code.png') : undefined,
+    provider === 'codex' ? resourcePath('providers/codex.png') : undefined,
+    resourcePath('icon.png')
+  ]
+  for (const path of candidates) {
+    if (path && existsSync(path)) return path
+  }
+  return undefined
+}
+
 function bridgeToken(): string {
   try {
     const raw = JSON.parse(readFileSync(config.endpointFile, 'utf8'))
@@ -169,6 +187,7 @@ function createWindow(): void {
     transparent: true,
     resizable: false,
     skipTaskbar: true,
+    icon: notificationIcon(),
     alwaysOnTop: true,
     hasShadow: false,
     fullscreenable: false,
@@ -539,8 +558,9 @@ function notifyTransitions(snap: StatusSnapshot): void {
     for (const a of snap.agents) {
       if (a.state === 'waiting' && !prevWaiting.has(a.id)) {
         const note = new Notification({
-          title: `${a.project} needs input`,
-          body: a.question ?? 'Waiting for input'
+          title: `${PROVIDER_TOAST_LABEL[a.provider]} · ${a.project} needs input`,
+          body: a.question ?? 'Waiting for input',
+          icon: notificationIcon(a.provider)
         })
         // Click jumps straight to that agent's terminal; fall back to the panel.
         note.on('click', () => {
@@ -579,7 +599,8 @@ function notifyUsageThresholds(p: PlanWindow): void {
         : ''
       new Notification({
         title: sev === 'critical' ? `${q.label} window nearly used up` : `${q.label} usage is high`,
-        body: `${Math.round(q.usedPct)}% of your ${windowName} window used${resetTxt}`
+        body: `${Math.round(q.usedPct)}% of your ${windowName} window used${resetTxt}`,
+        icon: notificationIcon()
       }).show()
     }
     prevSeverity[key] = sev
@@ -763,7 +784,7 @@ function setupAutoUpdate(): void {
     updateReady = info.version
     tray?.setToolTip(`TaylorMade Agent Monitor — update ${info.version} ready (right-click → Restart to update)`)
     if (Notification.isSupported()) {
-      new Notification({ title: 'Update ready', body: `Version ${info.version} — right-click the tray icon → Restart to update (or it installs on quit).` }).show()
+      new Notification({ title: 'Update ready', body: `Version ${info.version} — right-click the tray icon → Restart to update (or it installs on quit).`, icon: notificationIcon() }).show()
     }
   })
   autoUpdater.on('error', (e) => console.error(`[update] ${e?.message ?? e}`))
@@ -1027,6 +1048,7 @@ if (!gotLock) {
   app.on('second-instance', () => toggleWindow())
 
   app.whenReady().then(async () => {
+    app.setName('TaylorMade Agents')
     if (process.platform === 'win32') app.setAppUserModelId('com.taylormade.agent-monitor')
 
     settings = loadSettings()
