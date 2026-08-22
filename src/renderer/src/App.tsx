@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { StatusSnapshot } from '@shared/types'
+import type { StatusSnapshot, TerminalLaunch } from '@shared/types'
 import { UsageDashboard } from './UsageDashboard'
 import { ProjectGroup } from './ProjectGroup'
 import { AgentContextMenu, type MenuState } from './AgentContextMenu'
@@ -10,14 +10,20 @@ import { SettingsPanel } from './SettingsPanel'
 import { COLLAPSE_ALL_EVENT } from './useCollapse'
 import { UsageInsightsView } from './UsageInsightsView'
 import { SpendView } from './SpendView'
-import { TopBar } from './TopBar'
+import { TopBar, type MenuName } from './TopBar'
 import { Pane } from './Pane'
-import { DEFAULT_PANES, MAX_PANES, PANE_KINDS, loadPanes, savePanes, type PaneKind } from './panes'
+import { TerminalPane } from './TerminalPane'
+import { MenuCheckItem, MenuPop } from './Menu'
+import {
+  MAX_PANES, SIDEBAR_VIEWS, defaultPanes, isUniqueKind, loadPanes, loadSidebarViews, newPane,
+  savePanes, saveSidebarViews,
+  type PaneInstance, type PaneKind, type SidebarView, type TerminalPaneConfig
+} from './panes'
 import {
   LaunchContextChip, LauncherPane, WindowsPane, WindowsRefreshButton, useDesktopWindows,
   type LaunchContext
 } from './WorkspacePanes'
-import { Folder, FolderOpen, FolderPlus, ListRestart } from 'lucide-react'
+import { ChevronDown, X } from 'lucide-react'
 
 export function App() {
   const [snap, setSnap] = useState<StatusSnapshot | null>(null)
@@ -25,23 +31,28 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [menu, setMenu] = useState<MenuState | null>(null)
-  const [folderMenu, setFolderMenu] = useState(false)
+  const [openMenu, setOpenMenu] = useState<MenuName | 'sidebar' | null>(null)
   const [waitingOnly, setWaitingOnly] = useState(false)
   const [allCollapsed, setAllCollapsed] = useState(false)
   const { order, save: saveOrder, clear: clearOrder } = useGroupOrder()
   const [dragKey, setDragKey] = useState<string | null>(null)
   const [drop, setDrop] = useState<{ key: string; after: boolean } | null>(null)
-  // Main-frame layout: three vertical columns to start, up to six panes, one per
-  // kind. Persisted locally so a summoned workspace comes back as you left it.
-  const [panes, setPanes] = useState<PaneKind[]>(loadPanes)
+  // Main-frame layout: the launcher plus embedded terminal panes, drag-
+  // reorderable, up to six. Persisted locally so a summoned workspace comes
+  // back as you left it.
+  const [panes, setPanes] = useState<PaneInstance[]>(loadPanes)
+  const [paneDrag, setPaneDrag] = useState<string | null>(null)
+  const [paneDrop, setPaneDrop] = useState<{ id: string; after: boolean } | null>(null)
+  // Data views stacked under the agent list, toggled from the sidebar menu.
+  const [sidebarViews, setSidebarViews] = useState<SidebarView[]>(loadSidebarViews)
   // Launch actions start in the active project by default; the header chip toggles
   // back to the home folder so a launch target is never a surprise.
   const [useProjectContext, setUseProjectContext] = useState(true)
   // Drives the slide-up / slide-down transition. Starts closed so the very first
   // painted frame is already off-screen and the card rises into place.
   const [open, setOpen] = useState(false)
-  // Only enumerate windows while a pane is showing them.
-  const desktop = useDesktopWindows(panes.includes('windows'))
+  // Only enumerate windows while the sidebar section is showing them.
+  const desktop = useDesktopWindows(sidebarViews.includes('windows'))
 
   useEffect(() => {
     window.watch.getStatus().then(setSnap)
@@ -50,6 +61,7 @@ export function App() {
   }, [])
 
   useEffect(() => savePanes(panes), [panes])
+  useEffect(() => saveSidebarViews(sidebarViews), [sidebarViews])
 
   // Main sequences the animation: it shows the window then sends 'enter', and on
   // hide sends 'exit' and waits for the slide-down before the window disappears.
@@ -73,18 +85,21 @@ export function App() {
   }, [])
 
   // Escape closes an open menu or dialog, otherwise dismisses the workspace (it
-  // no longer auto-hides on blur, so this is the fast keyboard way out).
+  // no longer auto-hides on blur, so this is the fast keyboard way out). Keys
+  // inside an embedded terminal belong to the shell — Escape there interrupts
+  // the CLI, it must never also hide the workspace.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
+      if ((e.target as HTMLElement)?.closest?.('.termpane')) return
       if (menu) setMenu(null)
-      else if (folderMenu) setFolderMenu(false)
+      else if (openMenu) setOpenMenu(null)
       else if (newProjectOpen) setNewProjectOpen(false)
       else if (!settingsOpen) window.watch.hide()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [menu, settingsOpen, newProjectOpen, folderMenu])
+  }, [menu, settingsOpen, newProjectOpen, openMenu])
 
   const agents = snap?.agents ?? []
   const waitingParents = new Set(agents.filter((a) => a.state === 'waiting' && a.parentId).map((a) => a.parentId!))
@@ -189,39 +204,101 @@ export function App() {
     ))
   )
 
-  const paneBody = (kind: PaneKind) => {
-    switch (kind) {
+  /** Add a pane of `kind` if the layout allows it. Terminals repeat; others don't. */
+  const addPane = (kind: PaneKind, term?: TerminalPaneConfig) => {
+    if (panes.length >= MAX_PANES) return
+    if (isUniqueKind(kind) && panes.some((p) => p.kind === kind)) return
+    setPanes([...panes, newPane(kind, term)])
+  }
+
+  /** Embedded launch: a terminal pane in the current context. When the grid is
+   * full it degrades to the old behavior — an external window. */
+  const newTerminal = (launch: TerminalLaunch) => {
+    if (panes.length >= MAX_PANES) {
+      window.watch.openTerminal(context.cwd, launch)
+      return
+    }
+    addPane('terminal', { launch, cwd: context.cwd, label: context.label })
+  }
+
+  const updateTerm = (paneId: string, patch: Partial<TerminalPaneConfig>) =>
+    setPanes((current) => current.map((p) =>
+      p.id === paneId && p.term ? { ...p, term: { ...p.term, ...patch } } : p
+    ))
+
+  const setPaneKind = (paneId: string, kind: PaneKind) => {
+    const changing = panes.find((p) => p.id === paneId)
+    if (!changing || changing.kind === kind) return
+    // Leaving a terminal kills its shell; nothing should keep running unseen.
+    if (changing.term?.sessionId) window.watch.disposeTerminal(changing.term.sessionId)
+    setPanes(panes.map((p) => p.id === paneId
+      ? newPane(kind, kind === 'terminal' ? { launch: 'shell', cwd: context.cwd, label: context.label } : undefined)
+      : p
+    ))
+  }
+
+  const closePane = (paneId: string) => {
+    const closing = panes.find((p) => p.id === paneId)
+    if (closing?.term?.sessionId) window.watch.disposeTerminal(closing.term.sessionId)
+    const next = panes.filter((p) => p.id !== paneId)
+    setPanes(next.length ? next : defaultPanes())
+  }
+
+  const commitPaneDrop = () => {
+    if (paneDrag && paneDrop && paneDrag !== paneDrop.id) {
+      const moving = panes.find((p) => p.id === paneDrag)
+      if (moving) {
+        const rest = panes.filter((p) => p.id !== paneDrag)
+        const at = rest.findIndex((p) => p.id === paneDrop.id)
+        rest.splice(at + (paneDrop.after ? 1 : 0), 0, moving)
+        setPanes(rest)
+      }
+    }
+    setPaneDrag(null)
+    setPaneDrop(null)
+  }
+
+  const paneBody = (pane: PaneInstance) => {
+    switch (pane.kind) {
       case 'launcher':
-        return <LauncherPane context={context} onNewProject={() => setNewProjectOpen(true)} />
-      case 'windows':
-        return <WindowsPane windows={desktop.windows} />
+        return <LauncherPane context={context} onNewProject={() => setNewProjectOpen(true)} onEmbedTerminal={newTerminal} />
+      case 'terminal':
+        return <TerminalPane config={pane.term!} onConfig={(patch) => updateTerm(pane.id, patch)} />
+    }
+  }
+
+  const paneActions = (pane: PaneInstance) => {
+    if (pane.kind === 'launcher') return <LaunchContextChip context={context} />
+    if (pane.kind === 'terminal' && pane.term) {
+      const label = pane.term.launch === 'shell' ? null : pane.term.launch === 'codex' ? 'Codex' : 'Claude Code'
+      const where = pane.term.label ?? (pane.term.cwd ? pane.term.cwd.split(/[\\/]/).pop() : null)
+      if (!label && !where) return null
+      return <span className="pane-context is-project" title={pane.term.cwd ?? 'Home folder'}>{[label, where].filter(Boolean).join(' · ')}</span>
+    }
+    return null
+  }
+
+  const toggleSidebarView = (view: SidebarView) =>
+    setSidebarViews((current) => current.includes(view)
+      ? current.filter((v) => v !== view)
+      : [...current, view]
+    )
+
+  const sidebarBody = (view: SidebarView) => {
+    switch (view) {
       case 'limits':
         return snap ? <UsageDashboard usage={snap.usage} now={now} /> : <div className="empty">Connecting…</div>
       case 'spend':
         return snap ? <SpendView usage={snap.usage} now={now} /> : <div className="empty">Connecting…</div>
+      case 'windows':
+        return <WindowsPane windows={desktop.windows} />
       case 'insights':
         return <UsageInsightsView />
-      case 'agents':
-        return <div className="agents-inner">{agentList}</div>
     }
   }
 
-  const paneActions = (kind: PaneKind) => {
-    if (kind === 'launcher') return <LaunchContextChip context={context} />
-    if (kind === 'windows') return <WindowsRefreshButton refreshing={desktop.refreshing} refresh={desktop.refresh} />
-    return null
-  }
-
-  const addPane = () => {
-    const next = PANE_KINDS.find((p) => !panes.includes(p.id))
-    if (next && panes.length < MAX_PANES) setPanes([...panes, next.id])
-  }
-  const setPaneKind = (index: number, kind: PaneKind) =>
-    setPanes(panes.map((current, i) => (i === index ? kind : current)))
-  const closePane = (index: number) => {
-    const next = panes.filter((_, i) => i !== index)
-    setPanes(next.length ? next : [...DEFAULT_PANES])
-  }
+  // Sections render in the fixed catalog order so toggling never reshuffles.
+  const activeViews = SIDEBAR_VIEWS.filter((v) => sidebarViews.includes(v.id))
 
   return (
     <div className={`app ${open ? 'is-open' : ''}`}>
@@ -233,63 +310,111 @@ export function App() {
         allCollapsed={allCollapsed}
         onCollapseAll={collapseAll}
         conn={conn}
-        canAddPane={panes.length < MAX_PANES}
+        panes={panes}
         onAddPane={addPane}
-        onProjects={() => setFolderMenu(true)}
+        onNewTerminal={newTerminal}
+        onNewProject={() => setNewProjectOpen(true)}
+        canResetOrder={order.length > 0}
+        onResetOrder={clearOrder}
         onSettings={() => setSettingsOpen(true)}
+        openMenu={openMenu === 'sidebar' ? null : openMenu}
+        onOpenMenu={setOpenMenu}
       />
 
       <div className="frame">
         <aside className="sidebar">
-          <div className="pane-head">
-            <span className="pane-title">Coding agents</span>
+          <div className="pane-head sidebar-head">
+            <button
+              className="sidebar-title"
+              onClick={() => setOpenMenu(openMenu === 'sidebar' ? null : 'sidebar')}
+              aria-expanded={openMenu === 'sidebar'}
+              title="Choose which views stack below the agent list"
+            >
+              <span className="pane-title">Coding agents</span>
+              <ChevronDown className="sidebar-caret" strokeWidth={2} />
+            </button>
             {agents.length > 0 && <span className="pane-count">{agents.filter((a) => !a.parentId).length}</span>}
+            {openMenu === 'sidebar' && (
+              <MenuPop onAway={() => setOpenMenu(null)} ignoreSelector=".sidebar-head">
+                {SIDEBAR_VIEWS.map((v) => (
+                  <MenuCheckItem
+                    key={v.id}
+                    icon={<v.icon strokeWidth={2} />}
+                    label={v.label}
+                    hint={v.hint}
+                    checked={sidebarViews.includes(v.id)}
+                    onClick={() => toggleSidebarView(v.id)}
+                  />
+                ))}
+              </MenuPop>
+            )}
           </div>
           <div className="pane-scroll">
             <div className="agents-inner">{agentList}</div>
           </div>
+          {activeViews.map((v) => (
+            <section className="sideview" key={v.id}>
+              <div className="pane-head sideview-head">
+                <v.icon className="gpane-ic" strokeWidth={2} />
+                <span className="pane-title">{v.label}</span>
+                <span className="gpane-actions">
+                  {v.id === 'windows' && <WindowsRefreshButton refreshing={desktop.refreshing} refresh={desktop.refresh} />}
+                  <button className="iconbtn iconbtn--sm" onClick={() => toggleSidebarView(v.id)} title="Hide this view" aria-label={`Hide ${v.label}`}>
+                    <X className="gear gear--sm" strokeWidth={2} />
+                  </button>
+                </span>
+              </div>
+              <div className="sideview-body">{sidebarBody(v.id)}</div>
+            </section>
+          ))}
         </aside>
 
         <main className="grid" style={{ gridTemplateColumns: `repeat(${Math.min(panes.length, 3)}, minmax(0, 1fr))` }}>
-          {panes.map((kind, index) => (
-            <Pane
-              key={kind}
-              kind={kind}
-              taken={panes}
-              onKind={(next) => setPaneKind(index, next)}
-              onClose={() => closePane(index)}
-              actions={paneActions(kind)}
+          {panes.map((pane) => (
+            <div
+              key={pane.id}
+              className={`pane-slot ${paneDrag === pane.id ? 'is-dragging' : ''} ${
+                paneDrop?.id === pane.id && paneDrag && paneDrag !== pane.id ? (paneDrop.after ? 'pane-drop-after' : 'pane-drop-before') : ''
+              }`}
+              onDragOver={(event) => {
+                if (!paneDrag) return
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'move'
+                const rect = event.currentTarget.getBoundingClientRect()
+                const after = event.clientX > rect.left + rect.width / 2
+                setPaneDrop((current) => current?.id === pane.id && current.after === after ? current : { id: pane.id, after })
+              }}
+              onDrop={(event) => {
+                event.preventDefault()
+                commitPaneDrop()
+              }}
             >
-              {paneBody(kind)}
-            </Pane>
+              <Pane
+                kind={pane.kind}
+                taken={panes.filter((p) => p.id !== pane.id).map((p) => p.kind)}
+                onKind={(next) => setPaneKind(pane.id, next)}
+                onClose={() => closePane(pane.id)}
+                actions={paneActions(pane)}
+                dragHandle={{
+                  draggable: true,
+                  onDragStart: (event) => {
+                    event.dataTransfer.effectAllowed = 'move'
+                    event.dataTransfer.setData('text/plain', pane.id)
+                    setPaneDrag(pane.id)
+                  },
+                  onDragEnd: () => {
+                    setPaneDrag(null)
+                    setPaneDrop(null)
+                  }
+                }}
+              >
+                {paneBody(pane)}
+              </Pane>
+            </div>
           ))}
         </main>
       </div>
 
-      {folderMenu && (
-        <div className="ctxmenu-overlay" onClick={() => setFolderMenu(false)} onContextMenu={(e) => { e.preventDefault(); setFolderMenu(false) }}>
-          <div className="ctxmenu ctxmenu--topbar" onClick={(e) => e.stopPropagation()}>
-            <button className="ctxmenu-item" onClick={() => { setFolderMenu(false); setNewProjectOpen(true) }}>
-              <FolderPlus className="ctxmenu-ic" strokeWidth={2} />
-              New project…
-            </button>
-            <button className="ctxmenu-item" onClick={() => { setFolderMenu(false); window.watch.openCursor() }}>
-              <FolderOpen className="ctxmenu-ic" strokeWidth={2} />
-              Open Cursor
-            </button>
-            <button className="ctxmenu-item" onClick={() => { setFolderMenu(false); window.watch.openProjectsDir() }}>
-              <Folder className="ctxmenu-ic" strokeWidth={2} />
-              Open Projects folder
-            </button>
-            {order.length > 0 && (
-              <button className="ctxmenu-item" title="Forget the dragged order and sort projects by attention again" onClick={() => { setFolderMenu(false); clearOrder() }}>
-                <ListRestart className="ctxmenu-ic" strokeWidth={2} />
-                Reset project order
-              </button>
-            )}
-          </div>
-        </div>
-      )}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       {newProjectOpen && <NewProject onClose={() => setNewProjectOpen(false)} />}
       {menu && <AgentContextMenu menu={menu} onClose={() => setMenu(null)} />}

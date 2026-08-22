@@ -6,9 +6,16 @@ directories:
 files:
   - out/**
   - "!**/*.map"
-# koffi is a native module loaded at runtime — it must live outside the asar.
+# koffi and node-pty are native modules loaded at runtime — they must live
+# outside the asar (a .node binary inside an asar cannot be loaded).
 asarUnpack:
   - "**/node_modules/koffi/**"
+  - "**/node_modules/node-pty/**"
+# Both native deps ship prebuilt binaries (koffi its own dispatcher, node-pty
+# NAPI prebuilds under prebuilds/win32-*), so nothing needs node-gyp. Left on,
+# the rebuild step compiles node-pty from source and fails on machines without
+# Spectre-mitigated VS libraries (MSB8040).
+npmRebuild: false
 # Ship the tray/app/provider PNGs so the installed app finds them at process.resourcesPath.
 extraResources:
   - from: resources

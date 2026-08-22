@@ -1,25 +1,44 @@
-import type { ReactNode } from 'react'
+import type { DragEvent, ReactNode } from 'react'
 import { ChevronDown, X } from 'lucide-react'
-import { PANE_KINDS, type PaneKind } from './panes'
+import { PANE_KINDS, isUniqueKind, type PaneKind } from './panes'
 
 interface Props {
   kind: PaneKind
-  /** Kinds already shown elsewhere, so the picker can't create a duplicate. */
+  /** Unique kinds shown by OTHER panes, so the picker can't create a duplicate. */
   taken: PaneKind[]
   onKind: (kind: PaneKind) => void
   onClose: () => void
   /** Rendered by the pane header, right of the title (refresh, context chip…). */
   actions?: ReactNode
+  /** Grid drag-and-drop: the header is the handle; the slot around it drops. */
+  dragHandle?: {
+    draggable: boolean
+    onDragStart: (event: DragEvent) => void
+    onDragEnd: (event: DragEvent) => void
+  }
   children: ReactNode
 }
 
-/** One cell of the main frame: a titled, swappable, closable content pane. */
-export function Pane({ kind, taken, onKind, onClose, actions, children }: Props) {
+/** One cell of the main frame: a titled, swappable, closable, draggable pane. */
+export function Pane({ kind, taken, onKind, onClose, actions, dragHandle, children }: Props) {
   const meta = PANE_KINDS.find((p) => p.id === kind)!
   const Icon = meta.icon
   return (
     <section className="gpane">
-      <div className="gpane-head">
+      <div
+        className={`gpane-head ${dragHandle ? 'gpane-head--drag' : ''}`}
+        draggable={dragHandle?.draggable}
+        onDragStart={(event) => {
+          // Only the header background drags — a drag that starts on the picker
+          // or a button is a misfire, not a move.
+          if ((event.target as HTMLElement).closest('select, button')) {
+            event.preventDefault()
+            return
+          }
+          dragHandle?.onDragStart(event)
+        }}
+        onDragEnd={(event) => dragHandle?.onDragEnd(event)}
+      >
         <Icon className="gpane-ic" strokeWidth={2} />
         <select
           className="gpane-select"
@@ -29,7 +48,7 @@ export function Pane({ kind, taken, onKind, onClose, actions, children }: Props)
           aria-label="Pane content"
         >
           {PANE_KINDS.map((p) => (
-            <option key={p.id} value={p.id} disabled={p.id !== kind && taken.includes(p.id)}>
+            <option key={p.id} value={p.id} disabled={p.id !== kind && isUniqueKind(p.id) && taken.includes(p.id)}>
               {p.label}
             </option>
           ))}
@@ -42,7 +61,7 @@ export function Pane({ kind, taken, onKind, onClose, actions, children }: Props)
           </button>
         </span>
       </div>
-      <div className="gpane-body">{children}</div>
+      <div className={`gpane-body ${kind === 'terminal' ? 'gpane-body--term' : ''}`}>{children}</div>
     </section>
   )
 }

@@ -156,6 +156,26 @@ export interface DesktopWindow {
   agentProvider?: ProviderId
 }
 
+/** What an embedded terminal pane starts: a provider CLI, or just the shell. */
+export type TerminalLaunch = 'shell' | 'claude' | 'codex'
+
+export interface TerminalCreateRequest {
+  /** Folder the shell starts in; falls back to home when missing or invalid. */
+  cwd?: string
+  launch: TerminalLaunch
+  cols: number
+  rows: number
+}
+
+/** Result of reattaching a renderer to a main-side PTY session. */
+export interface TerminalAttachResult {
+  ok: boolean
+  /** Buffered scrollback replayed into a fresh xterm on reattach. */
+  snapshot?: string
+  /** Set when the process already exited; the pane shows a restart state. */
+  exitCode?: number
+}
+
 export interface ProviderHealth {
   installed: boolean
   needsRepair?: boolean

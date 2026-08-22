@@ -88,8 +88,12 @@ round-trip through main:
 - no settings-schema migration,
 - and the layout is per-view preference, not app configuration.
 
-Keep each pane kind unique (`MAX_PANES = 6`, one pane per kind). That stops an
-expensive poller like `windows:list` running *twice*.
+Keep data-view kinds unique (`MAX_PANES = 6`). That stops an expensive poller
+like `windows:list` running *twice*. Terminal panes are the deliberate
+exception: they repeat (one embedded PTY per pane), which is why panes are
+instances (`{id, kind}`) rather than a bare list of kinds. An embedded terminal
+does not contradict the no-foreign-windows rule below — it is this app's own
+xterm.js over a main-process ConPTY (`node-pty`), not a captured window.
 
 **It does not stop it running at all.** The hook lives in the parent, so it
 keeps polling after the pane is closed — a full `EnumWindows` plus a

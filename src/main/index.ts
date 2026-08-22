@@ -5,6 +5,7 @@ import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync, renameSync 
 import { randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { Daemon } from './daemon.js'
+import { TerminalManager } from './terminals.js'
 import { fetchApiUsage } from './usage.js'
 import { LocalUsage } from './localUsage.js'
 import { UsageHistorySync } from './history.js'
@@ -21,7 +22,7 @@ import { estimateCostUsd } from '../shared/pricing.mjs'
 // export 'autoUpdater' not found"), so import the default export and destructure.
 import electronUpdater from 'electron-updater'
 import { validateMutableSettingsPatch } from './store.js'
-import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type UsageInsights } from '../shared/types.js'
+import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights } from '../shared/types.js'
 
 const { autoUpdater } = electronUpdater
 
@@ -87,6 +88,10 @@ let updateReady: string | null = null // version string once an update is downlo
 let installingUpdate = false
 
 let daemon: Daemon
+// Embedded terminal sessions (ConPTY), pushed at whatever window exists when data arrives.
+const terminals = new TerminalManager((channel, ...args) => {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
+})
 const localUsage = new LocalUsage({ projectsDir: config.transcriptDir })
 // Daily-totals sync to MongoDB (token_board.daily_usage). Inert without a URI.
 const history = new UsageHistorySync(
@@ -1079,6 +1084,39 @@ function registerIpc(): void {
     openTerminal(cwd, provider)
     stepAside()
   })
+  // Embedded terminal panes. The renderer is untrusted: every field is validated
+  // and anything unexpected returns silently. Ids are main-issued UUIDs.
+  const validTermId = (id: unknown): id is string =>
+    typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)
+  const validTermSize = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 2 && (n as number) <= 1000
+  ipcMain.handle('term:create', (_e, req: TerminalCreateRequest) => {
+    if (typeof req !== 'object' || req === null) return null
+    if (req.cwd !== undefined && (typeof req.cwd !== 'string' || req.cwd.length > 32_767)) return null
+    if (req.launch !== 'shell' && req.launch !== 'claude' && req.launch !== 'codex') return null
+    if (!validTermSize(req.cols) || !validTermSize(req.rows)) return null
+    return terminals.create(
+      { cwd: req.cwd, launch: req.launch, cols: req.cols, rows: req.rows },
+      resolveShell(),
+      app.getPath('home')
+    )
+  })
+  ipcMain.handle('term:attach', (_e, id: string) => {
+    if (!validTermId(id)) return { ok: false }
+    return terminals.attach(id)
+  })
+  ipcMain.on('term:input', (_e, id: string, data: string) => {
+    // 1 MB caps a huge paste without ever letting the renderer balloon main.
+    if (!validTermId(id) || typeof data !== 'string' || data.length > 1_048_576) return
+    terminals.input(id, data)
+  })
+  ipcMain.on('term:resize', (_e, id: string, cols: number, rows: number) => {
+    if (!validTermId(id) || !validTermSize(cols) || !validTermSize(rows)) return
+    terminals.resize(id, cols, rows)
+  })
+  ipcMain.on('term:dispose', (_e, id: string) => {
+    if (!validTermId(id)) return
+    terminals.dispose(id)
+  })
   ipcMain.on('cursor:open', (_e, cwd?: string) => {
     if (cwd !== undefined && (typeof cwd !== 'string' || cwd.length > 32_767 || !existsSync(cwd))) return
     openInCursor(cwd)
@@ -1227,20 +1265,39 @@ if (!gotLock) {
       setTimeout(async () => {
         try {
           const captureView = process.env.CLAUDE_WATCH_CAPTURE_VIEW
+          const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
           if (captureView === 'settings' || captureView === 'projects') {
-            const label = captureView === 'settings' ? 'Settings' : 'Projects'
-            await win!.webContents.executeJavaScript(`document.querySelector('[aria-label="${label}"]')?.click()`)
-            await new Promise((resolve) => setTimeout(resolve, 300))
-          } else if (captureView) {
-            // Pane layouts are renderer state: seed the stored layout, then reload.
-            const kinds = captureView.startsWith('insights') ? ['insights'] : captureView.split(',')
+            // Both actions live in the menu bar now: User > Settings, or the File menu.
+            const menuLabel = captureView === 'settings' ? 'User' : 'File'
             await win!.webContents.executeJavaScript(
-              `localStorage.setItem('tm.panes.v1', ${JSON.stringify(JSON.stringify(kinds))}); location.reload()`
+              `[...document.querySelectorAll('.menu-btn')].find((b) => b.textContent === ${JSON.stringify(menuLabel)})?.click()`
             )
-            await new Promise((resolve) => setTimeout(resolve, 900))
+            await sleep(300)
+            if (captureView === 'settings') {
+              await win!.webContents.executeJavaScript(
+                `[...document.querySelectorAll('.menu-item')].find((b) => b.textContent.includes('Settings'))?.click()`
+              )
+              await sleep(300)
+            }
+          } else if (captureView) {
+            // Layout is renderer state: seed the stored sidebar views (data
+            // panes) and main-frame panes (launcher/terminal), then reload.
+            const parts = captureView.startsWith('insights') ? ['insights'] : captureView.split(',')
+            const sidebar = parts.filter((k) => ['limits', 'spend', 'windows', 'insights'].includes(k))
+            const panes = parts
+              .filter((k) => k === 'launcher' || k === 'terminal')
+              .map((kind, i) => ({ id: `capture-${i}`, kind, ...(kind === 'terminal' ? { term: { launch: 'shell' } } : {}) }))
+            await win!.webContents.executeJavaScript(
+              `localStorage.setItem('tm.sidebar.v1', ${JSON.stringify(JSON.stringify(sidebar))});` +
+              (panes.length ? `localStorage.setItem('tm.panes.v2', ${JSON.stringify(JSON.stringify(panes))});` : '') +
+              'location.reload()'
+            )
+            // Terminal panes start a real shell after the reload; give a cold
+            // PowerShell time to print its prompt before the frame is grabbed.
+            await sleep(Number(process.env.CLAUDE_WATCH_CAPTURE_VIEW_DELAY_MS) || 900)
             if (captureView === 'insights-week') {
               await win!.webContents.executeJavaScript(`document.querySelector('#insights-week-tab')?.click()`)
-              await new Promise((resolve) => setTimeout(resolve, 250))
+              await sleep(250)
             }
           }
           const img = await win!.webContents.capturePage()
@@ -1279,6 +1336,7 @@ if (!gotLock) {
 
   app.on('will-quit', () => {
     globalShortcut.unregisterAll()
+    terminals.disposeAll()
     daemon?.stop()
   })
 

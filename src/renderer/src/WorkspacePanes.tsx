@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { DesktopWindow, DesktopWindowKind } from '@shared/types'
+import { useCallback, useEffect, useState, type MouseEvent } from 'react'
+import type { DesktopWindow, DesktopWindowKind, TerminalLaunch } from '@shared/types'
 import { groupWindows } from '@shared/windows.mjs'
 import { Bot, Code2, Folder, FolderPlus, Globe, RefreshCw, SquareTerminal } from 'lucide-react'
 import { ProviderBadge } from './ProviderBadge'
@@ -39,22 +39,31 @@ export function LaunchContextChip({ context }: { context: LaunchContext }) {
   )
 }
 
-/** Start a terminal, editor, or browser — in the active project or at home. */
-export function LauncherPane({ context, onNewProject }: { context: LaunchContext; onNewProject: () => void }) {
+/** Start a terminal, editor, or browser — in the active project or at home.
+ * Terminal launches open embedded panes; Shift-click opens an external window. */
+export function LauncherPane({ context, onNewProject, onEmbedTerminal }: {
+  context: LaunchContext
+  onNewProject: () => void
+  onEmbedTerminal: (launch: TerminalLaunch) => void
+}) {
   const where = context.cwd ? `${context.label ?? context.cwd}` : 'your home folder'
   const inProject = ` in ${where}`
+  const launchTerminal = (launch: TerminalLaunch) => (event: MouseEvent<HTMLButtonElement>) => {
+    if (event.shiftKey) window.watch.openTerminal(context.cwd, launch)
+    else onEmbedTerminal(launch)
+  }
   return (
     <div className="launchwrap">
       <div className="launchpad">
-        <button className="launch" onClick={() => window.watch.openTerminal(context.cwd, 'claude')} title={`Open a terminal${inProject} and start Claude Code`}>
+        <button className="launch" onClick={launchTerminal('claude')} title={`Start Claude Code in a terminal pane${inProject} — Shift-click for an external window`}>
           <ProviderBadge provider="claude" />
           Claude Code
         </button>
-        <button className="launch" onClick={() => window.watch.openTerminal(context.cwd, 'codex')} title={`Open a terminal${inProject} and start Codex`}>
+        <button className="launch" onClick={launchTerminal('codex')} title={`Start Codex in a terminal pane${inProject} — Shift-click for an external window`}>
           <ProviderBadge provider="codex" />
           Codex
         </button>
-        <button className="launch" onClick={() => window.watch.openTerminal(context.cwd, 'shell')} title={`Open a plain PowerShell terminal${inProject}`}>
+        <button className="launch" onClick={launchTerminal('shell')} title={`Open a PowerShell terminal pane${inProject} — Shift-click for an external window`}>
           <SquareTerminal className="launch-ic" strokeWidth={2} />
           Terminal
         </button>
