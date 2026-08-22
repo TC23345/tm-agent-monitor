@@ -22,7 +22,7 @@ import { estimateCostUsd } from '../shared/pricing.mjs'
 // export 'autoUpdater' not found"), so import the default export and destructure.
 import electronUpdater from 'electron-updater'
 import { validateMutableSettingsPatch } from './store.js'
-import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights } from '../shared/types.js'
+import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights } from '../shared/types.js'
 
 const { autoUpdater } = electronUpdater
 
@@ -57,6 +57,7 @@ interface Settings {
   hotkey?: string
   notifications?: boolean
   mock?: boolean
+  sizeMode?: SizeMode
   /** Set only after a real Codex hook event reaches this app installation. */
   codexHookTrustVerified?: boolean
 }
@@ -196,7 +197,6 @@ function createWindow(): void {
     resizable: false,
     skipTaskbar: true,
     icon: notificationIcon(),
-    alwaysOnTop: true,
     hasShadow: false,
     fullscreenable: false,
     backgroundColor: '#00000000',
@@ -215,9 +215,10 @@ function createWindow(): void {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  // Sticky workspace: it stays open until the hotkey/tray toggles it closed,
-  // Escape is pressed, or it steps aside for a window it launched or focused —
-  // no auto-hide on blur.
+  // Sticky workspace: it stays open until the hotkey/tray toggles it closed or
+  // Escape is pressed — no auto-hide on blur. It layers like a normal window
+  // (deliberately not always-on-top), so anything it launches or focuses simply
+  // appears in front while the workspace waits behind; the hotkey raises it.
   win.on('closed', () => { win = null })
 }
 
@@ -225,12 +226,26 @@ function createWindow(): void {
 // full screen minus the taskbar, so the card can rise from the taskbar edge and
 // never covers it. Panes, not the window, absorb overflow. `half` takes one
 // side of the work area (full height), leaving the other side visible alongside
-// the workspace. The side is fixed here for now; the planned settings-backed
-// sizeMode ('full' | 'left' | 'right') should absorb this constant when it lands.
+// the workspace.
+//
+// The persisted `sizeMode` setting ('full' | 'left' | 'right') is the default
+// the workspace summons into and decides which side `half` means. The Alt+Q
+// hotkey flips the live view without touching the setting, so the View-menu
+// choice reflects the configured default, not a transient flip.
 type ViewMode = 'full' | 'half'
-const HALF_SIDE: 'left' | 'right' = 'right'
+let sizeModePref: SizeMode = 'full'
 // Capture tooling can boot straight into the half view to screenshot it.
 let viewMode: ViewMode = process.env.CLAUDE_WATCH_CAPTURE_HALF ? 'half' : 'full'
+
+function halfSide(): 'left' | 'right' {
+  return sizeModePref === 'left' ? 'left' : 'right'
+}
+
+function applySizeMode(mode: SizeMode): void {
+  sizeModePref = mode
+  viewMode = mode === 'full' ? 'full' : 'half'
+  if (win?.isVisible()) positionWorkspace()
+}
 
 function positionWorkspace(): void {
   if (!win) return
@@ -238,7 +253,7 @@ function positionWorkspace(): void {
   const { x, y, width, height } = screen.getDisplayNearestPoint(cursor).workArea
   if (viewMode === 'half') {
     const half = Math.floor(width / 2)
-    win.setBounds({ x: HALF_SIDE === 'right' ? x + (width - half) : x, y, width: half, height })
+    win.setBounds({ x: halfSide() === 'right' ? x + (width - half) : x, y, width: half, height })
   } else {
     win.setBounds({ x, y, width, height })
   }
@@ -276,19 +291,18 @@ function hideWindow(): void {
   }, EXIT_MS)
 }
 
-/** Dismiss the workspace so the window it just launched or focused is visible. */
-function stepAside(): void {
-  hideWindow()
-}
-
 /** Summon (or dismiss) the workspace in `mode`. Pressing the hotkey for the
- * mode already on screen hides it; the other hotkey re-sizes in place — a
- * single setBounds, not an animated loop. */
+ * mode already on screen hides it — but only when the workspace is the front
+ * window. The workspace is not always-on-top, so "visible" can mean buried
+ * under whatever it launched; the hotkey then raises it instead of hiding it.
+ * The other mode's hotkey re-sizes in place — a single setBounds, not an
+ * animated loop. */
 function toggleWindowMode(mode: ViewMode): void {
   if (!win) return
   if (win.isVisible() && !pendingHide) {
     if (viewMode === mode) {
-      hideWindow()
+      if (win.isFocused()) hideWindow()
+      else win.focus()
       return
     }
     viewMode = mode
@@ -300,8 +314,9 @@ function toggleWindowMode(mode: ViewMode): void {
   showWindow()
 }
 
+/** The main hotkey summons the configured default view (`sizeMode`). */
 function toggleWindow(): void {
-  toggleWindowMode('full')
+  toggleWindowMode(sizeModePref === 'full' ? 'full' : 'half')
 }
 
 /**
@@ -938,6 +953,7 @@ function settingsView() {
     notifications: notify,
     launchAtLogin: app.getLoginItemSettings().openAtLogin,
     mock: mockMode,
+    sizeMode: sizeModePref,
     hasAdminKey: !!ADMIN_KEY,
     port: PORT,
     version: app.getVersion(),
@@ -1091,27 +1107,25 @@ function registerIpc(): void {
       registerHotkey()
     }
     if (typeof patch.notifications === 'boolean') { notify = patch.notifications; settings.notifications = patch.notifications }
+    if (patch.sizeMode) { applySizeMode(patch.sizeMode); settings.sizeMode = patch.sizeMode }
     if (typeof patch.mock === 'boolean' && !mockForced) { mockMode = patch.mock; settings.mock = patch.mock; pushStatus() }
     if (typeof patch.launchAtLogin === 'boolean') app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin, args: ['--hidden'] })
     saveSettings()
     return settingsView()
   })
+  // Focus/launch routes never hide the workspace: it is not always-on-top, so
+  // the surfaced window simply appears in front while the workspace waits behind.
   ipcMain.on('agent:focus', (_e, id: string) => {
     if (typeof id !== 'string' || id.length > 5_000) return
-    if (focusAgentById(id)) stepAside()
+    focusAgentById(id)
   })
-  // `keepOpen` is set by callers that live inside a dialog (Settings), where
-  // dismissing the whole workspace would also tear down what you were reading.
-  ipcMain.on('path:open', (_e, p: string, keepOpen?: boolean) => {
+  ipcMain.on('path:open', (_e, p: string) => {
     if (typeof p !== 'string' || p.length > 32_767 || !existsSync(p)) return
-    if (keepOpen !== undefined && typeof keepOpen !== 'boolean') return
     void shell.openPath(p)
-    if (!keepOpen) stepAside()
   })
   ipcMain.on('projects:open', () => {
     try { mkdirSync(NEW_PROJECT_DIR, { recursive: true }) } catch { /* exists */ }
     shell.openPath(NEW_PROJECT_DIR)
-    stepAside()
   })
   ipcMain.on('config:open', () => shell.openPath(app.getPath('userData')))
   ipcMain.handle('update:check', async (): Promise<string> => {
@@ -1131,7 +1145,6 @@ function registerIpc(): void {
     if (cwd !== undefined && (typeof cwd !== 'string' || cwd.length > 32_767)) return
     if (provider !== undefined && provider !== 'claude' && provider !== 'codex' && provider !== 'cursor' && provider !== 'shell') return
     openTerminal(cwd, provider)
-    stepAside()
   })
   // Embedded terminal panes. The renderer is untrusted: every field is validated
   // and anything unexpected returns silently. Ids are main-issued UUIDs.
@@ -1169,11 +1182,9 @@ function registerIpc(): void {
   ipcMain.on('cursor:open', (_e, cwd?: string) => {
     if (cwd !== undefined && (typeof cwd !== 'string' || cwd.length > 32_767 || !existsSync(cwd))) return
     openInCursor(cwd)
-    stepAside()
   })
   ipcMain.on('chrome:open', () => {
     openChrome()
-    stepAside()
   })
   // Workspace switcher: every visible window we know how to present, tagged with
   // the tracked session that reported it.
@@ -1188,7 +1199,7 @@ function registerIpc(): void {
     if (typeof hwnd !== 'string' || hwnd.length > 32 || !/^\d+$/.test(hwnd)) return
     if (!Number.isInteger(pid) || pid <= 0 || pid > 0xffffffff) return
     // focusHwnd re-checks that the HWND still belongs to this pid before it acts.
-    if (focusHwnd(hwnd, pid)) stepAside()
+    focusHwnd(hwnd, pid)
   })
   ipcMain.handle('project:create', (_e, rawName: string) => {
     const name = sanitizeProjectName(rawName)
@@ -1257,6 +1268,8 @@ if (!gotLock) {
     settings = loadSettings()
     loadUsageHistory()
     if (settings.hotkey) hotkeyPref = settings.hotkey
+    // Capture tooling pins the boot view; the persisted mode must not override it.
+    if (!process.env.CLAUDE_WATCH_CAPTURE_HALF && (settings.sizeMode === 'full' || settings.sizeMode === 'left' || settings.sizeMode === 'right')) applySizeMode(settings.sizeMode)
     if (typeof settings.notifications === 'boolean') notify = settings.notifications
     if (typeof settings.mock === 'boolean' && !mockForced) mockMode = settings.mock
 

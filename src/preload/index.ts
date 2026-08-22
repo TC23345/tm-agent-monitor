@@ -11,8 +11,7 @@ const api = {
     }
   },
   focusAgent: (id: string) => ipcRenderer.send('agent:focus', id),
-  /** `keepOpen` leaves the workspace on screen — for callers inside a dialog. */
-  openPath: (p: string, keepOpen?: boolean) => ipcRenderer.send('path:open', p, keepOpen),
+  openPath: (p: string) => ipcRenderer.send('path:open', p),
   copyText: (t: string) => ipcRenderer.send('text:copy', t),
   openTerminal: (cwd?: string, provider?: ProviderId | 'shell') => ipcRenderer.send('terminal:open', cwd, provider),
   /** Embedded terminals: main-owned PTY sessions rendered by xterm panes. */

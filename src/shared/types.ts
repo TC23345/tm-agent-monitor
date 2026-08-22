@@ -262,11 +262,17 @@ export interface HookReport {
   ts?: number
 }
 
+/** Where the workspace sits on the work area. `full` covers it; `left`/`right`
+ * take that half at full height. Also decides which side the transient
+ * half-view hotkey uses. */
+export type SizeMode = 'full' | 'left' | 'right'
+
 export interface AppSettingsPatch {
   hotkey?: string
   notifications?: boolean
   launchAtLogin?: boolean
   mock?: boolean
+  sizeMode?: SizeMode
 }
 
 export interface AppSettings {
@@ -274,6 +280,7 @@ export interface AppSettings {
   notifications: boolean
   launchAtLogin: boolean
   mock: boolean
+  sizeMode: SizeMode
   hasAdminKey: boolean
   port: number
   version: string

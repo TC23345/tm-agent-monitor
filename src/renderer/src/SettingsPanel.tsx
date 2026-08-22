@@ -237,7 +237,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
               <div className="section-head section-head--spaced"><span>Connected files & data</span><button className="icon-text-btn" onClick={() => window.watch.openConfigDir()}>Open folder</button></div>
               <div className="settings-note">This folder mixes app-owned configuration with Electron runtime caches. The paths below are the files the watcher actively reads or writes; Cache, GPUCache, Network, and Session Storage are Chromium internals and can normally be ignored.</div>
-              {s.systemPaths.map((item) => <button className="path-row" key={item.id} onClick={() => item.exists && window.watch.openPath(item.path, true)} disabled={!item.exists} title={item.path}>
+              {s.systemPaths.map((item) => <button className="path-row" key={item.id} onClick={() => item.exists && window.watch.openPath(item.path)} disabled={!item.exists} title={item.path}>
                 <span className="path-copy"><span>{item.label}</span><small>{item.detail}</small><code>{item.path}</code></span><span className={`path-state ${item.exists ? 'is-set' : ''}`}>{item.exists ? 'Open' : 'Missing'}</span>
               </button>)}
             </>}
