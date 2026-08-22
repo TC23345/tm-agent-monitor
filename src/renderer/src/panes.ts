@@ -100,7 +100,8 @@ export function savePanes(panes: PaneInstance[]): void {
   }
 }
 
-/** Data views stacked under the agent list, toggled from the sidebar menu. */
+/** Data views stacked in the sidebar, toggled from the sidebar menu. Limits
+ * pins above the agent list; the rest stack below in catalog order. */
 export type SidebarView = 'limits' | 'spend' | 'windows' | 'insights'
 
 export const SIDEBAR_VIEWS: { id: SidebarView; label: string; icon: typeof Activity; hint: string }[] = [
@@ -110,7 +111,8 @@ export const SIDEBAR_VIEWS: { id: SidebarView; label: string; icon: typeof Activ
   { id: 'insights', label: 'Insights', icon: ChartColumn, hint: 'Local Claude and Codex usage patterns' }
 ]
 
-const SIDEBAR_KEY = 'tm.sidebar.v1'
+const SIDEBAR_KEY = 'tm.sidebar.v2'
+const LEGACY_SIDEBAR_KEY = 'tm.sidebar.v1'
 const DEFAULT_SIDEBAR: SidebarView[] = ['limits', 'windows']
 
 function isSidebarView(value: unknown): value is SidebarView {
@@ -120,8 +122,16 @@ function isSidebarView(value: unknown): value is SidebarView {
 export function loadSidebarViews(): SidebarView[] {
   try {
     const raw = JSON.parse(localStorage.getItem(SIDEBAR_KEY) ?? 'null')
-    if (!Array.isArray(raw)) return [...DEFAULT_SIDEBAR]
-    return [...new Set(raw.filter(isSidebarView))]
+    if (Array.isArray(raw)) return [...new Set(raw.filter(isSidebarView))]
+    // One-time v1 migration: keep the user's toggles but surface the new
+    // collapsed Open windows section once. Hiding it again sticks (v2).
+    const legacy = JSON.parse(localStorage.getItem(LEGACY_SIDEBAR_KEY) ?? 'null')
+    if (Array.isArray(legacy)) {
+      const views = [...new Set(legacy.filter(isSidebarView))]
+      if (!views.includes('windows')) views.push('windows')
+      return views
+    }
+    return [...DEFAULT_SIDEBAR]
   } catch {
     return [...DEFAULT_SIDEBAR]
   }
@@ -130,6 +140,29 @@ export function loadSidebarViews(): SidebarView[] {
 export function saveSidebarViews(views: SidebarView[]): void {
   try {
     localStorage.setItem(SIDEBAR_KEY, JSON.stringify(views))
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Sections a user rolled up to just their header. Open windows starts
+ * collapsed — it earns its space on demand, not by default. */
+const COLLAPSED_KEY = 'tm.sidebar.collapsed.v1'
+const DEFAULT_COLLAPSED: SidebarView[] = ['windows']
+
+export function loadSidebarCollapsed(): SidebarView[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? 'null')
+    if (!Array.isArray(raw)) return [...DEFAULT_COLLAPSED]
+    return [...new Set(raw.filter(isSidebarView))]
+  } catch {
+    return [...DEFAULT_COLLAPSED]
+  }
+}
+
+export function saveSidebarCollapsed(views: SidebarView[]): void {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify(views))
   } catch {
     /* non-fatal */
   }

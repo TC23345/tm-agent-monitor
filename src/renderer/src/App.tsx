@@ -15,8 +15,8 @@ import { Pane } from './Pane'
 import { TerminalPane } from './TerminalPane'
 import { MenuCheckItem, MenuPop } from './Menu'
 import {
-  MAX_PANES, SIDEBAR_VIEWS, defaultPanes, isUniqueKind, loadPanes, loadSidebarViews, newPane,
-  savePanes, saveSidebarViews,
+  MAX_PANES, SIDEBAR_VIEWS, defaultPanes, isUniqueKind, loadPanes, loadSidebarCollapsed,
+  loadSidebarViews, newPane, savePanes, saveSidebarCollapsed, saveSidebarViews,
   type PaneInstance, type PaneKind, type SidebarView, type TerminalPaneConfig
 } from './panes'
 import {
@@ -43,16 +43,19 @@ export function App() {
   const [panes, setPanes] = useState<PaneInstance[]>(loadPanes)
   const [paneDrag, setPaneDrag] = useState<string | null>(null)
   const [paneDrop, setPaneDrop] = useState<{ id: string; after: boolean } | null>(null)
-  // Data views stacked under the agent list, toggled from the sidebar menu.
+  // Data views stacked in the sidebar, toggled from the sidebar menu. Each
+  // section can also roll up to just its header.
   const [sidebarViews, setSidebarViews] = useState<SidebarView[]>(loadSidebarViews)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<SidebarView[]>(loadSidebarCollapsed)
   // Launch actions start in the active project by default; the header chip toggles
   // back to the home folder so a launch target is never a surprise.
   const [useProjectContext, setUseProjectContext] = useState(true)
   // Drives the slide-up / slide-down transition. Starts closed so the very first
   // painted frame is already off-screen and the card rises into place.
   const [open, setOpen] = useState(false)
-  // Only enumerate windows while the sidebar section is showing them.
-  const desktop = useDesktopWindows(sidebarViews.includes('windows'))
+  // Only enumerate windows while the sidebar section is actually showing them —
+  // a collapsed section stops the polling just like a hidden one.
+  const desktop = useDesktopWindows(sidebarViews.includes('windows') && !sidebarCollapsed.includes('windows'))
 
   useEffect(() => {
     window.watch.getStatus().then(setSnap)
@@ -62,6 +65,7 @@ export function App() {
 
   useEffect(() => savePanes(panes), [panes])
   useEffect(() => saveSidebarViews(sidebarViews), [sidebarViews])
+  useEffect(() => saveSidebarCollapsed(sidebarCollapsed), [sidebarCollapsed])
 
   // Main sequences the animation: it shows the window then sends 'enter', and on
   // hide sends 'exit' and waits for the slide-down before the window disappears.
@@ -284,6 +288,12 @@ export function App() {
       : [...current, view]
     )
 
+  const toggleSidebarCollapsed = (view: SidebarView) =>
+    setSidebarCollapsed((current) => current.includes(view)
+      ? current.filter((v) => v !== view)
+      : [...current, view]
+    )
+
   const sidebarBody = (view: SidebarView) => {
     switch (view) {
       case 'limits':
@@ -297,8 +307,38 @@ export function App() {
     }
   }
 
+  const sideSection = (v: (typeof SIDEBAR_VIEWS)[number], top = false) => {
+    const rolled = sidebarCollapsed.includes(v.id)
+    return (
+      <section className={`sideview ${top ? 'sideview--top' : ''} ${rolled ? 'is-collapsed' : ''}`} key={v.id}>
+        <div className="pane-head sideview-head">
+          <button
+            className="sidebar-title"
+            onClick={() => toggleSidebarCollapsed(v.id)}
+            aria-expanded={!rolled}
+            title={rolled ? `Show ${v.label}` : `Collapse ${v.label}`}
+          >
+            <v.icon className="gpane-ic" strokeWidth={2} />
+            <span className="pane-title">{v.label}</span>
+            <ChevronDown className={`sidebar-caret ${rolled ? 'is-closed' : ''}`} strokeWidth={2} />
+          </button>
+          <span className="gpane-actions">
+            {v.id === 'windows' && !rolled && <WindowsRefreshButton refreshing={desktop.refreshing} refresh={desktop.refresh} />}
+            <button className="iconbtn iconbtn--sm" onClick={() => toggleSidebarView(v.id)} title="Hide this view" aria-label={`Hide ${v.label}`}>
+              <X className="gear gear--sm" strokeWidth={2} />
+            </button>
+          </span>
+        </div>
+        {!rolled && <div className="sideview-body">{sidebarBody(v.id)}</div>}
+      </section>
+    )
+  }
+
   // Sections render in the fixed catalog order so toggling never reshuffles.
+  // Limits pins above the agent list; everything else stacks below it.
   const activeViews = SIDEBAR_VIEWS.filter((v) => sidebarViews.includes(v.id))
+  const limitsView = activeViews.find((v) => v.id === 'limits')
+  const belowViews = activeViews.filter((v) => v.id !== 'limits')
 
   return (
     <div className={`app ${open ? 'is-open' : ''}`}>
@@ -323,6 +363,7 @@ export function App() {
 
       <div className="frame">
         <aside className="sidebar">
+          {limitsView && sideSection(limitsView, true)}
           <div className="pane-head sidebar-head">
             <button
               className="sidebar-title"
@@ -352,21 +393,7 @@ export function App() {
           <div className="pane-scroll">
             <div className="agents-inner">{agentList}</div>
           </div>
-          {activeViews.map((v) => (
-            <section className="sideview" key={v.id}>
-              <div className="pane-head sideview-head">
-                <v.icon className="gpane-ic" strokeWidth={2} />
-                <span className="pane-title">{v.label}</span>
-                <span className="gpane-actions">
-                  {v.id === 'windows' && <WindowsRefreshButton refreshing={desktop.refreshing} refresh={desktop.refresh} />}
-                  <button className="iconbtn iconbtn--sm" onClick={() => toggleSidebarView(v.id)} title="Hide this view" aria-label={`Hide ${v.label}`}>
-                    <X className="gear gear--sm" strokeWidth={2} />
-                  </button>
-                </span>
-              </div>
-              <div className="sideview-body">{sidebarBody(v.id)}</div>
-            </section>
-          ))}
+          {belowViews.map((v) => sideSection(v))}
         </aside>
 
         <main className="grid" style={{ gridTemplateColumns: `repeat(${Math.min(panes.length, 3)}, minmax(0, 1fr))` }}>

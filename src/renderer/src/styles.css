@@ -1057,6 +1057,20 @@ html, body, #root {
   border-top: 1px solid var(--hairline);
 }
 .sideview-head { margin-bottom: 8px; }
+/* Limits pins above the agent list: its rule flips to the bottom edge. */
+.sideview--top {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+/* A rolled-up section is just its header row. */
+.sideview.is-collapsed { flex: 0 0 auto; min-height: 0; }
+.sideview.is-collapsed .sideview-head { margin-bottom: 0; }
+.sidebar-caret { transition: transform 120ms ease; }
+.sidebar-caret.is-closed { transform: rotate(-90deg); }
 .sideview-body {
   flex: 1 1 auto;
   min-height: 0;
