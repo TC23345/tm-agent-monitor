@@ -223,12 +223,25 @@ function createWindow(): void {
 
 // The workspace fills the work area of whichever display the cursor is on — the
 // full screen minus the taskbar, so the card can rise from the taskbar edge and
-// never covers it. Panes, not the window, absorb overflow.
+// never covers it. Panes, not the window, absorb overflow. `half` takes one
+// side of the work area (full height), leaving the other side visible alongside
+// the workspace. The side is fixed here for now; the planned settings-backed
+// sizeMode ('full' | 'left' | 'right') should absorb this constant when it lands.
+type ViewMode = 'full' | 'half'
+const HALF_SIDE: 'left' | 'right' = 'right'
+// Capture tooling can boot straight into the half view to screenshot it.
+let viewMode: ViewMode = process.env.CLAUDE_WATCH_CAPTURE_HALF ? 'half' : 'full'
+
 function positionWorkspace(): void {
   if (!win) return
   const cursor = screen.getCursorScreenPoint()
   const { x, y, width, height } = screen.getDisplayNearestPoint(cursor).workArea
-  win.setBounds({ x, y, width, height })
+  if (viewMode === 'half') {
+    const half = Math.floor(width / 2)
+    win.setBounds({ x: HALF_SIDE === 'right' ? x + (width - half) : x, y, width: half, height })
+  } else {
+    win.setBounds({ x, y, width, height })
+  }
 }
 
 // Show/hide are animated in the renderer (a GPU-composited transform, which stays
@@ -268,10 +281,27 @@ function stepAside(): void {
   hideWindow()
 }
 
-function toggleWindow(): void {
+/** Summon (or dismiss) the workspace in `mode`. Pressing the hotkey for the
+ * mode already on screen hides it; the other hotkey re-sizes in place — a
+ * single setBounds, not an animated loop. */
+function toggleWindowMode(mode: ViewMode): void {
   if (!win) return
-  if (win.isVisible() && !pendingHide) hideWindow()
-  else showWindow()
+  if (win.isVisible() && !pendingHide) {
+    if (viewMode === mode) {
+      hideWindow()
+      return
+    }
+    viewMode = mode
+    positionWorkspace()
+    win.focus()
+    return
+  }
+  viewMode = mode
+  showWindow()
+}
+
+function toggleWindow(): void {
+  toggleWindowMode('full')
 }
 
 /**
@@ -410,7 +440,10 @@ function sanitizeProjectName(raw: string): string {
     .slice(0, 120)
 }
 
-/** Register the summon hotkey, falling back through alternates on conflict. */
+/** Summons the bottom-half workspace; the main hotkey summons the full one. */
+const HALF_HOTKEY = 'Alt+Q'
+
+/** Register the summon hotkeys, falling back through alternates on conflict. */
 function registerHotkey(): void {
   const candidates = [hotkeyPref, ...HOTKEY_FALLBACKS.filter((h) => h !== hotkeyPref)]
   for (const acc of candidates) {
@@ -423,16 +456,32 @@ function registerHotkey(): void {
     if (ok && globalShortcut.isRegistered(acc)) {
       activeHotkey = acc
       console.log(`[hotkey] active: ${acc}${acc === hotkeyPref ? '' : ` (fallback — ${hotkeyPref} was unavailable)`}`)
+      registerHalfHotkey()
       return
     }
     globalShortcut.unregister(acc)
     console.warn(`[hotkey] could not register ${acc}`)
   }
   activeHotkey = null
+  registerHalfHotkey()
   console.error(
     `[hotkey] no hotkey registered (tried ${candidates.join(', ')}). ` +
     `Use the tray icon to toggle, or set CLAUDE_WATCH_HOTKEY to a free combo.`
   )
+}
+
+function registerHalfHotkey(): void {
+  if (HALF_HOTKEY === activeHotkey) return
+  try {
+    if (globalShortcut.register(HALF_HOTKEY, () => toggleWindowMode('half')) && globalShortcut.isRegistered(HALF_HOTKEY)) {
+      console.log(`[hotkey] half view: ${HALF_HOTKEY}`)
+      return
+    }
+  } catch {
+    /* fall through */
+  }
+  globalShortcut.unregister(HALF_HOTKEY)
+  console.warn(`[hotkey] could not register ${HALF_HOTKEY} for the half view`)
 }
 
 // --- status assembly --------------------------------------------------------
@@ -1175,6 +1224,7 @@ function registerIpc(): void {
 function buildTrayMenu(): Menu {
   const items: Electron.MenuItemConstructorOptions[] = [
     { label: activeHotkey ? `Show / Hide  (${activeHotkey})` : 'Show / Hide', click: toggleWindow },
+    { label: `Half view  (${HALF_HOTKEY})`, click: () => toggleWindowMode('half') },
     { type: 'separator' },
     { label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (i) => app.setLoginItemSettings({ openAtLogin: i.checked, args: ['--hidden'] }) },
     { label: 'Mock data', type: 'checkbox', checked: mockMode, click: (i) => { mockMode = i.checked; pushStatus() } }
