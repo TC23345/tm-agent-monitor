@@ -72,6 +72,10 @@ test('settings patches allow only mutable fields with bounded runtime types', ()
   assert.equal(validateMutableSettingsPatch({ port: 9999 }), null)
   assert.equal(validateMutableSettingsPatch({ notifications: 'yes' }), null)
   assert.equal(validateMutableSettingsPatch({ hotkey: `Alt+W\nInjected` }), null)
+  assert.deepEqual(validateMutableSettingsPatch({ sizeMode: 'left' }), { sizeMode: 'left' })
+  assert.deepEqual(validateMutableSettingsPatch({ sizeMode: 'full' }), { sizeMode: 'full' })
+  assert.equal(validateMutableSettingsPatch({ sizeMode: 'half' }), null)
+  assert.equal(validateMutableSettingsPatch({ sizeMode: true }), null)
 })
 
 test('deduplicates event ids and ignores older events per actor', () => {

@@ -5,6 +5,7 @@ import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync, renameSync 
 import { randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { Daemon } from './daemon.js'
+import { TerminalManager } from './terminals.js'
 import { fetchApiUsage } from './usage.js'
 import { LocalUsage } from './localUsage.js'
 import { UsageHistorySync } from './history.js'
@@ -21,7 +22,7 @@ import { estimateCostUsd } from '../shared/pricing.mjs'
 // export 'autoUpdater' not found"), so import the default export and destructure.
 import electronUpdater from 'electron-updater'
 import { validateMutableSettingsPatch } from './store.js'
-import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type UsageInsights } from '../shared/types.js'
+import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights } from '../shared/types.js'
 
 const { autoUpdater } = electronUpdater
 
@@ -56,6 +57,7 @@ interface Settings {
   hotkey?: string
   notifications?: boolean
   mock?: boolean
+  sizeMode?: SizeMode
   /** Set only after a real Codex hook event reaches this app installation. */
   codexHookTrustVerified?: boolean
 }
@@ -87,6 +89,10 @@ let updateReady: string | null = null // version string once an update is downlo
 let installingUpdate = false
 
 let daemon: Daemon
+// Embedded terminal sessions (ConPTY), pushed at whatever window exists when data arrives.
+const terminals = new TerminalManager((channel, ...args) => {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
+})
 const localUsage = new LocalUsage({ projectsDir: config.transcriptDir })
 // Daily-totals sync to MongoDB (token_board.daily_usage). Inert without a URI.
 const history = new UsageHistorySync(
@@ -191,7 +197,6 @@ function createWindow(): void {
     resizable: false,
     skipTaskbar: true,
     icon: notificationIcon(),
-    alwaysOnTop: true,
     hasShadow: false,
     fullscreenable: false,
     backgroundColor: '#00000000',
@@ -210,20 +215,48 @@ function createWindow(): void {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  // Sticky workspace: it stays open until the hotkey/tray toggles it closed,
-  // Escape is pressed, or it steps aside for a window it launched or focused —
-  // no auto-hide on blur.
+  // Sticky workspace: it stays open until the hotkey/tray toggles it closed or
+  // Escape is pressed — no auto-hide on blur. It layers like a normal window
+  // (deliberately not always-on-top), so anything it launches or focuses simply
+  // appears in front while the workspace waits behind; the hotkey raises it.
   win.on('closed', () => { win = null })
 }
 
 // The workspace fills the work area of whichever display the cursor is on — the
 // full screen minus the taskbar, so the card can rise from the taskbar edge and
-// never covers it. Panes, not the window, absorb overflow.
+// never covers it. Panes, not the window, absorb overflow. `half` takes one
+// side of the work area (full height), leaving the other side visible alongside
+// the workspace.
+//
+// The persisted `sizeMode` setting ('full' | 'left' | 'right') is the default
+// the workspace summons into and decides which side `half` means. The Alt+Q
+// hotkey flips the live view without touching the setting, so the View-menu
+// choice reflects the configured default, not a transient flip.
+type ViewMode = 'full' | 'half'
+let sizeModePref: SizeMode = 'full'
+// Capture tooling can boot straight into the half view to screenshot it.
+let viewMode: ViewMode = process.env.CLAUDE_WATCH_CAPTURE_HALF ? 'half' : 'full'
+
+function halfSide(): 'left' | 'right' {
+  return sizeModePref === 'left' ? 'left' : 'right'
+}
+
+function applySizeMode(mode: SizeMode): void {
+  sizeModePref = mode
+  viewMode = mode === 'full' ? 'full' : 'half'
+  if (win?.isVisible()) positionWorkspace()
+}
+
 function positionWorkspace(): void {
   if (!win) return
   const cursor = screen.getCursorScreenPoint()
   const { x, y, width, height } = screen.getDisplayNearestPoint(cursor).workArea
-  win.setBounds({ x, y, width, height })
+  if (viewMode === 'half') {
+    const half = Math.floor(width / 2)
+    win.setBounds({ x: halfSide() === 'right' ? x + (width - half) : x, y, width: half, height })
+  } else {
+    win.setBounds({ x, y, width, height })
+  }
 }
 
 // Show/hide are animated in the renderer (a GPU-composited transform, which stays
@@ -258,15 +291,32 @@ function hideWindow(): void {
   }, EXIT_MS)
 }
 
-/** Dismiss the workspace so the window it just launched or focused is visible. */
-function stepAside(): void {
-  hideWindow()
+/** Summon (or dismiss) the workspace in `mode`. Pressing the hotkey for the
+ * mode already on screen hides it — but only when the workspace is the front
+ * window. The workspace is not always-on-top, so "visible" can mean buried
+ * under whatever it launched; the hotkey then raises it instead of hiding it.
+ * The other mode's hotkey re-sizes in place — a single setBounds, not an
+ * animated loop. */
+function toggleWindowMode(mode: ViewMode): void {
+  if (!win) return
+  if (win.isVisible() && !pendingHide) {
+    if (viewMode === mode) {
+      if (win.isFocused()) hideWindow()
+      else win.focus()
+      return
+    }
+    viewMode = mode
+    positionWorkspace()
+    win.focus()
+    return
+  }
+  viewMode = mode
+  showWindow()
 }
 
+/** The main hotkey summons the configured default view (`sizeMode`). */
 function toggleWindow(): void {
-  if (!win) return
-  if (win.isVisible() && !pendingHide) hideWindow()
-  else showWindow()
+  toggleWindowMode(sizeModePref === 'full' ? 'full' : 'half')
 }
 
 /**
@@ -405,7 +455,10 @@ function sanitizeProjectName(raw: string): string {
     .slice(0, 120)
 }
 
-/** Register the summon hotkey, falling back through alternates on conflict. */
+/** Summons the bottom-half workspace; the main hotkey summons the full one. */
+const HALF_HOTKEY = 'Alt+Q'
+
+/** Register the summon hotkeys, falling back through alternates on conflict. */
 function registerHotkey(): void {
   const candidates = [hotkeyPref, ...HOTKEY_FALLBACKS.filter((h) => h !== hotkeyPref)]
   for (const acc of candidates) {
@@ -418,16 +471,32 @@ function registerHotkey(): void {
     if (ok && globalShortcut.isRegistered(acc)) {
       activeHotkey = acc
       console.log(`[hotkey] active: ${acc}${acc === hotkeyPref ? '' : ` (fallback — ${hotkeyPref} was unavailable)`}`)
+      registerHalfHotkey()
       return
     }
     globalShortcut.unregister(acc)
     console.warn(`[hotkey] could not register ${acc}`)
   }
   activeHotkey = null
+  registerHalfHotkey()
   console.error(
     `[hotkey] no hotkey registered (tried ${candidates.join(', ')}). ` +
     `Use the tray icon to toggle, or set CLAUDE_WATCH_HOTKEY to a free combo.`
   )
+}
+
+function registerHalfHotkey(): void {
+  if (HALF_HOTKEY === activeHotkey) return
+  try {
+    if (globalShortcut.register(HALF_HOTKEY, () => toggleWindowMode('half')) && globalShortcut.isRegistered(HALF_HOTKEY)) {
+      console.log(`[hotkey] half view: ${HALF_HOTKEY}`)
+      return
+    }
+  } catch {
+    /* fall through */
+  }
+  globalShortcut.unregister(HALF_HOTKEY)
+  console.warn(`[hotkey] could not register ${HALF_HOTKEY} for the half view`)
 }
 
 // --- status assembly --------------------------------------------------------
@@ -884,9 +953,11 @@ function settingsView() {
     notifications: notify,
     launchAtLogin: app.getLoginItemSettings().openAtLogin,
     mock: mockMode,
+    sizeMode: sizeModePref,
     hasAdminKey: !!ADMIN_KEY,
     port: PORT,
     version: app.getVersion(),
+    repoDir: config.repoDir,
     providers: buildSnapshot().providers,
     historySync: history.status(),
     apiConfigs: [
@@ -1037,27 +1108,25 @@ function registerIpc(): void {
       registerHotkey()
     }
     if (typeof patch.notifications === 'boolean') { notify = patch.notifications; settings.notifications = patch.notifications }
+    if (patch.sizeMode) { applySizeMode(patch.sizeMode); settings.sizeMode = patch.sizeMode }
     if (typeof patch.mock === 'boolean' && !mockForced) { mockMode = patch.mock; settings.mock = patch.mock; pushStatus() }
     if (typeof patch.launchAtLogin === 'boolean') app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin, args: ['--hidden'] })
     saveSettings()
     return settingsView()
   })
+  // Focus/launch routes never hide the workspace: it is not always-on-top, so
+  // the surfaced window simply appears in front while the workspace waits behind.
   ipcMain.on('agent:focus', (_e, id: string) => {
     if (typeof id !== 'string' || id.length > 5_000) return
-    if (focusAgentById(id)) stepAside()
+    focusAgentById(id)
   })
-  // `keepOpen` is set by callers that live inside a dialog (Settings), where
-  // dismissing the whole workspace would also tear down what you were reading.
-  ipcMain.on('path:open', (_e, p: string, keepOpen?: boolean) => {
+  ipcMain.on('path:open', (_e, p: string) => {
     if (typeof p !== 'string' || p.length > 32_767 || !existsSync(p)) return
-    if (keepOpen !== undefined && typeof keepOpen !== 'boolean') return
     void shell.openPath(p)
-    if (!keepOpen) stepAside()
   })
   ipcMain.on('projects:open', () => {
     try { mkdirSync(NEW_PROJECT_DIR, { recursive: true }) } catch { /* exists */ }
     shell.openPath(NEW_PROJECT_DIR)
-    stepAside()
   })
   ipcMain.on('config:open', () => shell.openPath(app.getPath('userData')))
   ipcMain.handle('update:check', async (): Promise<string> => {
@@ -1072,21 +1141,92 @@ function registerIpc(): void {
       return `check failed: ${(e as Error).message}`
     }
   })
+  // Dev loop without a release: build the installer from the local checkout,
+  // then hand off to a detached shell that waits for this process to exit,
+  // silently reinstalls over the same location, and starts the new exe. The
+  // promise stays pending through the build so Settings can show one busy state.
+  let reinstalling = false
+  ipcMain.handle('app:reinstall', async (): Promise<string> => {
+    if (reinstalling) return 'already rebuilding…'
+    if (!app.isPackaged) return 'dev build — restart npm run dev to pick up changes'
+    const repo = config.repoDir
+    if (!existsSync(join(repo, 'package.json'))) return `no repo at ${repo} — set CLAUDE_WATCH_REPO in .env`
+    reinstalling = true
+    try {
+      const build = await new Promise<{ code: number | null; tail: string }>((resolve, reject) => {
+        const child = spawn('cmd.exe', ['/d', '/s', '/c', 'npm run dist'], { cwd: repo, windowsHide: true })
+        let tail = ''
+        const keep = (chunk: Buffer) => { tail = (tail + chunk.toString()).slice(-2_000) }
+        child.stdout?.on('data', keep)
+        child.stderr?.on('data', keep)
+        const cutoff = setTimeout(() => child.kill(), 10 * 60_000)
+        child.on('error', (error) => { clearTimeout(cutoff); reject(error) })
+        child.on('close', (code) => { clearTimeout(cutoff); resolve({ code, tail }) })
+      })
+      if (build.code !== 0) return `build failed (exit ${build.code}): …${build.tail.slice(-300).trim()}`
+      const version = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).version as string
+      const installer = join(repo, 'dist', `tm-agent-monitor-${version}-x64.exe`)
+      if (!existsSync(installer)) return `built, but no installer at ${installer}`
+      const ps = (value: string) => `'${value.replace(/'/g, "''")}'`
+      spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
+        `Wait-Process -Id ${process.pid} -ErrorAction SilentlyContinue; ` +
+        `Start-Process -FilePath ${ps(installer)} -ArgumentList '/S' -Wait; ` +
+        `Start-Process -FilePath ${ps(process.execPath)}`
+      ], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+      // Give the reply a beat to land before the ordinary quit flush runs.
+      setTimeout(() => app.quit(), 800)
+      return `v${version} built — reinstalling, back in a moment`
+    } catch (e) {
+      return `reinstall failed: ${(e as Error).message}`
+    } finally {
+      reinstalling = false
+    }
+  })
   ipcMain.on('text:copy', (_e, t: string) => { if (typeof t === 'string' && t.length <= 100_000) clipboard.writeText(t) })
   ipcMain.on('terminal:open', (_e, cwd?: string, provider?: TerminalTarget) => {
     if (cwd !== undefined && (typeof cwd !== 'string' || cwd.length > 32_767)) return
     if (provider !== undefined && provider !== 'claude' && provider !== 'codex' && provider !== 'cursor' && provider !== 'shell') return
     openTerminal(cwd, provider)
-    stepAside()
+  })
+  // Embedded terminal panes. The renderer is untrusted: every field is validated
+  // and anything unexpected returns silently. Ids are main-issued UUIDs.
+  const validTermId = (id: unknown): id is string =>
+    typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)
+  const validTermSize = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 2 && (n as number) <= 1000
+  ipcMain.handle('term:create', (_e, req: TerminalCreateRequest) => {
+    if (typeof req !== 'object' || req === null) return null
+    if (req.cwd !== undefined && (typeof req.cwd !== 'string' || req.cwd.length > 32_767)) return null
+    if (req.launch !== 'shell' && req.launch !== 'claude' && req.launch !== 'codex') return null
+    if (!validTermSize(req.cols) || !validTermSize(req.rows)) return null
+    return terminals.create(
+      { cwd: req.cwd, launch: req.launch, cols: req.cols, rows: req.rows },
+      resolveShell(),
+      app.getPath('home')
+    )
+  })
+  ipcMain.handle('term:attach', (_e, id: string) => {
+    if (!validTermId(id)) return { ok: false }
+    return terminals.attach(id)
+  })
+  ipcMain.on('term:input', (_e, id: string, data: string) => {
+    // 1 MB caps a huge paste without ever letting the renderer balloon main.
+    if (!validTermId(id) || typeof data !== 'string' || data.length > 1_048_576) return
+    terminals.input(id, data)
+  })
+  ipcMain.on('term:resize', (_e, id: string, cols: number, rows: number) => {
+    if (!validTermId(id) || !validTermSize(cols) || !validTermSize(rows)) return
+    terminals.resize(id, cols, rows)
+  })
+  ipcMain.on('term:dispose', (_e, id: string) => {
+    if (!validTermId(id)) return
+    terminals.dispose(id)
   })
   ipcMain.on('cursor:open', (_e, cwd?: string) => {
     if (cwd !== undefined && (typeof cwd !== 'string' || cwd.length > 32_767 || !existsSync(cwd))) return
     openInCursor(cwd)
-    stepAside()
   })
   ipcMain.on('chrome:open', () => {
     openChrome()
-    stepAside()
   })
   // Workspace switcher: every visible window we know how to present, tagged with
   // the tracked session that reported it.
@@ -1101,7 +1241,7 @@ function registerIpc(): void {
     if (typeof hwnd !== 'string' || hwnd.length > 32 || !/^\d+$/.test(hwnd)) return
     if (!Number.isInteger(pid) || pid <= 0 || pid > 0xffffffff) return
     // focusHwnd re-checks that the HWND still belongs to this pid before it acts.
-    if (focusHwnd(hwnd, pid)) stepAside()
+    focusHwnd(hwnd, pid)
   })
   ipcMain.handle('project:create', (_e, rawName: string) => {
     const name = sanitizeProjectName(rawName)
@@ -1137,6 +1277,7 @@ function registerIpc(): void {
 function buildTrayMenu(): Menu {
   const items: Electron.MenuItemConstructorOptions[] = [
     { label: activeHotkey ? `Show / Hide  (${activeHotkey})` : 'Show / Hide', click: toggleWindow },
+    { label: `Half view  (${HALF_HOTKEY})`, click: () => toggleWindowMode('half') },
     { type: 'separator' },
     { label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (i) => app.setLoginItemSettings({ openAtLogin: i.checked, args: ['--hidden'] }) },
     { label: 'Mock data', type: 'checkbox', checked: mockMode, click: (i) => { mockMode = i.checked; pushStatus() } }
@@ -1169,6 +1310,8 @@ if (!gotLock) {
     settings = loadSettings()
     loadUsageHistory()
     if (settings.hotkey) hotkeyPref = settings.hotkey
+    // Capture tooling pins the boot view; the persisted mode must not override it.
+    if (!process.env.CLAUDE_WATCH_CAPTURE_HALF && (settings.sizeMode === 'full' || settings.sizeMode === 'left' || settings.sizeMode === 'right')) applySizeMode(settings.sizeMode)
     if (typeof settings.notifications === 'boolean') notify = settings.notifications
     if (typeof settings.mock === 'boolean' && !mockForced) mockMode = settings.mock
 
@@ -1227,20 +1370,39 @@ if (!gotLock) {
       setTimeout(async () => {
         try {
           const captureView = process.env.CLAUDE_WATCH_CAPTURE_VIEW
+          const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
           if (captureView === 'settings' || captureView === 'projects') {
-            const label = captureView === 'settings' ? 'Settings' : 'Projects'
-            await win!.webContents.executeJavaScript(`document.querySelector('[aria-label="${label}"]')?.click()`)
-            await new Promise((resolve) => setTimeout(resolve, 300))
-          } else if (captureView) {
-            // Pane layouts are renderer state: seed the stored layout, then reload.
-            const kinds = captureView.startsWith('insights') ? ['insights'] : captureView.split(',')
+            // Both actions live in the menu bar now: User > Settings, or the File menu.
+            const menuLabel = captureView === 'settings' ? 'User' : 'File'
             await win!.webContents.executeJavaScript(
-              `localStorage.setItem('tm.panes.v1', ${JSON.stringify(JSON.stringify(kinds))}); location.reload()`
+              `[...document.querySelectorAll('.menu-btn')].find((b) => b.textContent === ${JSON.stringify(menuLabel)})?.click()`
             )
-            await new Promise((resolve) => setTimeout(resolve, 900))
+            await sleep(300)
+            if (captureView === 'settings') {
+              await win!.webContents.executeJavaScript(
+                `[...document.querySelectorAll('.menu-item')].find((b) => b.textContent.includes('Settings'))?.click()`
+              )
+              await sleep(300)
+            }
+          } else if (captureView) {
+            // Layout is renderer state: seed the stored sidebar views (data
+            // panes) and main-frame panes (launcher/terminal), then reload.
+            const parts = captureView.startsWith('insights') ? ['insights'] : captureView.split(',')
+            const sidebar = parts.filter((k) => ['limits', 'spend', 'windows', 'insights'].includes(k))
+            const panes = parts
+              .filter((k) => k === 'launcher' || k === 'terminal')
+              .map((kind, i) => ({ id: `capture-${i}`, kind, ...(kind === 'terminal' ? { term: { launch: 'shell' } } : {}) }))
+            await win!.webContents.executeJavaScript(
+              `localStorage.setItem('tm.sidebar.v1', ${JSON.stringify(JSON.stringify(sidebar))});` +
+              (panes.length ? `localStorage.setItem('tm.panes.v2', ${JSON.stringify(JSON.stringify(panes))});` : '') +
+              'location.reload()'
+            )
+            // Terminal panes start a real shell after the reload; give a cold
+            // PowerShell time to print its prompt before the frame is grabbed.
+            await sleep(Number(process.env.CLAUDE_WATCH_CAPTURE_VIEW_DELAY_MS) || 900)
             if (captureView === 'insights-week') {
               await win!.webContents.executeJavaScript(`document.querySelector('#insights-week-tab')?.click()`)
-              await new Promise((resolve) => setTimeout(resolve, 250))
+              await sleep(250)
             }
           }
           const img = await win!.webContents.capturePage()
@@ -1279,6 +1441,7 @@ if (!gotLock) {
 
   app.on('will-quit', () => {
     globalShortcut.unregisterAll()
+    terminals.disposeAll()
     daemon?.stop()
   })
 

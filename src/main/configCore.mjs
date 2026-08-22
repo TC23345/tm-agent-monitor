@@ -42,6 +42,7 @@ export function bootstrapConfig(options) {
     mongoUri: merged.MONGODB_URI || merged.CLAUDE_WATCH_MONGODB_URI || undefined,
     transcriptDir: merged.CLAUDE_WATCH_PROJECTS_DIR || undefined,
     newProjectDir: merged.CLAUDE_WATCH_NEW_PROJECT_DIR || join(options.home, 'Projects'),
+    repoDir: merged.CLAUDE_WATCH_REPO || join(options.home, 'Projects', 'claude-watch'),
     hotkey: merged.CLAUDE_WATCH_HOTKEY || 'Control+Alt+W',
     notifications: merged.CLAUDE_WATCH_NOTIFICATIONS === '1',
     mock: (options.argv ?? process.argv).includes('--mock') || merged.CLAUDE_WATCH_MOCK === '1',
