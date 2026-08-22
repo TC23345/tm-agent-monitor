@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { StatusSnapshot, TerminalLaunch } from '@shared/types'
+import type { SizeMode, StatusSnapshot, TerminalLaunch } from '@shared/types'
 import { UsageDashboard } from './UsageDashboard'
 import { ProjectGroup } from './ProjectGroup'
 import { AgentContextMenu, type MenuState } from './AgentContextMenu'
@@ -15,15 +15,22 @@ import { Pane } from './Pane'
 import { TerminalPane } from './TerminalPane'
 import { MenuCheckItem, MenuPop } from './Menu'
 import {
-  MAX_PANES, SIDEBAR_VIEWS, defaultPanes, isUniqueKind, loadPanes, loadSidebarCollapsed,
-  loadSidebarViews, newPane, savePanes, saveSidebarCollapsed, saveSidebarViews,
-  type PaneInstance, type PaneKind, type SidebarView, type TerminalPaneConfig
+  MAX_PANES, SIDEBAR_VIEWS, defaultPanes, isUniqueKind, loadPaneCols, loadPanes, loadSidebarCollapsed,
+  loadSidebarViews, newPane, savePaneCols, savePanes, saveSidebarCollapsed, saveSidebarViews,
+  type PaneCols, type PaneInstance, type PaneKind, type SidebarView, type TerminalPaneConfig
 } from './panes'
 import {
   LaunchContextChip, LauncherPane, WindowsPane, WindowsRefreshButton, useDesktopWindows,
   type LaunchContext
 } from './WorkspacePanes'
 import { ChevronDown, X } from 'lucide-react'
+
+/** Most columns the viewport can hold before panes get crushed — the former
+ * CSS breakpoints (styles.css), moved here so an explicit column choice and
+ * the cap compose instead of the media query silently winning. */
+function colCap(): number {
+  return window.innerWidth >= 1400 ? 3 : window.innerWidth >= 1040 ? 2 : 1
+}
 
 export function App() {
   const [snap, setSnap] = useState<StatusSnapshot | null>(null)
@@ -43,6 +50,14 @@ export function App() {
   const [panes, setPanes] = useState<PaneInstance[]>(loadPanes)
   const [paneDrag, setPaneDrag] = useState<string | null>(null)
   const [paneDrop, setPaneDrop] = useState<{ id: string; after: boolean } | null>(null)
+  // Grid column preference (View menu). The viewport still caps the count so a
+  // half-width window or narrow display never crushes panes.
+  const [paneCols, setPaneCols] = useState<PaneCols>(loadPaneCols)
+  const [viewportCap, setViewportCap] = useState(() => colCap())
+  // The persisted workspace size (full / left half / right half). Main owns the
+  // truth; the View menu radio reflects the configured default, not a transient
+  // Alt+Q flip.
+  const [sizeMode, setSizeMode] = useState<SizeMode>('full')
   // Data views stacked in the sidebar, toggled from the sidebar menu. Each
   // section can also roll up to just its header.
   const [sidebarViews, setSidebarViews] = useState<SidebarView[]>(loadSidebarViews)
@@ -66,6 +81,25 @@ export function App() {
   useEffect(() => savePanes(panes), [panes])
   useEffect(() => saveSidebarViews(sidebarViews), [sidebarViews])
   useEffect(() => saveSidebarCollapsed(sidebarCollapsed), [sidebarCollapsed])
+  useEffect(() => savePaneCols(paneCols), [paneCols])
+
+  // Re-cap the columns when the window bounds change (size-mode switch, other
+  // display). The window never resizes with content, so this only fires on real
+  // bounds changes.
+  useEffect(() => {
+    const on = () => setViewportCap(colCap())
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+
+  // Main owns sizeMode; hydrate the menu radio from settings once.
+  useEffect(() => {
+    window.watch.getSettings().then((s) => setSizeMode(s.sizeMode)).catch(() => {})
+  }, [])
+  const applySizeMode = (mode: SizeMode) => {
+    setSizeMode(mode) // optimistic — the window re-sizes in the same beat
+    window.watch.setSettings({ sizeMode: mode }).then((s) => setSizeMode(s.sizeMode)).catch(() => {})
+  }
 
   // Main sequences the animation: it shows the window then sends 'enter', and on
   // hide sends 'exit' and waits for the slide-down before the window disappears.
@@ -357,6 +391,10 @@ export function App() {
         canResetOrder={order.length > 0}
         onResetOrder={clearOrder}
         onSettings={() => setSettingsOpen(true)}
+        sizeMode={sizeMode}
+        onSizeMode={applySizeMode}
+        paneCols={paneCols}
+        onPaneCols={setPaneCols}
         openMenu={openMenu === 'sidebar' ? null : openMenu}
         onOpenMenu={setOpenMenu}
       />
@@ -396,7 +434,7 @@ export function App() {
           {belowViews.map((v) => sideSection(v))}
         </aside>
 
-        <main className="grid" style={{ gridTemplateColumns: `repeat(${Math.min(panes.length, 3)}, minmax(0, 1fr))` }}>
+        <main className="grid" style={{ gridTemplateColumns: `repeat(${Math.max(1, Math.min(paneCols === 'auto' ? 3 : paneCols, panes.length, viewportCap))}, minmax(0, 1fr))` }}>
           {panes.map((pane) => (
             <div
               key={pane.id}

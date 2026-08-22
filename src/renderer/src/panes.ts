@@ -167,3 +167,27 @@ export function saveSidebarCollapsed(views: SidebarView[]): void {
     /* non-fatal */
   }
 }
+
+/** Grid column preference. `auto` packs up to three columns; a number pins the
+ * count, though the viewport can still cap it lower before panes get crushed. */
+export type PaneCols = 'auto' | 1 | 2 | 3
+
+const LAYOUT_KEY = 'tm.layout.v1'
+
+export function loadPaneCols(): PaneCols {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? 'null') as { cols?: unknown } | null
+    const cols = raw?.cols
+    return cols === 1 || cols === 2 || cols === 3 || cols === 'auto' ? cols : 'auto'
+  } catch {
+    return 'auto'
+  }
+}
+
+export function savePaneCols(cols: PaneCols): void {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ cols }))
+  } catch {
+    /* non-fatal */
+  }
+}

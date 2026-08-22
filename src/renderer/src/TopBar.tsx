@@ -1,12 +1,12 @@
 import {
-  ChevronsDownUp, ChevronsUpDown, Code2, Filter, Folder, FolderPlus, Globe,
-  ListRestart, Minus, Power, SquarePlus, SquareTerminal, Terminal
+  ChevronsDownUp, ChevronsUpDown, Code2, Columns3, Filter, Folder, FolderPlus, Globe,
+  ListRestart, Minus, Monitor, PanelLeft, PanelRight, Power, SquarePlus, SquareTerminal, Terminal
 } from 'lucide-react'
 import { Settings } from './Icons'
 import logo from './assets/logo.png'
-import { MenuItem, MenuPop } from './Menu'
-import { MAX_PANES, PANE_KINDS, isUniqueKind, type PaneInstance, type PaneKind } from './panes'
-import type { TerminalLaunch } from '@shared/types'
+import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
+import { MAX_PANES, PANE_KINDS, isUniqueKind, type PaneCols, type PaneInstance, type PaneKind } from './panes'
+import type { SizeMode, TerminalLaunch } from '@shared/types'
 import { ProviderBadge } from './ProviderBadge'
 
 export type MenuName = 'file' | 'terminal' | 'view' | 'user'
@@ -26,6 +26,11 @@ interface Props {
   canResetOrder: boolean
   onResetOrder: () => void
   onSettings: () => void
+  /** Persisted workspace size — the default view and the half-view side. */
+  sizeMode: SizeMode
+  onSizeMode: (mode: SizeMode) => void
+  paneCols: PaneCols
+  onPaneCols: (cols: PaneCols) => void
   /** Which dropdown is open. Owned by App so Escape can close it before hiding. */
   openMenu: MenuName | null
   onOpenMenu: (menu: MenuName | null) => void
@@ -41,7 +46,7 @@ export function TopBar(props: Props) {
   const {
     waiting, waitingOnly, onWaitingOnly, canCollapse, allCollapsed, onCollapseAll, conn,
     panes, onAddPane, onNewTerminal, onNewProject, canResetOrder, onResetOrder, onSettings,
-    openMenu, onOpenMenu
+    sizeMode, onSizeMode, paneCols, onPaneCols, openMenu, onOpenMenu
   } = props
 
   const paneFull = panes.length >= MAX_PANES
@@ -146,6 +151,19 @@ export function TopBar(props: Props) {
                 disabled={waiting === 0 && !waitingOnly}
                 onClick={run(onWaitingOnly)}
               />
+              <div className="menu-sep" />
+              {/* Radio groups stay open like the sidebar's check toggles, so a
+                  choice can be compared and re-picked without reopening. */}
+              <div className="menu-label"><Monitor className="menu-label-ic" strokeWidth={2} />Workspace size</div>
+              <MenuCheckItem icon={<Monitor strokeWidth={2} />} label="Full screen" hint="Fill the work area (default)" checked={sizeMode === 'full'} onClick={() => onSizeMode('full')} />
+              <MenuCheckItem icon={<PanelLeft strokeWidth={2} />} label="Left half" hint="Take the left half, leaving the right visible" checked={sizeMode === 'left'} onClick={() => onSizeMode('left')} />
+              <MenuCheckItem icon={<PanelRight strokeWidth={2} />} label="Right half" hint="Take the right half, leaving the left visible" checked={sizeMode === 'right'} onClick={() => onSizeMode('right')} />
+              <div className="menu-sep" />
+              <div className="menu-label"><Columns3 className="menu-label-ic" strokeWidth={2} />Columns</div>
+              <MenuCheckItem label="Auto" hint="Up to three columns, as panes fit" checked={paneCols === 'auto'} onClick={() => onPaneCols('auto')} />
+              <MenuCheckItem label="1 column" checked={paneCols === 1} onClick={() => onPaneCols(1)} />
+              <MenuCheckItem label="2 columns" checked={paneCols === 2} onClick={() => onPaneCols(2)} />
+              <MenuCheckItem label="3 columns" checked={paneCols === 3} onClick={() => onPaneCols(3)} />
             </MenuPop>
           )}
         </div>

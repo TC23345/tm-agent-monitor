@@ -410,11 +410,11 @@ html, body, #root {
 .linkbtn:hover { color: var(--text); background: var(--elev); }
 .linkbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* Narrow displays: fewer columns before anything gets crushed, then the sidebar
-   yields the last of its width rather than the panes disappearing. */
-@media (max-width: 1400px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+/* Narrow displays: the sidebar yields the last of its width rather than the
+   panes disappearing. Column count is capped in App.tsx (`colCap`) so the
+   viewport limit and an explicit View-menu column choice compose — a media
+   query here would silently override the user's pick. */
 @media (max-width: 1040px) {
-  .grid { grid-template-columns: minmax(0, 1fr) !important; }
   .sidebar { flex-basis: 280px; }
 }
 /* Section headings (provider names) share the app title's type so the panel
