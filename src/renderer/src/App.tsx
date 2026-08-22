@@ -16,8 +16,9 @@ import { TerminalPane } from './TerminalPane'
 import { MenuCheckItem, MenuPop } from './Menu'
 import {
   MAX_PANES, SIDEBAR_VIEWS, defaultPanes, isUniqueKind, loadPaneCols, loadPanes, loadSidebarCollapsed,
-  loadSidebarViews, newPane, savePaneCols, savePanes, saveSidebarCollapsed, saveSidebarViews,
-  type PaneCols, type PaneInstance, type PaneKind, type SidebarView, type TerminalPaneConfig
+  loadSidebarOrder, loadSidebarViews, newPane, savePaneCols, savePanes, saveSidebarCollapsed,
+  saveSidebarOrder, saveSidebarViews,
+  type PaneCols, type PaneInstance, type PaneKind, type SidebarSlot, type SidebarView, type TerminalPaneConfig
 } from './panes'
 import {
   LaunchContextChip, LauncherPane, WindowsPane, WindowsRefreshButton, useDesktopWindows,
@@ -62,6 +63,11 @@ export function App() {
   // section can also roll up to just its header.
   const [sidebarViews, setSidebarViews] = useState<SidebarView[]>(loadSidebarViews)
   const [sidebarCollapsed, setSidebarCollapsed] = useState<SidebarView[]>(loadSidebarCollapsed)
+  // Sidebar stacking order — the agent list is a slot like the data views, so
+  // sections drag above or below it. Same native-DnD shape as the pane grid.
+  const [sidebarOrder, setSidebarOrder] = useState<SidebarSlot[]>(loadSidebarOrder)
+  const [sideDrag, setSideDrag] = useState<SidebarSlot | null>(null)
+  const [sideDrop, setSideDrop] = useState<{ id: SidebarSlot; after: boolean } | null>(null)
   // Launch actions start in the active project by default; the header chip toggles
   // back to the home folder so a launch target is never a surprise.
   const [useProjectContext, setUseProjectContext] = useState(true)
@@ -81,6 +87,7 @@ export function App() {
   useEffect(() => savePanes(panes), [panes])
   useEffect(() => saveSidebarViews(sidebarViews), [sidebarViews])
   useEffect(() => saveSidebarCollapsed(sidebarCollapsed), [sidebarCollapsed])
+  useEffect(() => saveSidebarOrder(sidebarOrder), [sidebarOrder])
   useEffect(() => savePaneCols(paneCols), [paneCols])
 
   // Re-cap the columns when the window bounds change (size-mode switch, other
@@ -296,6 +303,33 @@ export function App() {
     setPaneDrop(null)
   }
 
+  const commitSideDrop = () => {
+    if (sideDrag && sideDrop && sideDrag !== sideDrop.id) {
+      setSidebarOrder((current) => {
+        const rest = current.filter((s) => s !== sideDrag)
+        const at = rest.indexOf(sideDrop.id)
+        rest.splice(at + (sideDrop.after ? 1 : 0), 0, sideDrag)
+        return rest
+      })
+    }
+    setSideDrag(null)
+    setSideDrop(null)
+  }
+
+  /** Drag-handle props for a sidebar slot header. */
+  const sideDragHandle = (slot: SidebarSlot) => ({
+    draggable: true,
+    onDragStart: (event: React.DragEvent) => {
+      event.dataTransfer.effectAllowed = 'move'
+      event.dataTransfer.setData('text/plain', slot)
+      setSideDrag(slot)
+    },
+    onDragEnd: () => {
+      setSideDrag(null)
+      setSideDrop(null)
+    }
+  })
+
   const paneBody = (pane: PaneInstance) => {
     switch (pane.kind) {
       case 'launcher':
@@ -341,11 +375,11 @@ export function App() {
     }
   }
 
-  const sideSection = (v: (typeof SIDEBAR_VIEWS)[number], top = false) => {
+  const sideSection = (v: (typeof SIDEBAR_VIEWS)[number]) => {
     const rolled = sidebarCollapsed.includes(v.id)
     return (
-      <section className={`sideview ${top ? 'sideview--top' : ''} ${rolled ? 'is-collapsed' : ''}`} key={v.id}>
-        <div className="pane-head sideview-head">
+      <section className={`sideview ${rolled ? 'is-collapsed' : ''}`}>
+        <div className="pane-head sideview-head side-drag" {...sideDragHandle(v.id)}>
           <button
             className="sidebar-title"
             onClick={() => toggleSidebarCollapsed(v.id)}
@@ -368,11 +402,9 @@ export function App() {
     )
   }
 
-  // Sections render in the fixed catalog order so toggling never reshuffles.
-  // Limits pins above the agent list; everything else stacks below it.
-  const activeViews = SIDEBAR_VIEWS.filter((v) => sidebarViews.includes(v.id))
-  const limitsView = activeViews.find((v) => v.id === 'limits')
-  const belowViews = activeViews.filter((v) => v.id !== 'limits')
+  // Slots render in the dragged order; hidden views keep their place for when
+  // they return. The agent list is a slot too, so sections sit above or below it.
+  const sideSlots = sidebarOrder.filter((s) => s === 'agents' || sidebarViews.includes(s))
 
   return (
     <div className={`app ${open ? 'is-open' : ''}`}>
@@ -401,37 +433,64 @@ export function App() {
 
       <div className="frame">
         <aside className="sidebar">
-          {limitsView && sideSection(limitsView, true)}
-          <div className="pane-head sidebar-head">
-            <button
-              className="sidebar-title"
-              onClick={() => setOpenMenu(openMenu === 'sidebar' ? null : 'sidebar')}
-              aria-expanded={openMenu === 'sidebar'}
-              title="Choose which views stack below the agent list"
+          {sideSlots.map((slot) => (
+            <div
+              key={slot}
+              className={`side-slot ${slot === 'agents' ? 'side-slot--agents' : ''} ${
+                slot !== 'agents' && sidebarCollapsed.includes(slot) ? 'side-slot--rolled' : ''
+              } ${sideDrag === slot ? 'is-dragging' : ''} ${
+                sideDrop?.id === slot && sideDrag && sideDrag !== slot ? (sideDrop.after ? 'side-drop-after' : 'side-drop-before') : ''
+              }`}
+              onDragOver={(event) => {
+                if (!sideDrag) return
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'move'
+                const rect = event.currentTarget.getBoundingClientRect()
+                const after = event.clientY > rect.top + rect.height / 2
+                setSideDrop((current) => current?.id === slot && current.after === after ? current : { id: slot, after })
+              }}
+              onDrop={(event) => {
+                event.preventDefault()
+                commitSideDrop()
+              }}
             >
-              <span className="pane-title">Coding agents</span>
-              <ChevronDown className="sidebar-caret" strokeWidth={2} />
-            </button>
-            {agents.length > 0 && <span className="pane-count">{agents.filter((a) => !a.parentId).length}</span>}
-            {openMenu === 'sidebar' && (
-              <MenuPop onAway={() => setOpenMenu(null)} ignoreSelector=".sidebar-head">
-                {SIDEBAR_VIEWS.map((v) => (
-                  <MenuCheckItem
-                    key={v.id}
-                    icon={<v.icon strokeWidth={2} />}
-                    label={v.label}
-                    hint={v.hint}
-                    checked={sidebarViews.includes(v.id)}
-                    onClick={() => toggleSidebarView(v.id)}
-                  />
-                ))}
-              </MenuPop>
-            )}
-          </div>
-          <div className="pane-scroll">
-            <div className="agents-inner">{agentList}</div>
-          </div>
-          {belowViews.map((v) => sideSection(v))}
+              {slot === 'agents' ? (
+                <>
+                  <div className="pane-head sidebar-head side-drag" {...sideDragHandle('agents')}>
+                    <button
+                      className="sidebar-title"
+                      onClick={() => setOpenMenu(openMenu === 'sidebar' ? null : 'sidebar')}
+                      aria-expanded={openMenu === 'sidebar'}
+                      title="Choose which views stack in the sidebar"
+                    >
+                      <span className="pane-title">Coding agents</span>
+                      <ChevronDown className="sidebar-caret" strokeWidth={2} />
+                    </button>
+                    {agents.length > 0 && <span className="pane-count">{agents.filter((a) => !a.parentId).length}</span>}
+                    {openMenu === 'sidebar' && (
+                      <MenuPop onAway={() => setOpenMenu(null)} ignoreSelector=".sidebar-head">
+                        {SIDEBAR_VIEWS.map((v) => (
+                          <MenuCheckItem
+                            key={v.id}
+                            icon={<v.icon strokeWidth={2} />}
+                            label={v.label}
+                            hint={v.hint}
+                            checked={sidebarViews.includes(v.id)}
+                            onClick={() => toggleSidebarView(v.id)}
+                          />
+                        ))}
+                      </MenuPop>
+                    )}
+                  </div>
+                  <div className="pane-scroll">
+                    <div className="agents-inner">{agentList}</div>
+                  </div>
+                </>
+              ) : (
+                sideSection(SIDEBAR_VIEWS.find((v) => v.id === slot)!)
+              )}
+            </div>
+          ))}
         </aside>
 
         <main className="grid" style={{ gridTemplateColumns: `repeat(${Math.max(1, Math.min(paneCols === 'auto' ? 3 : paneCols, panes.length, viewportCap))}, minmax(0, 1fr))` }}>

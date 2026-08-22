@@ -229,8 +229,9 @@ function createWindow(): void {
 // the workspace.
 //
 // The persisted `sizeMode` setting ('full' | 'left' | 'right') is the default
-// the workspace summons into and decides which side `half` means. The Alt+Q
-// hotkey flips the live view without touching the setting, so the View-menu
+// the workspace summons into and decides which side `half` means — left, unless
+// the setting explicitly says right. The Alt+Q hotkey (and the top-bar half
+// control) flips the live view without touching the setting, so the View-menu
 // choice reflects the configured default, not a transient flip.
 type ViewMode = 'full' | 'half'
 let sizeModePref: SizeMode = 'full'
@@ -238,7 +239,7 @@ let sizeModePref: SizeMode = 'full'
 let viewMode: ViewMode = process.env.CLAUDE_WATCH_CAPTURE_HALF ? 'half' : 'full'
 
 function halfSide(): 'left' | 'right' {
-  return sizeModePref === 'left' ? 'left' : 'right'
+  return sizeModePref === 'right' ? 'right' : 'left'
 }
 
 function applySizeMode(mode: SizeMode): void {
@@ -455,7 +456,8 @@ function sanitizeProjectName(raw: string): string {
     .slice(0, 120)
 }
 
-/** Summons the bottom-half workspace; the main hotkey summons the full one. */
+/** Summons the half workspace (left side unless sizeMode says right); the main
+ * hotkey summons the configured default view. */
 const HALF_HOTKEY = 'Alt+Q'
 
 /** Register the summon hotkeys, falling back through alternates on conflict. */
@@ -1269,6 +1271,9 @@ function registerIpc(): void {
   })
   ipcMain.handle('usage:insights', () => getUsageInsights())
   ipcMain.on('window:hide', () => hideWindow())
+  // The top-bar half control: the IDE maximize/restore analog. Transient like
+  // Alt+Q — flips the live view, never the persisted sizeMode.
+  ipcMain.on('window:half', () => toggleWindowMode(viewMode === 'half' ? 'full' : 'half'))
   ipcMain.on('app:quit', () => { app.quit() })
 }
 

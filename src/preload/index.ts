@@ -58,6 +58,8 @@ const api = {
   createProject: (name: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
     ipcRenderer.invoke('project:create', name),
   hide: () => ipcRenderer.send('window:hide'),
+  /** Flip the live view full ↔ half without touching the persisted sizeMode. */
+  toggleHalf: () => ipcRenderer.send('window:half'),
   getHistory: (): Promise<DailyUsageDay[]> => ipcRenderer.invoke('history:recent'),
   getUsageInsights: (): Promise<UsageInsights> => ipcRenderer.invoke('usage:insights'),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),

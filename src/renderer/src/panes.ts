@@ -168,6 +168,37 @@ export function saveSidebarCollapsed(views: SidebarView[]): void {
   }
 }
 
+/** Sidebar stacking order. The agent list is itself a slot, so data views can
+ * be dragged above or below it; a hidden view keeps its place for when it
+ * returns. Views added in later versions append in catalog order. */
+export type SidebarSlot = SidebarView | 'agents'
+
+const SIDEBAR_ORDER_KEY = 'tm.sidebarOrder.v1'
+const DEFAULT_SIDEBAR_ORDER: SidebarSlot[] = ['limits', 'agents', 'spend', 'windows', 'insights']
+
+function isSidebarSlot(value: unknown): value is SidebarSlot {
+  return value === 'agents' || isSidebarView(value)
+}
+
+export function loadSidebarOrder(): SidebarSlot[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SIDEBAR_ORDER_KEY) ?? 'null')
+    const order = Array.isArray(raw) ? [...new Set(raw.filter(isSidebarSlot))] : []
+    for (const slot of DEFAULT_SIDEBAR_ORDER) if (!order.includes(slot)) order.push(slot)
+    return order
+  } catch {
+    return [...DEFAULT_SIDEBAR_ORDER]
+  }
+}
+
+export function saveSidebarOrder(order: SidebarSlot[]): void {
+  try {
+    localStorage.setItem(SIDEBAR_ORDER_KEY, JSON.stringify(order))
+  } catch {
+    /* non-fatal */
+  }
+}
+
 /** Grid column preference. `auto` packs up to three columns; a number pins the
  * count, though the viewport can still cap it lower before panes get crushed. */
 export type PaneCols = 'auto' | 1 | 2 | 3

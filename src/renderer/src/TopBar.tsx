@@ -1,5 +1,5 @@
 import {
-  ChevronsDownUp, ChevronsUpDown, Code2, Columns3, Filter, Folder, FolderPlus, Globe,
+  ChevronsDownUp, ChevronsUpDown, Code2, Columns2, Columns3, Filter, Folder, FolderPlus, Globe,
   ListRestart, Minus, Monitor, PanelLeft, PanelRight, Power, SquarePlus, SquareTerminal, Terminal
 } from 'lucide-react'
 import { Settings } from './Icons'
@@ -37,9 +37,11 @@ interface Props {
 }
 
 /**
- * The app chrome: brand row, then a standard File / Terminal / View / User menu
- * strip under the logo. Every app action lives in these menus — the top right
- * keeps only passive status (waiting count, connection health). The sidebar and
+ * The app chrome, one IDE-style row: logo glyph, the File / Terminal / View /
+ * User menus inline beside it, and the right edge holding passive status
+ * (waiting count, connection health) plus the window-control cluster — the
+ * half-view toggle (the maximize/restore analog, transient like Alt+Q) and
+ * hide-to-tray. Every other app action lives in the menus; the sidebar and
  * panes below stay pure content.
  */
 export function TopBar(props: Props) {
@@ -72,24 +74,7 @@ export function TopBar(props: Props) {
 
   return (
     <header className="topbar">
-      <div className="topbar-brandrow">
-        <img className="brand" src={logo} alt="TaylorMade Solutions" draggable={false} />
-        <div className="topbar-status">
-          {waiting > 0 && (
-            <button
-              className={`needs ${waitingOnly ? 'needs--active' : ''}`}
-              onClick={onWaitingOnly}
-              title={waitingOnly ? 'Showing waiting sessions only — click to show all' : 'Agents waiting for your input — click to show only them'}
-            >
-              {waiting} waiting
-            </button>
-          )}
-          <div className={`conn is-${conn.state}`} title={conn.title}>
-            <span className="conn-dot" />
-            {conn.label}
-          </div>
-        </div>
-      </div>
+      <img className="brand" src={logo} alt="TaylorMade Solutions" draggable={false} />
 
       <nav className="menubar">
         <div className="menu-wrap">
@@ -181,6 +166,30 @@ export function TopBar(props: Props) {
           )}
         </div>
       </nav>
+
+      <div className="topbar-status">
+        {waiting > 0 && (
+          <button
+            className={`needs ${waitingOnly ? 'needs--active' : ''}`}
+            onClick={onWaitingOnly}
+            title={waitingOnly ? 'Showing waiting sessions only — click to show all' : 'Agents waiting for your input — click to show only them'}
+          >
+            {waiting} waiting
+          </button>
+        )}
+        <div className={`conn is-${conn.state}`} title={conn.title}>
+          <span className="conn-dot" />
+          {conn.label}
+        </div>
+        <span className="tb-winctl">
+          <button className="winctl-btn" onClick={() => window.watch.toggleHalf()} title="Toggle half view (Alt+Q)" aria-label="Toggle half view">
+            <Columns2 strokeWidth={2} />
+          </button>
+          <button className="winctl-btn" onClick={() => window.watch.hide()} title="Hide to tray (Esc)" aria-label="Hide to tray">
+            <Minus strokeWidth={2} />
+          </button>
+        </span>
+      </div>
     </header>
   )
 }
