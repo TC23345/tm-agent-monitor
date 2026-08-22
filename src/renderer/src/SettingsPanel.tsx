@@ -47,6 +47,17 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     window.watch.checkUpdates().then(setUpdateMsg).catch(() => setUpdateMsg('check failed'))
   }
 
+  const [reinstallBusy, setReinstallBusy] = useState(false)
+  const reinstall = () => {
+    if (reinstallBusy) return
+    setReinstallBusy(true)
+    setUpdateMsg('building installer from source — this takes a minute or two…')
+    window.watch.reinstallApp()
+      .then(setUpdateMsg)
+      .catch((error) => setUpdateMsg(String(error)))
+      .finally(() => setReinstallBusy(false))
+  }
+
   const apply = useCallback((patch: AppSettingsPatch) => {
     window.watch.setSettings(patch).then(setS)
   }, [])
@@ -182,6 +193,17 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               <span className="slabel">Version<span className="shint">v{s.version}</span></span>
               <button className="hotkey-btn" onClick={checkUpdates} title="Check GitHub Releases for a newer build">
                 Check for updates
+              </button>
+            </div>
+            <div className="srow">
+              <span className="slabel">Reinstall from source<span className="shint">{s.repoDir}</span></span>
+              <button
+                className="hotkey-btn"
+                onClick={reinstall}
+                disabled={reinstallBusy}
+                title="npm run dist in the repo, then silent reinstall and relaunch"
+              >
+                {reinstallBusy ? 'Building…' : 'Rebuild & relaunch'}
               </button>
             </div>
             {updateMsg && <div className="supdate">{updateMsg}</div>}

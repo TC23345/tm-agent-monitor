@@ -957,6 +957,7 @@ function settingsView() {
     hasAdminKey: !!ADMIN_KEY,
     port: PORT,
     version: app.getVersion(),
+    repoDir: config.repoDir,
     providers: buildSnapshot().providers,
     historySync: history.status(),
     apiConfigs: [
@@ -1138,6 +1139,47 @@ function registerIpc(): void {
       return `up to date (v${app.getVersion()})`
     } catch (e) {
       return `check failed: ${(e as Error).message}`
+    }
+  })
+  // Dev loop without a release: build the installer from the local checkout,
+  // then hand off to a detached shell that waits for this process to exit,
+  // silently reinstalls over the same location, and starts the new exe. The
+  // promise stays pending through the build so Settings can show one busy state.
+  let reinstalling = false
+  ipcMain.handle('app:reinstall', async (): Promise<string> => {
+    if (reinstalling) return 'already rebuilding…'
+    if (!app.isPackaged) return 'dev build — restart npm run dev to pick up changes'
+    const repo = config.repoDir
+    if (!existsSync(join(repo, 'package.json'))) return `no repo at ${repo} — set CLAUDE_WATCH_REPO in .env`
+    reinstalling = true
+    try {
+      const build = await new Promise<{ code: number | null; tail: string }>((resolve, reject) => {
+        const child = spawn('cmd.exe', ['/d', '/s', '/c', 'npm run dist'], { cwd: repo, windowsHide: true })
+        let tail = ''
+        const keep = (chunk: Buffer) => { tail = (tail + chunk.toString()).slice(-2_000) }
+        child.stdout?.on('data', keep)
+        child.stderr?.on('data', keep)
+        const cutoff = setTimeout(() => child.kill(), 10 * 60_000)
+        child.on('error', (error) => { clearTimeout(cutoff); reject(error) })
+        child.on('close', (code) => { clearTimeout(cutoff); resolve({ code, tail }) })
+      })
+      if (build.code !== 0) return `build failed (exit ${build.code}): …${build.tail.slice(-300).trim()}`
+      const version = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).version as string
+      const installer = join(repo, 'dist', `tm-agent-monitor-${version}-x64.exe`)
+      if (!existsSync(installer)) return `built, but no installer at ${installer}`
+      const ps = (value: string) => `'${value.replace(/'/g, "''")}'`
+      spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
+        `Wait-Process -Id ${process.pid} -ErrorAction SilentlyContinue; ` +
+        `Start-Process -FilePath ${ps(installer)} -ArgumentList '/S' -Wait; ` +
+        `Start-Process -FilePath ${ps(process.execPath)}`
+      ], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+      // Give the reply a beat to land before the ordinary quit flush runs.
+      setTimeout(() => app.quit(), 800)
+      return `v${version} built — reinstalling, back in a moment`
+    } catch (e) {
+      return `reinstall failed: ${(e as Error).message}`
+    } finally {
+      reinstalling = false
     }
   })
   ipcMain.on('text:copy', (_e, t: string) => { if (typeof t === 'string' && t.length <= 100_000) clipboard.writeText(t) })

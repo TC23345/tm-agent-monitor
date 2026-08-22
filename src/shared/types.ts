@@ -284,6 +284,8 @@ export interface AppSettings {
   hasAdminKey: boolean
   port: number
   version: string
+  /** Local source checkout used by "Rebuild & relaunch" (CLAUDE_WATCH_REPO). */
+  repoDir: string
   providers: Record<ProviderId, ProviderHealth>
   historySync: { state: 'off' | 'connecting' | 'ok' | 'error'; detail?: string; lastFlushAt?: number }
   apiConfigs: ApiConfigItem[]

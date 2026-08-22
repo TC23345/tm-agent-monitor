@@ -6,6 +6,7 @@ export interface AppConfig {
   mongoUri?: string
   transcriptDir?: string
   newProjectDir: string
+  repoDir: string
   hotkey: string
   notifications: boolean
   mock: boolean

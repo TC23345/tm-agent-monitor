@@ -66,6 +66,8 @@ AgentStore + usage + history -> StatusSnapshot -> preload IPC -> React
 
 The daemon publishes `%APPDATA%/taylormade-agent-monitor/hook-endpoint.json` by default. Custom ports belong there; hook processes must not depend on inherited environment state.
 
+Settings → "Rebuild & relaunch" (`app:reinstall`) is the dev loop without a release: it runs `npm run dist` in the local checkout (`CLAUDE_WATCH_REPO`, default `~/Projects/claude-watch`), then a detached PowerShell waits for the app to exit, silently reinstalls the built NSIS installer, and starts the new exe. Packaged builds only; the auto-update feed stays the release path.
+
 ## Invariants and gotchas
 
 - Pure ESM. `electron-updater` is CommonJS: import its default and destructure.

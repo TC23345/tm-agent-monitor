@@ -49,6 +49,8 @@ const api = {
   openProjectsDir: () => ipcRenderer.send('projects:open'),
   openConfigDir: () => ipcRenderer.send('config:open'),
   checkUpdates: (): Promise<string> => ipcRenderer.invoke('update:check'),
+  /** Build the installer from the local repo, silently reinstall, relaunch. */
+  reinstallApp: (): Promise<string> => ipcRenderer.invoke('app:reinstall'),
   manageHooks: (provider: ProviderId, action: 'install' | 'repair' | 'remove' | 'status'): Promise<{ ok: boolean; message: string; settings: AppSettings }> =>
     ipcRenderer.invoke('hooks:manage', provider, action),
   reviewCodexHookTrust: (): Promise<{ ok: boolean; message: string }> =>
