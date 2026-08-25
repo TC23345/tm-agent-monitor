@@ -77,7 +77,16 @@ These defy assumption. Each one cost real debugging time here.
     not when the action came from inside a modal the user is still reading. Give
     those callers an opt-out (`openPath(path, keepOpen)`), decided by the
     renderer, which is the only side that knows a dialog is open.
-12. **A new skill is not discoverable mid-session.** Adding
+12. **An npm bin shim is not `node <file>`.** A package whose bin entry lacks a
+    `#!/usr/bin/env node` line runs fine as `node dist/index.js` and dies as
+    `npx <pkg>` on any machine whose npm `script-shell` is Git Bash (`npm config
+    get script-shell`): the sh shim *sources* the bundle. Spawning `.cmd` shims
+    without a shell fails too (Node refuses since the 2024 CVE fix). For
+    anything an agent must launch reliably — MCP servers, `electron` itself —
+    resolve the real entry and run it under node (`scripts/mcp-electron-debug.mjs`,
+    `scripts/debug-app.mjs`, which spawns the binary `require('electron')`
+    returns).
+13. **A new skill is not discoverable mid-session.** Adding
     `<repo>/.claude/skills/<name>/` does not register it in a running session —
     `Skill(name)` fails with "Unknown skill". Install it to
     `~/.claude/skills/<name>/` (see "Maintaining this skill") and it resolves
@@ -129,6 +138,54 @@ are not are where the bugs live:
 Then run the gates below. Finish with a screenshot, because typecheck passing
 says nothing about whether the UI renders.
 
+### Drive the live app from an agent — reach for this first
+
+The `electron-debug` MCP server (four tools) is the primary way to look at the
+running app: verifying a change, seeing what rendered, clicking through a
+flow, reading console output. Screenshots alone prove rendering; these prove
+behaviour.
+
+1. `npm run debug:app` — launches the built app with `--remote-debugging-port`,
+   mock data, a throwaway `--user-data-dir` (gotcha 3), and daemon port 7460 so
+   the installed app's hooks stay untouched. `--real` for live hooks,
+   `--packaged` for `dist/win-unpacked`.
+2. `get_electron_window_info` — confirms the attach (`automationReady: true`).
+3. `send_command_to_electron` `get_page_structure` — every button/select with
+   its text, aria-label, and class; pick targets from this, not from memory.
+4. Act: `click_by_text`, `click_by_selector`, `fill_input`,
+   `send_keyboard_shortcut`, or `eval` for anything else.
+5. `take_screenshot` — no args returns the PNG inline; a **relative**
+   `outputPath` (`dist/shot.png`) writes a file. Absolute Windows paths,
+   `%TEMP%` included, are rejected as "restricted".
+6. `read_electron_logs` for console output.
+
+Caveats: at the configured `SECURITY_LEVEL=balanced`, `eval` executes but
+reports only `executed` — it is for actions; read state through
+`get_page_structure`, `get_body_text`, or a screenshot. `fill_input` sets
+`.value` without an input event, so a React-controlled input ignores it —
+`eval` the native setter
+(`Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el, text)`)
+and dispatch `new Event('input', { bubbles: true })`; likewise dispatch
+`KeyboardEvent`s on the element for Enter/arrow handling. `send_keyboard_shortcut`
+never reached this app's `window` keydown listener (Escape did nothing); for
+app-wide keys, `eval` a
+`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`
+— verified to un-zoom a pane. The launch/close/build
+tools are hidden at that level. The server writes an audit log to `./logs/`
+(gitignored). It is launched through `scripts/mcp-electron-debug.mjs`, not
+`npx` (gotcha 12). Without the MCP server, the same flag lets you hit
+`http://127.0.0.1:9222/json` and drive CDP by hand.
+
+### When the live app can't answer
+
+Electron publishes no `llms.txt`, MCP server, or agent skill, and
+`electron/electron`'s own `.claude/skills` are maintainer workflows (Chromium
+upgrades, PR triage). For packaging and update semantics the shipped source is
+authoritative — `node_modules/electron-updater/out/*.js` and
+`node_modules/app-builder-lib/templates/nsis/*.nsh`; Context7
+(`/websites/electronjs`, `/electron-userland/electron-builder`) is the fallback
+for API questions. Never answer either from memory.
+
 ### Position a window on the right display
 
 `screen.getCursorScreenPoint()` + `getDisplayNearestPoint().workArea` gives the
@@ -175,7 +232,7 @@ what this project does differently and why.
 | `examples/multi-view-panes.md` | Splitting a window into panes, or asked to embed another app |
 | `examples/tray-hotkey-lifecycle.md` | Tray icon, global shortcut, single-instance, app lifecycle |
 | `examples/native-modules.md` | Calling Win32 / any native module, or a `.node` fails to load |
-| `examples/packaging-and-update.md` | electron-builder config, asar, auto-update, releasing |
+| `examples/packaging-and-update.md` | electron-builder config, asar, auto-update, installing a local build, releasing |
 
 ## Verification gates
 

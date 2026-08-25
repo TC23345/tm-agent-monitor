@@ -1,15 +1,20 @@
 import type { DragEvent, ReactNode } from 'react'
-import { ChevronDown, X } from 'lucide-react'
-import { PANE_KINDS, isUniqueKind, type PaneKind } from './panes'
+import { Maximize2, Minimize2, X } from 'lucide-react'
+import { PANE_KINDS, type PaneKind } from './panes'
 
 interface Props {
   kind: PaneKind
-  /** Unique kinds shown by OTHER panes, so the picker can't create a duplicate. */
-  taken: PaneKind[]
-  onKind: (kind: PaneKind) => void
   onClose: () => void
-  /** Rendered by the pane header, right of the title (refresh, context chip…). */
-  actions?: ReactNode
+  /** Rendered right after the title — the launch-context chip, a cwd label. */
+  context?: ReactNode
+  /** Icon buttons in the header's action strip, before zoom and close. Each
+   * pane kind brings its own tools (restart, clear, split…) — the header is
+   * the editor-title bar, not a content picker. */
+  tools?: ReactNode
+  /** Zoom: this pane alone fills the grid. The others stay mounted and hidden,
+   * so a zoom never disturbes a running shell. */
+  zoomed?: boolean
+  onZoom?: () => void
   /** Grid drag-and-drop: the header is the handle; the slot around it drops. */
   dragHandle?: {
     draggable: boolean
@@ -19,8 +24,11 @@ interface Props {
   children: ReactNode
 }
 
-/** One cell of the main frame: a titled, swappable, closable, draggable pane. */
-export function Pane({ kind, taken, onKind, onClose, actions, dragHandle, children }: Props) {
+/** One cell of the main frame: a titled, closable, draggable, zoomable pane
+ * whose header carries its kind's tools. The kind itself is fixed for the
+ * pane's life — swapping a terminal into a launcher would kill its shell, so
+ * a different kind is a new pane (View → Add pane, or the palette). */
+export function Pane({ kind, onClose, context, tools, zoomed, onZoom, dragHandle, children }: Props) {
   const meta = PANE_KINDS.find((p) => p.id === kind)!
   const Icon = meta.icon
   return (
@@ -29,33 +37,36 @@ export function Pane({ kind, taken, onKind, onClose, actions, dragHandle, childr
         className={`gpane-head ${dragHandle ? 'gpane-head--drag' : ''}`}
         draggable={dragHandle?.draggable}
         onDragStart={(event) => {
-          // Only the header background drags — a drag that starts on the picker
-          // or a button is a misfire, not a move.
-          if ((event.target as HTMLElement).closest('select, button')) {
+          // Only the header background drags — a drag that starts on a button
+          // is a misfire, not a move.
+          if ((event.target as HTMLElement).closest('button')) {
             event.preventDefault()
             return
           }
           dragHandle?.onDragStart(event)
         }}
         onDragEnd={(event) => dragHandle?.onDragEnd(event)}
+        onDoubleClick={(event) => {
+          if ((event.target as HTMLElement).closest('button')) return
+          onZoom?.()
+        }}
       >
         <Icon className="gpane-ic" strokeWidth={2} />
-        <select
-          className="gpane-select"
-          value={kind}
-          onChange={(e) => onKind(e.target.value as PaneKind)}
-          title={meta.hint}
-          aria-label="Pane content"
-        >
-          {PANE_KINDS.map((p) => (
-            <option key={p.id} value={p.id} disabled={p.id !== kind && isUniqueKind(p.id) && taken.includes(p.id)}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-        <ChevronDown className="gpane-caret" strokeWidth={2} aria-hidden />
+        <span className="gpane-title" title={meta.hint}>{meta.label}</span>
+        {context}
         <span className="gpane-actions">
-          {actions}
+          {tools && <span className="gpane-tools">{tools}</span>}
+          {onZoom && (
+            <button
+              className="iconbtn iconbtn--sm"
+              onClick={onZoom}
+              title={zoomed ? 'Restore the grid (Esc, or double-click the header)' : 'Zoom this pane to fill the grid (double-click the header)'}
+              aria-label={zoomed ? 'Restore the grid' : 'Zoom this pane'}
+              aria-pressed={zoomed}
+            >
+              {zoomed ? <Minimize2 className="gear gear--sm" strokeWidth={2} /> : <Maximize2 className="gear gear--sm" strokeWidth={2} />}
+            </button>
+          )}
           <button className="iconbtn iconbtn--sm" onClick={onClose} title="Close this pane" aria-label="Close this pane">
             <X className="gear gear--sm" strokeWidth={2} />
           </button>

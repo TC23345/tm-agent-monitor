@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "electron-debug": {
+      "command": "node",
+      "args": ["scripts/mcp-electron-debug.mjs"],
+      "env": {
+        "SECURITY_LEVEL": "balanced"
+      }
+    }
+  }
+}

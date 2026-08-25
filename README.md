@@ -1,25 +1,31 @@
 # TaylorMade Agent Monitor (Windows)
 
-A hotkey-summoned Electron workspace for local **Claude Code and Codex** work. It groups live roots by project, nests subagents, shows provider health and local usage, launches and switches the windows you drive agents from, and keeps optional daily history. The default toggle is **Ctrl+Alt+W**.
+A hotkey-summoned Electron workspace for local **Claude Code, Codex, and Cursor** work. It groups live roots by project, nests subagents, shows provider health and local usage, embeds real terminals, launches and switches the windows you drive agents from, and keeps optional daily history. The default toggle is **Ctrl+Alt+W**; **Alt+Q** summons a half-screen view.
 
-The workspace fills the work area of whichever display the cursor is on and slides up from the taskbar when summoned. It is sticky — it stays open until the hotkey or tray toggles it closed, `Escape` is pressed, or it steps aside for a window it just launched or focused.
+The workspace fills the work area of whichever display the cursor is on — or one half of it, per the View menu — and slides up from the taskbar when summoned. It is sticky: it stays open until the hotkey or tray toggles it closed or `Escape` is pressed. It is deliberately *not* always-on-top, so anything it launches or focuses simply appears in front while the workspace waits behind; the hotkey raises a buried workspace and only dismisses one that is already focused.
 
-A control strip, an agent sidebar, and a pane grid:
+An IDE-style title bar, an agent sidebar, and a pane grid:
 
-- **Top bar** — waiting count, provider connection, collapse all, add pane, projects, settings, hide, and quit.
-- **Sidebar (left)** — coding agent details: live Claude and Codex sessions grouped by project, with nested subagents. Always visible, whatever the panes show.
-- **Main frame** — up to **six panes**, laid out as three vertical columns that grow to a second row. Each pane's title is its content picker, and each kind appears at most once: **Launch**, **Open windows**, **Limits**, **Spend**, **Insights**, **Agents**. The layout persists across summons.
+- **Title bar** — the brand mark and the File / Terminal / View / User menus at the left, the **command center** in the middle, and the waiting count and provider connection at the right. The command center (or **Ctrl+Shift+P**, or Ctrl+P outside a terminal) opens the **command palette**: every command, every live agent (focus its window), and every open window (raise it), fuzzy-searched — `>` narrows to commands, `@` to agents, `#` to windows, `Tab` cycles those.
+- **Sidebar (left)** — coding-agent details: live sessions grouped by project with nested subagents, plus toggleable data views. **Open windows** and **Limits** pin above the agent list (Open windows starts rolled up); **Spend** and **Insights** stack below. Each section collapses to its header.
+- **Main frame** — up to **six panes**: the **Launch** pane and embedded **Terminal** panes (PowerShell, Claude Code, or Codex, in the active project's folder). Each pane header is an editor title bar: the kind, a folder chip, and that kind's tools — a terminal has split (another shell in the same folder), clear, restart, open external terminal here, and open folder; the launcher has new project and Projects folder — then zoom and close. Panes drag to reorder; the View menu picks the column count. Ctrl+Shift+` opens a new terminal pane; Ctrl+, opens Settings.
 
-**Launch** starts a Claude Code, Codex, or plain terminal, Cursor, Chrome, or a new project — in the active project's folder or your home folder, switchable from the chip in the pane header. **Open windows** lists your open terminals, editors, browsers, and Explorer windows; click one to bring it to the front. Windows owned by a tracked session are marked with that provider's badge.
+**Everything resizes.** Drag the splitter between the sidebar and the grid, or the gutters between columns and rows. Double-click a splitter (or press `Home` on it) to reset it, or View → *Reset pane sizes* to reset everything. Sizes are remembered separately for the full and half workspace. Double-click a pane header (or its zoom button) to fill the grid with that pane; `Escape` restores the grid without disturbing the shells in the other panes.
 
-Panes host this app's own content and *switch to* your real windows rather than embedding them: Electron has no supported way to host a foreign native window ([electron/electron#10547](https://github.com/electron/electron/issues/10547) is still open), and reparenting a live HWND breaks input, focus, and DPI in the window being captured.
+**Launch** starts a Claude Code, Codex, or plain terminal in a pane (Shift-click for an external window), or Cursor, Chrome, or a new project — in the active project's folder or your home folder, switchable from the chip in the pane header. **Open windows** lists your open terminals, editors, browsers, and Explorer windows; click one to bring it to the front. Windows owned by a tracked session are marked with that provider's badge.
+
+Panes host this app's own content — the embedded terminal is our xterm over our ConPTY — and *switch to* your real windows rather than embedding them: Electron has no supported way to host a foreign native window ([electron/electron#10547](https://github.com/electron/electron/issues/10547) is still open), and reparenting a live HWND breaks input, focus, and DPI in the window being captured.
+
+See [CHANGELOG.md](./CHANGELOG.md) for what each version added.
 
 ## Current capabilities
 
 - Provider-neutral live lifecycle model with collision-safe identities (`provider:sessionId[:actorId]`).
 - Claude Code, Codex, and Cursor roots grouped together by canonical project path, with provider badges and expandable child rows.
-- Six pane kinds — launch, open windows, limits, spend, insights, agents — composed into up to six panes and remembered between summons.
-- The limits pane shows limit bars only — Claude and Codex separately — so it stays scannable; token counts and spend live in the spend pane.
+- Embedded ConPTY terminals (`node-pty` + xterm.js) that survive hide/show and pane remounts, killed on quit.
+- A resizable, persisted layout: draggable sidebar, column and row splitters, per-view sizes, pane zoom, drag-to-reorder panes and projects.
+- A command palette over every app action, live agent, and open window, with prefix filters and keyboard navigation.
+- Sidebar data views: limit bars only in **Limits** (Claude and Codex separately) so it stays scannable; token counts and spend in **Spend**; local usage patterns in **Insights**.
 - Workspace launchers and a Win32 window switcher for terminals, editors, browsers, and Explorer, launched in the active project's folder or your home folder.
 - Per-provider install/reporting/trust health. Codex user hooks require an explicit review in `/hooks`.
 - Claude subscription windows, deduplicated local Claude transcript totals, best-effort isolated Codex rollout totals, and actual Anthropic organization API spend.
@@ -27,6 +33,7 @@ Panes host this app's own content and *switch to* your real windows rather than 
 - Optional MongoDB schema-v2 history with aggregate compatibility fields and `byProvider` breakdowns.
 - Native Windows focus, resolving the stored agent ID in main and validating HWND/PID ownership before raising a window.
 - Sandbox-enabled renderer, runtime-validated IPC, authenticated loopback ingestion, and a per-install discovery token.
+- Auto-update from GitHub Releases, and Settings → **Rebuild & relaunch** to reinstall from the local checkout without cutting a release.
 
 Windows can raise the Codex/ChatGPT desktop window, but public Win32 APIs cannot select a specific task tab.
 
@@ -112,13 +119,24 @@ npm run dist
 
 Every distribution/publish command regenerates `build/icon.ico` offline from tracked `resources/icon.png`. A clean checkout does not depend on ignored local icon assets or a network font. Packaged resources include the shared bridge/installer and native focus module. Builds are unsigned.
 
-`npm run dist` produces two Windows executables in `dist/`: the `*-x64.exe` installer opens the setup wizard, while `*-portable.exe` runs without installation. From a fresh PowerShell window, the newest locally built installer can be launched with:
+`npm run dist` produces two Windows executables in `dist/`: the `*-x64.exe` installer opens the setup wizard, while `*-portable.exe` runs without installation. Pass `--publish never` for a purely local build (`npm run dist -- --publish never`) — the config declares a GitHub publisher.
+
+### Installing a local build over the installed app
+
+Quit the running app (tray → Quit, or File → Quit), then hand the installer the same arguments `electron-updater` uses for `quitAndInstall({ isSilent: true, isForceRunAfter: true })`:
 
 ```powershell
-Start-Process (Get-ChildItem .\dist\tm-agent-monitor-*-x64.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+Start-Process .\dist\tm-agent-monitor-0.3.1-x64.exe -ArgumentList '--updated', '/S', '--force-run'
 ```
 
-Add `/S` to install silently without the wizard.
+`--updated` marks an in-place update (the assisted installer skips its pages and passes `--updated` to the relaunched app), `/S` is NSIS silent mode, and `--force-run` makes the silent install start the app afterwards, as your user, so nothing needs to know the install directory. `scripts\reinstall-local.ps1` wraps this (add `-SkipBuild` to install what `dist\` already holds), and Settings → **Rebuild & relaunch** does the whole thing from inside the app.
+
+Before trusting a local build, verify it the way a release is verified — a green build is not a working app:
+
+```powershell
+node .claude\skills\electron\scripts\verify-asar-deps.mjs dist\win-unpacked   # every production dep is in the asar
+node scripts\debug-app.mjs --packaged                                         # it boots, driveable over CDP
+```
 
 ### Publishing a release
 
@@ -148,6 +166,14 @@ npm run dist:dir
 npm audit
 git status --short
 ```
+
+## Agent tooling
+
+Electron publishes no official MCP server, agent skill, or `llms.txt` (the `.claude/skills` in `electron/electron` are for Chromium-upgrade and PR-triage maintainers). What this repo uses instead:
+
+- **Driving the live app (use this first)** — [`.mcp.json`](./.mcp.json) registers [`electron-mcp-server`](https://github.com/halilural/electron-mcp-server) (MIT), which attaches over the Chrome DevTools Protocol to take screenshots, click, type, evaluate JS, and read console/network logs. It is launched through `scripts/mcp-electron-debug.mjs` rather than `npx` because the package's entry has no shebang — on a machine whose npm `script-shell` is Git Bash the bin shim sources the bundle and dies on line 1; the wrapper runs the package's main under node directly (devDependency first, else the npx cache). It needs an app started with `--remote-debugging-port`: `npm run debug:app` launches the built app that way with mock data, a throwaway user-data dir (the single-instance lock would otherwise exit it), and daemon port 7460 so the installed app's hooks are untouched. `--real` uses your live hooks; `--packaged` runs `dist\win-unpacked`. Give `take_screenshot` a *relative* `outputPath` (or none, for an inline image) — its validator rejects absolute Windows paths — and read page state with `get_page_structure` / `get_body_text`, since `eval` at the configured security level performs actions but returns only `executed`.
+- **Docs, when the live app can't answer** — the shipped source is authoritative for packaging and updates: `node_modules/electron-updater/out/*.js` and `node_modules/app-builder-lib/templates/nsis/*.nsh`; Context7 mirrors (`/websites/electronjs`, `/electron-userland/electron-builder`) are the fallback for API questions.
+- **Repo skills** — `.claude/skills/electron` (process model, packaging, auto-update, the failures this project hit) and `.claude/skills/workspace-layout` (window sizing, layering, persisted layout). Copy them to `~/.claude/skills/` to invoke them.
 
 ## Scope after provider-neutral monitoring
 

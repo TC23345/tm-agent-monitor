@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { SizeMode, StatusSnapshot, TerminalLaunch } from '@shared/types'
 import { UsageDashboard } from './UsageDashboard'
 import { ProjectGroup } from './ProjectGroup'
@@ -12,18 +12,33 @@ import { UsageInsightsView } from './UsageInsightsView'
 import { SpendView } from './SpendView'
 import { TopBar, type MenuName } from './TopBar'
 import { Pane } from './Pane'
-import { TerminalPane } from './TerminalPane'
+import { TerminalPane, type TerminalPaneHandle } from './TerminalPane'
 import { MenuCheckItem, MenuPop } from './Menu'
+import { CommandPalette, type PaletteItem } from './CommandPalette'
+import { ProviderBadge } from './ProviderBadge'
+import { Settings as SettingsIcon } from './Icons'
 import {
-  MAX_PANES, SIDEBAR_VIEWS, defaultPanes, isUniqueKind, loadPaneCols, loadPanes, loadSidebarCollapsed,
-  loadSidebarViews, newPane, savePaneCols, savePanes, saveSidebarCollapsed, saveSidebarViews,
-  type PaneCols, type PaneInstance, type PaneKind, type SidebarView, type TerminalPaneConfig
+  MAX_PANES, SIDEBAR_VIEWS, defaultPanes, emptySizes, isTopSidebarView, isUniqueKind, loadPaneCols,
+  loadPanes, loadSidebarCollapsed, loadSidebarViews, loadSizes, newPane, savePaneCols, savePanes,
+  saveSidebarCollapsed, saveSidebarViews, saveSizes,
+  type AllSizes, type PaneCols, type PaneInstance, type PaneKind, type PaneSizes, type SidebarView,
+  type TerminalPaneConfig
 } from './panes'
+import { Splitter } from './Splitter'
+import {
+  PANE_MIN, PANE_MIN_ROW, clampSidebarWidth, columnTemplate, normalizeFractions, resizeFractions,
+  trackWidths, viewportBucket, type SizeBucket
+} from '@shared/layout.mjs'
 import {
   LaunchContextChip, LauncherPane, WindowsPane, WindowsRefreshButton, useDesktopWindows,
   type LaunchContext
 } from './WorkspacePanes'
-import { ChevronDown, X } from 'lucide-react'
+import {
+  AppWindow, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Columns3, Eraser, ExternalLink, Filter,
+  Folder, FolderPlus, Globe, Maximize2, Minimize2, Minus, Monitor, PanelLeft, PanelRight, Power, RotateCcw,
+  Ruler, SquarePlus, SquareSplitHorizontal, SquareTerminal, Terminal, X
+} from 'lucide-react'
+import type { DesktopWindow } from '@shared/types'
 
 /** Most columns the viewport can hold before panes get crushed — the former
  * CSS breakpoints (styles.css), moved here so an explicit column choice and
@@ -31,6 +46,10 @@ import { ChevronDown, X } from 'lucide-react'
 function colCap(): number {
   return window.innerWidth >= 1400 ? 3 : window.innerWidth >= 1040 ? 2 : 1
 }
+
+/** Width of the gutter track a column splitter lives in. It replaces the grid's
+ * column gap (styles.css `.grid`), so the spacing looks unchanged. */
+const GRID_GUTTER = 10
 
 export function App() {
   const [snap, setSnap] = useState<StatusSnapshot | null>(null)
@@ -54,6 +73,25 @@ export function App() {
   // half-width window or narrow display never crushes panes.
   const [paneCols, setPaneCols] = useState<PaneCols>(loadPaneCols)
   const [viewportCap, setViewportCap] = useState(() => colCap())
+  // Draggable sizes, held for every view bucket at once so switching between
+  // the full and half workspace swaps splits instead of overwriting them.
+  const [allSizes, setAllSizes] = useState<AllSizes>(loadSizes)
+  const [bucket, setBucket] = useState<SizeBucket>(() => viewportBucket(window.innerWidth, window.screen.availWidth))
+  // Zoom: one pane fills the grid while the rest stay mounted but hidden.
+  const [zoom, setZoom] = useState<string | null>(null)
+  // The command palette, and a one-shot window list for it (the sidebar's
+  // poll only runs while its section is open; the palette wants the list now).
+  const [palette, setPalette] = useState(false)
+  const [paletteWindows, setPaletteWindows] = useState<DesktopWindow[]>([])
+  // Live handles to the terminal panes, for the header tools (clear/restart).
+  const termRefs = useRef(new Map<string, TerminalPaneHandle>())
+  const [frameW, setFrameW] = useState(() => window.innerWidth)
+  const frameRef = useRef<HTMLDivElement>(null)
+  const gridRef = useRef<HTMLElement>(null)
+  // Drag baselines: every splitter reports a delta from its own pointer-down,
+  // so the geometry it started from is captured once instead of accumulated.
+  const sidebarDrag = useRef(0)
+  const trackDrag = useRef<{ axis: 'cols' | 'rows'; fracs: number[]; before: number; after: number } | null>(null)
   // The persisted workspace size (full / left half / right half). Main owns the
   // truth; the View menu radio reflects the configured default, not a transient
   // Alt+Q flip.
@@ -82,12 +120,23 @@ export function App() {
   useEffect(() => saveSidebarViews(sidebarViews), [sidebarViews])
   useEffect(() => saveSidebarCollapsed(sidebarCollapsed), [sidebarCollapsed])
   useEffect(() => savePaneCols(paneCols), [paneCols])
+  useEffect(() => saveSizes(allSizes), [allSizes])
 
   // Re-cap the columns when the window bounds change (size-mode switch, other
   // display). The window never resizes with content, so this only fires on real
   // bounds changes.
   useEffect(() => {
-    const on = () => setViewportCap(colCap())
+    const on = () => {
+      setViewportCap(colCap())
+      // One measurement per bounds change — the sidebar ceiling follows the
+      // frame it shares. Deliberately not a ResizeObserver: bounds never track
+      // content (CLAUDE.md), so `resize` is the whole story.
+      setFrameW(frameRef.current?.clientWidth ?? window.innerWidth)
+      // Half view or full? Read from the live viewport, since the transient
+      // Alt+Q flip never touches the persisted sizeMode setting.
+      setBucket(viewportBucket(window.innerWidth, window.screen.availWidth))
+    }
+    on()
     window.addEventListener('resize', on)
     return () => window.removeEventListener('resize', on)
   }, [])
@@ -122,22 +171,59 @@ export function App() {
     return () => clearInterval(t)
   }, [])
 
-  // Escape closes an open menu or dialog, otherwise dismisses the workspace (it
-  // no longer auto-hides on blur, so this is the fast keyboard way out). Keys
-  // inside an embedded terminal belong to the shell — Escape there interrupts
-  // the CLI, it must never also hide the workspace.
+  // Escape closes an open menu, the palette, or a dialog, then un-zooms, and
+  // otherwise dismisses the workspace (it no longer auto-hides on blur, so this
+  // is the fast keyboard way out). Keys inside an embedded terminal belong to
+  // the shell — Escape there interrupts the CLI, it must never also hide the
+  // workspace, and Ctrl+P is the shell's too. Only the Ctrl+Shift chords reach
+  // past a focused terminal, which is why the palette's canonical shortcut is
+  // Ctrl+Shift+P rather than Ctrl+P alone.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const inTerminal = !!(e.target as HTMLElement)?.closest?.('.termpane')
+      const ctrl = e.ctrlKey && !e.altKey && !e.metaKey
+      if (ctrl && e.shiftKey && (e.key === 'P' || e.key === 'p')) {
+        e.preventDefault()
+        setPalette((v) => !v)
+        return
+      }
+      if (ctrl && e.shiftKey && e.key === '`') {
+        e.preventDefault()
+        newTerminal('shell')
+        return
+      }
+      if (inTerminal) return
+      if (ctrl && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault()
+        setPalette((v) => !v)
+        return
+      }
+      if (ctrl && !e.shiftKey && e.key === ',') {
+        e.preventDefault()
+        setSettingsOpen(true)
+        return
+      }
       if (e.key !== 'Escape') return
-      if ((e.target as HTMLElement)?.closest?.('.termpane')) return
       if (menu) setMenu(null)
       else if (openMenu) setOpenMenu(null)
+      else if (palette) setPalette(false)
       else if (newProjectOpen) setNewProjectOpen(false)
+      else if (zoom) setZoom(null)
       else if (!settingsOpen) window.watch.hide()
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [menu, settingsOpen, newProjectOpen, openMenu])
+    // Capture phase: xterm stops propagation of keys it handles, and a chord
+    // meant for the app must win before the shell sees it.
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  })
+
+  // The palette lists open windows: refresh once per open rather than polling.
+  useEffect(() => {
+    if (!palette) return
+    let live = true
+    window.watch.listWindows().then((list) => { if (live) setPaletteWindows(list) }).catch(() => {})
+    return () => { live = false }
+  }, [palette])
 
   const agents = snap?.agents ?? []
   const waitingParents = new Set(agents.filter((a) => a.state === 'waiting' && a.parentId).map((a) => a.parentId!))
@@ -264,17 +350,6 @@ export function App() {
       p.id === paneId && p.term ? { ...p, term: { ...p.term, ...patch } } : p
     ))
 
-  const setPaneKind = (paneId: string, kind: PaneKind) => {
-    const changing = panes.find((p) => p.id === paneId)
-    if (!changing || changing.kind === kind) return
-    // Leaving a terminal kills its shell; nothing should keep running unseen.
-    if (changing.term?.sessionId) window.watch.disposeTerminal(changing.term.sessionId)
-    setPanes(panes.map((p) => p.id === paneId
-      ? newPane(kind, kind === 'terminal' ? { launch: 'shell', cwd: context.cwd, label: context.label } : undefined)
-      : p
-    ))
-  }
-
   const closePane = (paneId: string) => {
     const closing = panes.find((p) => p.id === paneId)
     if (closing?.term?.sessionId) window.watch.disposeTerminal(closing.term.sessionId)
@@ -301,17 +376,66 @@ export function App() {
       case 'launcher':
         return <LauncherPane context={context} onNewProject={() => setNewProjectOpen(true)} onEmbedTerminal={newTerminal} />
       case 'terminal':
-        return <TerminalPane config={pane.term!} onConfig={(patch) => updateTerm(pane.id, patch)} />
+        return (
+          <TerminalPane
+            ref={(handle) => {
+              if (handle) termRefs.current.set(pane.id, handle)
+              else termRefs.current.delete(pane.id)
+            }}
+            config={pane.term!}
+            onConfig={(patch) => updateTerm(pane.id, patch)}
+          />
+        )
     }
   }
 
-  const paneActions = (pane: PaneInstance) => {
+  /** What sits after the title: the launcher's folder chip, a terminal's
+   * launch + folder label. */
+  const paneContext = (pane: PaneInstance) => {
     if (pane.kind === 'launcher') return <LaunchContextChip context={context} />
     if (pane.kind === 'terminal' && pane.term) {
       const label = pane.term.launch === 'shell' ? null : pane.term.launch === 'codex' ? 'Codex' : 'Claude Code'
       const where = pane.term.label ?? (pane.term.cwd ? pane.term.cwd.split(/[\\/]/).pop() : null)
       if (!label && !where) return null
       return <span className="pane-context is-project" title={pane.term.cwd ?? 'Home folder'}>{[label, where].filter(Boolean).join(' · ')}</span>
+    }
+    return null
+  }
+
+  const tool = (title: string, icon: ReactNode, onClick: () => void, disabled = false) => (
+    <button className="iconbtn iconbtn--sm" onClick={onClick} title={title} aria-label={title} disabled={disabled}>
+      {icon}
+    </button>
+  )
+  const ic = (Icon: typeof Folder) => <Icon className="gear gear--sm" strokeWidth={2} />
+
+  /** The header tool strip, per kind — an editor title bar's actions. */
+  const paneTools = (pane: PaneInstance) => {
+    if (pane.kind === 'launcher') {
+      return (
+        <>
+          {tool('New project', ic(FolderPlus), () => setNewProjectOpen(true))}
+          {tool('Open the Projects folder', ic(Folder), () => window.watch.openProjectsDir())}
+        </>
+      )
+    }
+    if (pane.kind === 'terminal' && pane.term) {
+      const term = pane.term
+      const handle = () => termRefs.current.get(pane.id)
+      return (
+        <>
+          {tool(
+            panes.length >= MAX_PANES ? 'All six panes are open' : 'Split: another terminal in this folder',
+            ic(SquareSplitHorizontal),
+            () => addPane('terminal', { launch: 'shell', cwd: term.cwd, label: term.label }),
+            panes.length >= MAX_PANES
+          )}
+          {tool('Clear the terminal', ic(Eraser), () => handle()?.clear())}
+          {tool('Restart the shell', ic(RotateCcw), () => handle()?.restart())}
+          {tool('Open an external terminal here', ic(ExternalLink), () => window.watch.openTerminal(term.cwd, term.launch === 'shell' ? 'shell' : term.launch))}
+          {term.cwd && tool('Open this folder in Explorer', ic(Folder), () => window.watch.openPath(term.cwd!))}
+        </>
+      )
     }
     return null
   }
@@ -369,10 +493,128 @@ export function App() {
   }
 
   // Sections render in the fixed catalog order so toggling never reshuffles.
-  // Limits pins above the agent list; everything else stacks below it.
+  // Open windows and Limits pin above the agent list; the rest stack below it.
   const activeViews = SIDEBAR_VIEWS.filter((v) => sidebarViews.includes(v.id))
-  const limitsView = activeViews.find((v) => v.id === 'limits')
-  const belowViews = activeViews.filter((v) => v.id !== 'limits')
+  const topViews = activeViews.filter((v) => isTopSidebarView(v.id))
+  const belowViews = activeViews.filter((v) => !isTopSidebarView(v.id))
+
+  // Live geometry for this bucket. The column count still composes choice, pane
+  // count and the viewport cap; the fractions only re-split what that leaves.
+  const sizes = allSizes[bucket]
+  const sidebarWidth = clampSidebarWidth(sizes.sidebar, frameW)
+  const cols = Math.max(1, Math.min(paneCols === 'auto' ? 3 : paneCols, panes.length, viewportCap))
+  const rows = Math.ceil(panes.length / cols)
+  const colFracs = normalizeFractions(sizes.cols[String(cols)], cols)
+  const rowFracs = normalizeFractions(sizes.rows[String(rows)], rows)
+  // A pane closed while zoomed leaves a stale id; the grid falls back to the
+  // full layout rather than rendering nothing.
+  const zoomed = zoom && panes.some((p) => p.id === zoom) ? zoom : null
+  const sized = Object.values(allSizes).some(
+    (s: PaneSizes) => s.sidebar !== null || Object.keys(s.cols).length > 0 || Object.keys(s.rows).length > 0
+  )
+
+  const patchSizes = (patch: (current: PaneSizes) => PaneSizes) =>
+    setAllSizes((current) => ({ ...current, [bucket]: patch(current[bucket]) }))
+
+  /** Every splitter back to its default, in both views — the escape hatch for a
+   * layout dragged somewhere useless on a display that no longer exists. */
+  const resetSizes = () => setAllSizes({ full: emptySizes(), half: emptySizes() })
+
+  const beginTrackDrag = (axis: 'cols' | 'rows', index: number) => {
+    // Measure the *used* track sizes rather than assuming the padding and gap:
+    // the computed template is already in pixels, so nothing here can drift out
+    // of sync with styles.css.
+    const computed = gridRef.current ? getComputedStyle(gridRef.current) : null
+    const tracks = trackWidths(computed && (axis === 'cols' ? computed.gridTemplateColumns : computed.gridTemplateRows))
+    trackDrag.current = {
+      axis,
+      fracs: axis === 'cols' ? colFracs : rowFracs,
+      before: tracks[index * 2] ?? 0,
+      after: tracks[index * 2 + 2] ?? 0
+    }
+  }
+
+  const dragTrack = (index: number, delta: number) => {
+    const start = trackDrag.current
+    if (!start) return
+    const min = start.axis === 'cols' ? PANE_MIN : PANE_MIN_ROW
+    const next = resizeFractions(start.fracs, index, delta, start.before, start.after, min)
+    const count = String(start.axis === 'cols' ? cols : rows)
+    patchSizes((current) => ({ ...current, [start.axis]: { ...current[start.axis], [count]: next } }))
+  }
+
+  const resetTrack = (axis: 'cols' | 'rows') =>
+    patchSizes((current) => {
+      const next = { ...current[axis] }
+      delete next[String(axis === 'cols' ? cols : rows)]
+      return { ...current, [axis]: next }
+    })
+
+  /** Everything the palette can run. Commands mirror the menus (so a menu and
+   * the palette never disagree), then live agents, then open windows. */
+  const paletteItems = (): PaletteItem[] => {
+    const items: PaletteItem[] = []
+    const cmd = (id: string, label: string, run: () => void, extra: Partial<PaletteItem> = {}) =>
+      items.push({ id: `cmd:${id}`, section: 'command', label, run, ...extra })
+    const full = panes.length >= MAX_PANES
+    cmd('new-terminal', 'New terminal', () => newTerminal('shell'), { icon: <Terminal strokeWidth={2} />, keywords: ['shell', 'powershell'], keys: ['Ctrl', 'Shift', '`'], detail: full ? 'opens a window — all six panes are open' : undefined })
+    cmd('new-claude', 'New Claude Code', () => newTerminal('claude'), { icon: <ProviderBadge provider="claude" />, keywords: ['agent'] })
+    cmd('new-codex', 'New Codex', () => newTerminal('codex'), { icon: <ProviderBadge provider="codex" />, keywords: ['agent'] })
+    cmd('ext-terminal', 'Open external terminal', () => window.watch.openTerminal(context.cwd, 'shell'), { icon: <SquareTerminal strokeWidth={2} />, detail: context.label ?? 'home folder' })
+    cmd('cursor', 'Open Cursor', () => window.watch.openCursor(context.cwd), { icon: <Code2 strokeWidth={2} />, detail: context.label, keywords: ['editor'] })
+    cmd('chrome', 'Open Chrome', () => window.watch.openChrome(), { icon: <Globe strokeWidth={2} />, keywords: ['browser'] })
+    cmd('new-project', 'New project…', () => setNewProjectOpen(true), { icon: <FolderPlus strokeWidth={2} /> })
+    cmd('projects-dir', 'Open Projects folder', () => window.watch.openProjectsDir(), { icon: <Folder strokeWidth={2} />, keywords: ['explorer'] })
+    if (!panes.some((p) => p.kind === 'launcher') && !full) cmd('add-launcher', 'Add pane: Launch', () => addPane('launcher'), { icon: <SquarePlus strokeWidth={2} /> })
+    for (const pane of panes) {
+      const kindLabel = pane.kind === 'launcher' ? 'Launch' : `Terminal${pane.term?.label ? ` · ${pane.term.label}` : ''}`
+      if (panes.length > 1) {
+        cmd(`zoom:${pane.id}`, zoomed === pane.id ? `Restore grid` : `Zoom pane: ${kindLabel}`, () => setZoom(zoomed === pane.id ? null : pane.id), { icon: zoomed === pane.id ? <Minimize2 strokeWidth={2} /> : <Maximize2 strokeWidth={2} />, keywords: ['maximize', 'focus'] })
+      }
+      cmd(`close:${pane.id}`, `Close pane: ${kindLabel}`, () => closePane(pane.id), { icon: <X strokeWidth={2} /> })
+    }
+    for (const v of SIDEBAR_VIEWS) {
+      const on = sidebarViews.includes(v.id)
+      cmd(`view:${v.id}`, `${on ? 'Hide' : 'Show'} ${v.label}`, () => toggleSidebarView(v.id), { icon: <v.icon strokeWidth={2} />, detail: 'sidebar', keywords: ['sidebar', 'toggle'] })
+    }
+    cmd('collapse', allCollapsed ? 'Expand all projects' : 'Collapse all projects', collapseAll, { icon: allCollapsed ? <ChevronsUpDown strokeWidth={2} /> : <ChevronsDownUp strokeWidth={2} /> })
+    cmd('waiting', waitingOnly ? 'Show all sessions' : 'Show waiting only', () => setWaitingOnly((v) => !v), { icon: <Filter strokeWidth={2} /> })
+    cmd('size-full', 'Workspace size: Full screen', () => applySizeMode('full'), { icon: <Monitor strokeWidth={2} />, detail: sizeMode === 'full' ? 'current' : undefined })
+    cmd('size-left', 'Workspace size: Left half', () => applySizeMode('left'), { icon: <PanelLeft strokeWidth={2} />, detail: sizeMode === 'left' ? 'current' : undefined })
+    cmd('size-right', 'Workspace size: Right half', () => applySizeMode('right'), { icon: <PanelRight strokeWidth={2} />, detail: sizeMode === 'right' ? 'current' : undefined })
+    for (const c of ['auto', 1, 2, 3] as const) {
+      cmd(`cols-${c}`, `Columns: ${c === 'auto' ? 'Auto' : c}`, () => setPaneCols(c), { icon: <Columns3 strokeWidth={2} />, detail: paneCols === c ? 'current' : undefined, keywords: ['grid', 'layout'] })
+    }
+    if (sized) cmd('reset-sizes', 'Reset pane sizes', resetSizes, { icon: <Ruler strokeWidth={2} />, keywords: ['layout', 'splitter'] })
+    if (order.length > 0) cmd('reset-order', 'Reset project order', clearOrder, { icon: <ChevronsUpDown strokeWidth={2} /> })
+    cmd('settings', 'Settings…', () => setSettingsOpen(true), { icon: <SettingsIcon strokeWidth={2} />, keys: ['Ctrl', ','], keywords: ['hotkey', 'hooks', 'updates', 'preferences'] })
+    cmd('hide', 'Hide to tray', () => window.watch.hide(), { icon: <Minus strokeWidth={2} />, keys: ['Esc'] })
+    cmd('quit', 'Quit', () => window.watch.quit(), { icon: <Power strokeWidth={2} />, keywords: ['exit'] })
+
+    for (const a of agents.filter((x) => !x.parentId)) {
+      items.push({
+        id: `agent:${a.id}`,
+        section: 'agent',
+        label: a.project,
+        detail: [a.state === 'waiting' ? 'waiting' : a.state, a.activity ?? a.question].filter(Boolean).join(' · '),
+        keywords: [a.provider, a.cwd ?? '', a.model ?? ''],
+        icon: <ProviderBadge provider={a.provider} />,
+        run: () => window.watch.focusAgent(a.id)
+      })
+    }
+    for (const w of paletteWindows) {
+      items.push({
+        id: `win:${w.hwnd}`,
+        section: 'window',
+        label: w.title,
+        detail: w.app,
+        keywords: [w.kind],
+        icon: w.agentProvider ? <ProviderBadge provider={w.agentProvider} /> : <AppWindow strokeWidth={2} />,
+        run: () => window.watch.focusWindow(w.hwnd, w.pid)
+      })
+    }
+    return items
+  }
 
   return (
     <div className={`app ${open ? 'is-open' : ''}`}>
@@ -395,13 +637,16 @@ export function App() {
         onSizeMode={applySizeMode}
         paneCols={paneCols}
         onPaneCols={setPaneCols}
+        canResetSizes={sized}
+        onResetSizes={resetSizes}
         openMenu={openMenu === 'sidebar' ? null : openMenu}
         onOpenMenu={setOpenMenu}
+        onPalette={() => setPalette((v) => !v)}
       />
 
-      <div className="frame">
-        <aside className="sidebar">
-          {limitsView && sideSection(limitsView, true)}
+      <div className="frame" ref={frameRef}>
+        <aside className="sidebar" style={{ flexBasis: sidebarWidth }}>
+          {topViews.map((v) => sideSection(v, true))}
           <div className="pane-head sidebar-head">
             <button
               className="sidebar-title"
@@ -434,13 +679,36 @@ export function App() {
           {belowViews.map((v) => sideSection(v))}
         </aside>
 
-        <main className="grid" style={{ gridTemplateColumns: `repeat(${Math.max(1, Math.min(paneCols === 'auto' ? 3 : paneCols, panes.length, viewportCap))}, minmax(0, 1fr))` }}>
-          {panes.map((pane) => (
+        <Splitter
+          className="splitter--frame"
+          label="Sidebar width"
+          onStart={() => { sidebarDrag.current = sidebarWidth }}
+          onMove={(delta) => patchSizes((current) => ({ ...current, sidebar: clampSidebarWidth(sidebarDrag.current + delta, frameW) }))}
+          onReset={() => patchSizes((current) => ({ ...current, sidebar: null }))}
+        />
+
+        {/* The gutter tracks between columns and rows are where the splitters
+            live, so panes are placed explicitly instead of auto-flowing. A
+            zoomed grid is one track — its splitters have nothing to split. */}
+        <main
+          className={`grid ${zoomed ? 'is-zoomed' : ''}`}
+          ref={gridRef}
+          style={{
+            gridTemplateColumns: zoomed ? '1fr' : columnTemplate(colFracs, GRID_GUTTER),
+            gridTemplateRows: zoomed ? '1fr' : columnTemplate(rowFracs, GRID_GUTTER),
+            columnGap: 0,
+            rowGap: 0
+          }}
+        >
+          {panes.map((pane, index) => (
             <div
               key={pane.id}
               className={`pane-slot ${paneDrag === pane.id ? 'is-dragging' : ''} ${
                 paneDrop?.id === pane.id && paneDrag && paneDrag !== pane.id ? (paneDrop.after ? 'pane-drop-after' : 'pane-drop-before') : ''
               }`}
+              style={zoomed
+                ? (pane.id === zoomed ? { gridColumn: 1, gridRow: 1 } : { display: 'none' })
+                : { gridColumn: (index % cols) * 2 + 1, gridRow: Math.floor(index / cols) * 2 + 1 }}
               onDragOver={(event) => {
                 if (!paneDrag) return
                 event.preventDefault()
@@ -456,10 +724,11 @@ export function App() {
             >
               <Pane
                 kind={pane.kind}
-                taken={panes.filter((p) => p.id !== pane.id).map((p) => p.kind)}
-                onKind={(next) => setPaneKind(pane.id, next)}
                 onClose={() => closePane(pane.id)}
-                actions={paneActions(pane)}
+                context={paneContext(pane)}
+                tools={paneTools(pane)}
+                zoomed={zoomed === pane.id}
+                onZoom={panes.length > 1 ? () => setZoom((current) => (current === pane.id ? null : pane.id)) : undefined}
                 dragHandle={{
                   draggable: true,
                   onDragStart: (event) => {
@@ -477,9 +746,33 @@ export function App() {
               </Pane>
             </div>
           ))}
+          {!zoomed && colFracs.slice(1).map((_, i) => (
+            <Splitter
+              key={`col-${i}`}
+              className="splitter--grid"
+              label={`Width of column ${i + 1}`}
+              style={{ gridColumn: (i + 1) * 2, gridRow: `1 / ${rows * 2}` }}
+              onStart={() => beginTrackDrag('cols', i)}
+              onMove={(delta) => dragTrack(i, delta)}
+              onReset={() => resetTrack('cols')}
+            />
+          ))}
+          {!zoomed && rowFracs.slice(1).map((_, i) => (
+            <Splitter
+              key={`row-${i}`}
+              axis="y"
+              className="splitter--grid"
+              label={`Height of row ${i + 1}`}
+              style={{ gridRow: (i + 1) * 2, gridColumn: `1 / ${cols * 2}` }}
+              onStart={() => beginTrackDrag('rows', i)}
+              onMove={(delta) => dragTrack(i, delta)}
+              onReset={() => resetTrack('rows')}
+            />
+          ))}
         </main>
       </div>
 
+      {palette && <CommandPalette items={paletteItems()} onClose={() => setPalette(false)} />}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       {newProjectOpen && <NewProject onClose={() => setNewProjectOpen(false)} />}
       {menu && <AgentContextMenu menu={menu} onClose={() => setMenu(null)} />}

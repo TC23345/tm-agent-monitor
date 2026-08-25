@@ -6,3 +6,9 @@ build
 *.log
 *.tsbuildinfo
 plan-design-system-agent-monitor.md
+
+# electron-mcp-server audit log (written to cwd)
+logs
+
+# Claude Code worktrees (local scratch checkouts)
+.claude/worktrees

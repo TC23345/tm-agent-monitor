@@ -98,6 +98,43 @@ modal, and `quitAndInstall()` runs *after* the bounded final flush in
 to an update restart. Updates are also disabled outside a packaged build —
 `app.isPackaged` gates both `setupAutoUpdate()` and the manual check.
 
+## Installing a local build the way the updater does
+
+`electron-updater` does not "install" anything itself: `NsisUpdater.doInstall`
+spawns the NSIS installer with a fixed argument list and quits
+(`node_modules/electron-updater/out/NsisUpdater.js`):
+
+```js
+const args = ['--updated']
+if (options.isSilent) args.push('/S')
+if (options.isForceRunAfter) args.push('--force-run')
+```
+
+Each flag is read by electron-builder's NSIS templates
+(`node_modules/app-builder-lib/templates/nsis/*.nsh`):
+
+| Flag | Effect |
+| --- | --- |
+| `--updated` | `isUpdated`: the assisted installer skips its pages, and the relaunched app receives `--updated` |
+| `/S` | NSIS silent mode — no UI at all |
+| `--force-run` | `isForceRun`: a *silent* assisted install starts the app afterwards, via `ExecShellAsUser` (as the user, not elevated) |
+
+So the canonical way to put a locally built installer over the installed app
+is not "run `/S`, then find and start the exe" — it is the updater's own
+argument list, which never needs the install directory:
+
+```powershell
+Start-Process .\dist\tm-agent-monitor-<version>-x64.exe -ArgumentList '--updated', '/S', '--force-run'
+```
+
+This repo does exactly that in `app:reinstall` (Settings → Rebuild & relaunch)
+and `scripts/reinstall-local.ps1`. Quit the app first — the installer would
+wait for it, but quitting through the app runs the bounded history flush.
+
+`app.relaunch()` is the wrong tool here: it relaunches the *current* binary
+when this instance exits, which is what you want after a settings change, not
+after an install that replaces the binary.
+
 ## Releasing (repo-specific, easy to get wrong)
 
 The tag **and** the GitHub release must both exist *before* `npm run publish`.

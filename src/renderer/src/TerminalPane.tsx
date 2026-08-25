@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { RotateCcw } from 'lucide-react'
@@ -20,13 +20,23 @@ interface Props {
   onConfig: (patch: Partial<TerminalPaneConfig>) => void
 }
 
+/** What the pane header's tool buttons can do to the shell. */
+export interface TerminalPaneHandle {
+  /** Wipe the viewport and scrollback — like `clear`, without sending a command. */
+  clear: () => void
+  /** Kill the session and start a fresh one with the same launch. */
+  restart: () => void
+  focus: () => void
+}
+
 /**
  * An embedded shell: xterm.js in the pane, the real ConPTY lives in main. The
  * session survives hide/show and pane remounts (scrollback is replayed on
  * reattach); it does not survive an app restart — a stale id starts fresh.
  */
-export function TerminalPane({ config, onConfig }: Props) {
+export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function TerminalPane({ config, onConfig }, ref) {
   const hostRef = useRef<HTMLDivElement>(null)
+  const termRef = useRef<Terminal | null>(null)
   const [exited, setExited] = useState<number | null>(null)
   const [failed, setFailed] = useState(false)
   // A restart re-runs the init effect against a fresh session.
@@ -52,6 +62,7 @@ export function TerminalPane({ config, onConfig }: Props) {
     term.loadAddon(fit)
     term.open(host)
     fit.fit()
+    termRef.current = term
 
     let disposed = false
     let sessionId: string | null = null
@@ -137,13 +148,14 @@ export function TerminalPane({ config, onConfig }: Props) {
       offInput.dispose()
       offData()
       offExit()
+      termRef.current = null
       term.dispose()
     }
     // `epoch` reruns everything after a restart; config is read through a ref.
   }, [epoch])
 
   const restart = () => {
-    // Free the dead session in main before starting its replacement.
+    // Free the old session in main before starting its replacement.
     const stale = configRef.current.sessionId
     if (stale) window.watch.disposeTerminal(stale)
     onConfigRef.current({ sessionId: undefined })
@@ -151,6 +163,12 @@ export function TerminalPane({ config, onConfig }: Props) {
     setFailed(false)
     setEpoch((n) => n + 1)
   }
+
+  useImperativeHandle(ref, () => ({
+    clear: () => termRef.current?.clear(),
+    restart,
+    focus: () => termRef.current?.focus()
+  }), [])
 
   return (
     <div className="termpane">
@@ -168,4 +186,4 @@ export function TerminalPane({ config, onConfig }: Props) {
       )}
     </div>
   )
-}
+})

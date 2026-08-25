@@ -100,14 +100,31 @@ export function UsageInsightsView() {
   const [insights, setInsights] = useState<UsageInsights | null>(null)
   const [period, setPeriod] = useState<PeriodKey>('day')
 
+  // Mounting is the consumer gate (the section unmounts when hidden or rolled
+  // up); visibility is the other half — a workspace hidden to the tray must
+  // not keep re-scanning local sessions every 30s. Electron marks the
+  // document hidden the moment the window hides.
   useEffect(() => {
     let alive = true
+    let refresh: number | null = null
     const load = () => window.watch.getUsageInsights().then((value) => { if (alive) setInsights(value) }).catch(() => {})
-    load()
-    const refresh = window.setInterval(load, 30_000)
+    const start = () => {
+      if (refresh !== null) return
+      load()
+      refresh = window.setInterval(load, 30_000)
+    }
+    const stop = () => {
+      if (refresh === null) return
+      window.clearInterval(refresh)
+      refresh = null
+    }
+    const onVisibility = () => (document.hidden ? stop() : start())
+    if (!document.hidden) start()
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       alive = false
-      window.clearInterval(refresh)
+      stop()
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [])
 

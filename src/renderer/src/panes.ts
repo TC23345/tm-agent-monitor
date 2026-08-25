@@ -1,5 +1,6 @@
 import { Activity, AppWindow, ChartColumn, Coins, SquareTerminal, Terminal } from 'lucide-react'
 import type { TerminalLaunch } from '@shared/types'
+import type { SizeBucket } from '@shared/layout.mjs'
 
 /**
  * The main frame belongs to work: the launcher and embedded terminal sessions.
@@ -100,20 +101,30 @@ export function savePanes(panes: PaneInstance[]): void {
   }
 }
 
-/** Data views stacked in the sidebar, toggled from the sidebar menu. Limits
- * pins above the agent list; the rest stack below in catalog order. */
+/** Data views stacked in the sidebar, toggled from the sidebar menu. The
+ * `SIDEBAR_TOP` views pin above the agent list; the rest stack below, both in
+ * catalog order. */
 export type SidebarView = 'limits' | 'spend' | 'windows' | 'insights'
 
 export const SIDEBAR_VIEWS: { id: SidebarView; label: string; icon: typeof Activity; hint: string }[] = [
+  { id: 'windows', label: 'Open windows', icon: AppWindow, hint: 'Switch to an open terminal, editor, or browser' },
   { id: 'limits', label: 'Limits', icon: Activity, hint: 'Provider usage limits' },
   { id: 'spend', label: 'Spend', icon: Coins, hint: 'Today’s tokens and value per provider and project' },
-  { id: 'windows', label: 'Open windows', icon: AppWindow, hint: 'Switch to an open terminal, editor, or browser' },
   { id: 'insights', label: 'Insights', icon: ChartColumn, hint: 'Local Claude and Codex usage patterns' }
 ]
 
+/** Views that pin above the agent list, in this order. Open windows leads: it
+ * starts rolled up, so it costs one header row and is one click from the switcher.
+ * Everything else stacks below the agents. */
+export const SIDEBAR_TOP: SidebarView[] = ['windows', 'limits']
+
+export function isTopSidebarView(view: SidebarView): boolean {
+  return SIDEBAR_TOP.includes(view)
+}
+
 const SIDEBAR_KEY = 'tm.sidebar.v2'
 const LEGACY_SIDEBAR_KEY = 'tm.sidebar.v1'
-const DEFAULT_SIDEBAR: SidebarView[] = ['limits', 'windows']
+const DEFAULT_SIDEBAR: SidebarView[] = ['windows', 'limits']
 
 function isSidebarView(value: unknown): value is SidebarView {
   return SIDEBAR_VIEWS.some((v) => v.id === value)
@@ -172,22 +183,90 @@ export function saveSidebarCollapsed(views: SidebarView[]): void {
  * count, though the viewport can still cap it lower before panes get crushed. */
 export type PaneCols = 'auto' | 1 | 2 | 3
 
+/** Column widths a user dragged, keyed by the column count they were dragged
+ * at — sizing a two-column grid says nothing about a three-column one. */
+export type PaneFractions = Record<string, number[]>
+
+/** Sizes shared one key: columns, sidebar width, dragged column widths. Reads
+ * tolerate anything (an older app wrote only `cols`); writes merge so one
+ * concern never drops another's value. */
 const LAYOUT_KEY = 'tm.layout.v1'
 
-export function loadPaneCols(): PaneCols {
+function readLayout(): Record<string, unknown> {
   try {
-    const raw = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? 'null') as { cols?: unknown } | null
-    const cols = raw?.cols
-    return cols === 1 || cols === 2 || cols === 3 || cols === 'auto' ? cols : 'auto'
+    const raw = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? 'null')
+    return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
   } catch {
-    return 'auto'
+    return {}
   }
 }
 
-export function savePaneCols(cols: PaneCols): void {
+function writeLayout(patch: Record<string, unknown>): void {
   try {
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ cols }))
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ ...readLayout(), ...patch }))
   } catch {
-    /* non-fatal */
+    /* private mode / quota — sizes just reset next launch */
   }
+}
+
+export function loadPaneCols(): PaneCols {
+  const cols = readLayout().cols
+  return cols === 1 || cols === 2 || cols === 3 || cols === 'auto' ? cols : 'auto'
+}
+
+export function savePaneCols(cols: PaneCols): void {
+  writeLayout({ cols })
+}
+
+/** Sizes are stored per view bucket: a split tuned for the full screen is wrong
+ * at half the width, and the transient Alt+Q half view must not overwrite it.
+ * `sidebar` stays null until dragged, so an untouched sidebar keeps following
+ * the responsive default instead of freezing today's number into storage. */
+export interface PaneSizes {
+  sidebar: number | null
+  cols: PaneFractions
+  rows: PaneFractions
+}
+
+export type AllSizes = Record<SizeBucket, PaneSizes>
+
+export function emptySizes(): PaneSizes {
+  return { sidebar: null, cols: {}, rows: {} }
+}
+
+function readFractions(raw: unknown): PaneFractions {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
+  const out: PaneFractions = {}
+  for (const [count, list] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^[1-9]\d*$/.test(count) || !Array.isArray(list)) continue
+    if (list.every((n) => typeof n === 'number' && Number.isFinite(n) && n > 0)) out[count] = list as number[]
+  }
+  return out
+}
+
+function readWidth(raw: unknown): number | null {
+  return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : null
+}
+
+function readSizes(raw: unknown): PaneSizes {
+  if (typeof raw !== 'object' || raw === null) return emptySizes()
+  const { sidebar, cols, rows } = raw as Record<string, unknown>
+  return { sidebar: readWidth(sidebar), cols: readFractions(cols), rows: readFractions(rows) }
+}
+
+export function loadSizes(): AllSizes {
+  const stored = readLayout()
+  const buckets = stored.sizes
+  if (typeof buckets === 'object' && buckets !== null) {
+    const { full, half } = buckets as Record<string, unknown>
+    return { full: readSizes(full), half: readSizes(half) }
+  }
+  // Pre-bucket layouts held one set of sizes at the top level. The user sized
+  // whichever view they were in; seeding both beats discarding the drag.
+  const legacy: PaneSizes = { sidebar: readWidth(stored.sidebar), cols: readFractions(stored.fracs), rows: {} }
+  return { full: legacy, half: { ...legacy, cols: { ...legacy.cols } } }
+}
+
+export function saveSizes(sizes: AllSizes): void {
+  writeLayout({ sizes })
 }

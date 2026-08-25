@@ -1167,11 +1167,19 @@ function registerIpc(): void {
       const version = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).version as string
       const installer = join(repo, 'dist', `tm-agent-monitor-${version}-x64.exe`)
       if (!existsSync(installer)) return `built, but no installer at ${installer}`
+      // The same arguments electron-updater's NsisUpdater passes on
+      // quitAndInstall({ isSilent: true, isForceRunAfter: true }): `--updated`
+      // marks an in-place update (the assisted installer skips its pages and
+      // hands `--updated` to the relaunched app), `/S` is NSIS silent mode, and
+      // `--force-run` makes a silent install start the app afterwards — as the
+      // user, via the shell — so nothing here has to know the install path.
+      // Waiting on our own pid keeps the ordering deterministic with the final
+      // history flush in before-quit; the installer would otherwise wait for
+      // the running app itself.
       const ps = (value: string) => `'${value.replace(/'/g, "''")}'`
       spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
         `Wait-Process -Id ${process.pid} -ErrorAction SilentlyContinue; ` +
-        `Start-Process -FilePath ${ps(installer)} -ArgumentList '/S' -Wait; ` +
-        `Start-Process -FilePath ${ps(process.execPath)}`
+        `Start-Process -FilePath ${ps(installer)} -ArgumentList '--updated','/S','--force-run'`
       ], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
       // Give the reply a beat to land before the ordinary quit flush runs.
       setTimeout(() => app.quit(), 800)
@@ -1393,7 +1401,18 @@ if (!gotLock) {
               .filter((k) => k === 'launcher' || k === 'terminal')
               .map((kind, i) => ({ id: `capture-${i}`, kind, ...(kind === 'terminal' ? { term: { launch: 'shell' } } : {}) }))
             await win!.webContents.executeJavaScript(
-              `localStorage.setItem('tm.sidebar.v1', ${JSON.stringify(JSON.stringify(sidebar))});` +
+              // The current key, and by default no rolled-up sections: a capture
+              // asked for a view to see it, not to see its header. (The legacy
+              // v1 key would migrate, silently adding Open windows to every
+              // capture.) CLAUDE_WATCH_CAPTURE_COLLAPSED rolls views back up.
+              `localStorage.setItem('tm.sidebar.v2', ${JSON.stringify(JSON.stringify(sidebar))});` +
+              `localStorage.setItem('tm.sidebar.collapsed.v1', ${JSON.stringify(JSON.stringify((process.env.CLAUDE_WATCH_CAPTURE_COLLAPSED ?? '').split(',').filter(Boolean)))});` +
+              // Dragged sizes are renderer state too: CLAUDE_WATCH_CAPTURE_LAYOUT
+              // takes the `tm.layout.v1` shape ({cols, sidebar, fracs}) so a
+              // resized workspace can be screenshotted without a real drag.
+              (process.env.CLAUDE_WATCH_CAPTURE_LAYOUT
+                ? `localStorage.setItem('tm.layout.v1', ${JSON.stringify(process.env.CLAUDE_WATCH_CAPTURE_LAYOUT)});`
+                : '') +
               (panes.length ? `localStorage.setItem('tm.panes.v2', ${JSON.stringify(JSON.stringify(panes))});` : '') +
               'location.reload()'
             )

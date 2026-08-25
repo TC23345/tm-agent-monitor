@@ -68,22 +68,20 @@ html, body, #root {
   .app { transition: opacity 0.12s linear; transform: none; }
 }
 
-/* ---- top bar: brand row, then the File / Terminal / View / User menu strip.
-   Every app action lives in the menus; the right side is passive status only. */
-.topbar {
+/* ---- title bar: one IDE-style row — brand mark + File / Terminal / View / User
+   at the left, the command center in the middle, passive status at the right.
+   Every app action lives in the menus and the palette. ---- */
+.titlebar {
   flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px 6px 8px;
   border-bottom: 1px solid var(--hairline);
 }
-.topbar-brandrow {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 10px 16px 2px;
-}
 .topbar-status {
-  margin-left: auto;
+  justify-self: end;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -92,7 +90,51 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 2px 10px 6px;
+}
+.brand-mark {
+  width: 22px;
+  height: 22px;
+  margin: 0 8px 0 2px;
+  border-radius: 6px;
+  flex: 0 0 auto;
+  user-select: none;
+}
+/* The command center: a quiet search pill that opens the palette. */
+.cmdcenter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(560px, 42vw);
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--faint);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background-color 100ms ease, border-color 100ms ease, color 100ms ease;
+}
+.cmdcenter:hover { background: var(--elev); border-color: var(--border); color: var(--muted); }
+.cmdcenter:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cmdcenter-ic { width: 14px; height: 14px; flex: 0 0 14px; }
+.cmdcenter-label { flex: 1 1 auto; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cmdcenter-keys { display: flex; gap: 3px; }
+kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 5px;
+  border: 1px solid var(--hairline);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: center;
 }
 .menu-wrap { position: relative; }
 .menu-btn {
@@ -200,8 +242,10 @@ html, body, #root {
 }
 /* Coding-agent details live here, always visible whatever the panes show. */
 .sidebar {
-  /* Matches the width the agent rows were designed against — narrower and the
-     activity text truncates before the meta chips are reached. */
+  /* Width comes in as an inline flex-basis (App.tsx `sidebarWidth`): the drag
+     preference clamped against the frame. The default — and the tighter start
+     on narrow displays — lives in `defaultSidebarWidth` (@shared/layout.mjs),
+     never in a media query, which would silently beat the inline value. */
   flex: 0 0 400px;
   display: flex;
   flex-direction: column;
@@ -211,8 +255,11 @@ html, body, #root {
   border-right: 1px solid var(--hairline);
   background: rgba(0, 0, 0, 0.16);
 }
-/* Up to six panes: three vertical columns, growing to a second row. Column count
-   is set inline from the pane count so one or two panes still fill the frame. */
+/* Up to six panes: three vertical columns, growing to a second row. Both track
+   templates are set inline (App.tsx) from the pane count and the dragged
+   fractions, interleaved with the gutter tracks the splitters occupy — which is
+   why the gaps are set to 0 there. `grid-auto-rows` only backstops a row the
+   template did not anticipate. */
 .grid {
   flex: 1 1 auto;
   min-height: 0;
@@ -241,28 +288,27 @@ html, body, #root {
   border-bottom: 1px solid var(--hairline);
 }
 .gpane-ic { width: 14px; height: 14px; flex: 0 0 14px; color: var(--muted); }
-/* Native select, restyled — the pane title doubles as its content picker. */
-.gpane-select {
-  flex: 0 1 auto;
-  min-width: 0;
-  padding: 2px 4px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
+/* The pane kind, fixed for the pane's life — the header is an editor title
+   bar with tools, not a content picker. */
+.gpane-title {
+  flex: 0 0 auto;
   font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.9px;
   text-transform: uppercase;
-  cursor: pointer;
-  appearance: none;
+  color: var(--muted);
 }
-.gpane-select:hover { color: var(--text); border-color: var(--hairline); }
-.gpane-select:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.gpane-select option { background: var(--elev); color: var(--text); font-size: 13px; letter-spacing: 0; text-transform: none; }
-.gpane-caret { width: 12px; height: 12px; flex: 0 0 12px; margin-left: -4px; color: var(--faint); }
 .gpane-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+/* Per-kind tool buttons, separated from zoom/close by a hairline. */
+.gpane-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 8px;
+  margin-right: 2px;
+  border-right: 1px solid var(--hairline);
+}
+.gpane-head .pane-context { margin-left: 4px; }
 .gpane-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -410,13 +456,11 @@ html, body, #root {
 .linkbtn:hover { color: var(--text); background: var(--elev); }
 .linkbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* Narrow displays: the sidebar yields the last of its width rather than the
-   panes disappearing. Column count is capped in App.tsx (`colCap`) so the
-   viewport limit and an explicit View-menu column choice compose — a media
-   query here would silently override the user's pick. */
-@media (max-width: 1040px) {
-  .sidebar { flex-basis: 280px; }
-}
+/* Nothing responsive lives here on purpose. Both geometry limits are computed
+   in JS so a user's explicit pick and the viewport limit compose: column count
+   in App.tsx (`colCap`), sidebar width in `clampSidebarWidth`/
+   `defaultSidebarWidth` (@shared/layout.mjs). A media query would override an
+   inline width or column count without a trace. */
 /* Section headings (provider names) share the app title's type so the panel
    reads as one voice instead of a title plus uppercase micro-labels. */
 .titletype {
@@ -424,12 +468,6 @@ html, body, #root {
   font-weight: 700;
   letter-spacing: -0.2px;
   color: var(--text);
-}
-.brand {
-  height: 24px;
-  width: auto;
-  display: block;
-  flex: 0 0 auto;
 }
 .needs {
   font-size: 12px;
@@ -1025,6 +1063,127 @@ html, body, #root {
 .pane-slot.pane-drop-after::after { right: -6px; }
 .gpane-head--drag { cursor: grab; }
 .gpane-head--drag:active { cursor: grabbing; }
+
+/* ---- command palette: quick open, anchored near the top like an IDE's ---- */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 7vh;
+  background: rgba(0, 0, 0, 0.28);
+}
+.palette {
+  width: min(720px, 92vw);
+  max-height: 72vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--hairline);
+  overflow: hidden;
+  animation: menu-pop-in 160ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  transform-origin: top center;
+}
+.palette-inputrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.palette-ic { width: 16px; height: 16px; flex: 0 0 16px; color: var(--muted); }
+.palette-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+.palette-input::placeholder { color: var(--faint); }
+.palette-hint { flex: 0 0 auto; color: var(--faint); font-size: 11px; white-space: nowrap; }
+.palette-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--track) transparent;
+}
+.palette-section {
+  padding: 8px 10px 3px;
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.palette-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.palette-row.is-active { background: rgba(217, 119, 87, 0.18); box-shadow: inset 0 0 0 1px rgba(217, 119, 87, 0.35); }
+.palette-row-ic { width: 16px; height: 16px; flex: 0 0 16px; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.palette-row-ic svg { width: 15px; height: 15px; }
+.palette-row-label { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.palette-row-detail { flex: 1 1 auto; min-width: 0; color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.palette-keys { margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
+.palette-plus { color: var(--faint); font-size: 10px; margin: 0 1px; }
+.palette-empty { padding: 18px 12px; color: var(--faint); font-size: 13px; text-align: center; }
+
+/* ---- splitters: the sidebar edge and the grid's gutter tracks ---- */
+.splitter {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+/* The grip is a hairline; the hit area is the whole track plus a few pixels of
+   the panes either side, so the drag is catchable without aiming. */
+.splitter::before {
+  content: '';
+  position: absolute;
+  z-index: 4;
+}
+.splitter--x { cursor: col-resize; }
+.splitter--y { cursor: row-resize; }
+.splitter--x::before { inset: 0 -3px; }
+.splitter--y::before { inset: -3px 0; }
+.splitter-grip {
+  border-radius: 2px;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+.splitter--x .splitter-grip { width: 2px; height: calc(100% - 16px); }
+.splitter--y .splitter-grip { height: 2px; width: calc(100% - 16px); }
+.splitter:hover .splitter-grip,
+.splitter:focus-visible .splitter-grip,
+.splitter.is-dragging .splitter-grip { background: var(--accent); }
+.splitter:focus-visible { outline: none; }
+/* The sidebar edge already has the frame hairline; the splitter straddles it. */
+.splitter--frame { width: 7px; margin: 0 -3px; }
+.splitter--frame .splitter-grip { height: calc(100% - 20px); }
+/* A grid splitter fills its gutter track. */
+.splitter--grid { justify-self: stretch; align-self: stretch; }
 
 /* ---- sidebar: header menu + stacked data views under the agent list ---- */
 .sidebar-head { position: relative; }

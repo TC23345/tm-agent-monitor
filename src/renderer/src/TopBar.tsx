@@ -1,9 +1,9 @@
 import {
   ChevronsDownUp, ChevronsUpDown, Code2, Columns3, Filter, Folder, FolderPlus, Globe,
-  ListRestart, Minus, Monitor, PanelLeft, PanelRight, Power, SquarePlus, SquareTerminal, Terminal
+  ListRestart, Minus, Monitor, PanelLeft, PanelRight, Power, Ruler, Search, SquarePlus, SquareTerminal, Terminal
 } from 'lucide-react'
 import { Settings } from './Icons'
-import logo from './assets/logo.png'
+import mark from './assets/icon.png'
 import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
 import { MAX_PANES, PANE_KINDS, isUniqueKind, type PaneCols, type PaneInstance, type PaneKind } from './panes'
 import type { SizeMode, TerminalLaunch } from '@shared/types'
@@ -31,22 +31,28 @@ interface Props {
   onSizeMode: (mode: SizeMode) => void
   paneCols: PaneCols
   onPaneCols: (cols: PaneCols) => void
+  /** Drag-resized sidebar / column widths, and the way back to the defaults. */
+  canResetSizes: boolean
+  onResetSizes: () => void
   /** Which dropdown is open. Owned by App so Escape can close it before hiding. */
   openMenu: MenuName | null
   onOpenMenu: (menu: MenuName | null) => void
+  /** The command center: opens the palette. */
+  onPalette: () => void
 }
 
 /**
- * The app chrome: brand row, then a standard File / Terminal / View / User menu
- * strip under the logo. Every app action lives in these menus — the top right
- * keeps only passive status (waiting count, connection health). The sidebar and
- * panes below stay pure content.
+ * The app chrome as one title bar, IDE-style: the brand mark and the File /
+ * Terminal / View / User menus at the left, the command center in the middle,
+ * and passive status (waiting count, connection health) at the right. Every
+ * app action lives in the menus and the palette; the sidebar and panes below
+ * stay pure content.
  */
 export function TopBar(props: Props) {
   const {
     waiting, waitingOnly, onWaitingOnly, canCollapse, allCollapsed, onCollapseAll, conn,
     panes, onAddPane, onNewTerminal, onNewProject, canResetOrder, onResetOrder, onSettings,
-    sizeMode, onSizeMode, paneCols, onPaneCols, openMenu, onOpenMenu
+    sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, openMenu, onOpenMenu, onPalette
   } = props
 
   const paneFull = panes.length >= MAX_PANES
@@ -71,27 +77,9 @@ export function TopBar(props: Props) {
   )
 
   return (
-    <header className="topbar">
-      <div className="topbar-brandrow">
-        <img className="brand" src={logo} alt="TaylorMade Solutions" draggable={false} />
-        <div className="topbar-status">
-          {waiting > 0 && (
-            <button
-              className={`needs ${waitingOnly ? 'needs--active' : ''}`}
-              onClick={onWaitingOnly}
-              title={waitingOnly ? 'Showing waiting sessions only — click to show all' : 'Agents waiting for your input — click to show only them'}
-            >
-              {waiting} waiting
-            </button>
-          )}
-          <div className={`conn is-${conn.state}`} title={conn.title}>
-            <span className="conn-dot" />
-            {conn.label}
-          </div>
-        </div>
-      </div>
-
+    <header className="titlebar">
       <nav className="menubar">
+        <img className="brand-mark" src={mark} alt="" draggable={false} title="TaylorMade Agent Monitor" />
         <div className="menu-wrap">
           {menuButton('file', 'File')}
           {openMenu === 'file' && (
@@ -112,7 +100,7 @@ export function TopBar(props: Props) {
           {menuButton('terminal', 'Terminal')}
           {openMenu === 'terminal' && (
             <MenuPop {...away}>
-              <MenuItem icon={<Terminal strokeWidth={2} />} label="New terminal" hint={paneFull ? 'All six panes are open — opens a window instead' : 'Open a PowerShell terminal in a pane'} onClick={run(() => onNewTerminal('shell'))} />
+              <MenuItem icon={<Terminal strokeWidth={2} />} label="New terminal" hint={paneFull ? 'All six panes are open — opens a window instead' : 'Open a PowerShell terminal in a pane (Ctrl+Shift+`)'} onClick={run(() => onNewTerminal('shell'))} />
               <MenuItem icon={<ProviderBadge provider="claude" />} label="New Claude Code" hint="Start Claude Code in a terminal pane" onClick={run(() => onNewTerminal('claude'))} />
               <MenuItem icon={<ProviderBadge provider="codex" />} label="New Codex" hint="Start Codex in a terminal pane" onClick={run(() => onNewTerminal('codex'))} />
               <div className="menu-sep" />
@@ -127,6 +115,8 @@ export function TopBar(props: Props) {
           {menuButton('view', 'View')}
           {openMenu === 'view' && (
             <MenuPop {...away}>
+              <MenuItem icon={<Search strokeWidth={2} />} label="Command palette…" hint="Ctrl+Shift+P" onClick={run(onPalette)} />
+              <div className="menu-sep" />
               <div className="menu-label"><SquarePlus className="menu-label-ic" strokeWidth={2} />Add pane</div>
               {PANE_KINDS.map((p) => (
                 <MenuItem
@@ -164,6 +154,14 @@ export function TopBar(props: Props) {
               <MenuCheckItem label="1 column" checked={paneCols === 1} onClick={() => onPaneCols(1)} />
               <MenuCheckItem label="2 columns" checked={paneCols === 2} onClick={() => onPaneCols(2)} />
               <MenuCheckItem label="3 columns" checked={paneCols === 3} onClick={() => onPaneCols(3)} />
+              <div className="menu-sep" />
+              <MenuItem
+                icon={<Ruler strokeWidth={2} />}
+                label="Reset pane sizes"
+                hint="Sidebar width and dragged column widths back to their defaults"
+                disabled={!canResetSizes}
+                onClick={run(onResetSizes)}
+              />
             </MenuPop>
           )}
         </div>
@@ -172,7 +170,7 @@ export function TopBar(props: Props) {
           {menuButton('user', 'User')}
           {openMenu === 'user' && (
             <MenuPop {...away}>
-              <MenuItem icon={<Settings strokeWidth={2} />} label="Settings…" hint="Hotkey, notifications, startup, updates, hooks" onClick={run(onSettings)} />
+              <MenuItem icon={<Settings strokeWidth={2} />} label="Settings…" hint="Hotkey, notifications, startup, updates, hooks (Ctrl+,)" onClick={run(onSettings)} />
               <div className="menu-sep" />
               <div className="menu-status" title={conn.title}>
                 <span className={`conn is-${conn.state}`}><span className="conn-dot" />{conn.label}</span>
@@ -181,6 +179,31 @@ export function TopBar(props: Props) {
           )}
         </div>
       </nav>
+
+      {/* The command center: the palette's front door, where an IDE keeps its
+          search box. Ctrl+Shift+P always opens it; Ctrl+P too, unless a
+          terminal pane has focus and the key belongs to the shell. */}
+      <button className="cmdcenter" onClick={onPalette} title="Search commands, agents, and open windows (Ctrl+Shift+P)">
+        <Search className="cmdcenter-ic" strokeWidth={2} />
+        <span className="cmdcenter-label">Search commands, agents, windows</span>
+        <span className="cmdcenter-keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd></span>
+      </button>
+
+      <div className="topbar-status">
+        {waiting > 0 && (
+          <button
+            className={`needs ${waitingOnly ? 'needs--active' : ''}`}
+            onClick={onWaitingOnly}
+            title={waitingOnly ? 'Showing waiting sessions only — click to show all' : 'Agents waiting for your input — click to show only them'}
+          >
+            {waiting} waiting
+          </button>
+        )}
+        <div className={`conn is-${conn.state}`} title={conn.title}>
+          <span className="conn-dot" />
+          {conn.label}
+        </div>
+      </div>
     </header>
   )
 }
