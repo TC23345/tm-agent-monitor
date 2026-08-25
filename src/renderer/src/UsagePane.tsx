@@ -10,7 +10,7 @@ import { UsageInsightsView } from './UsageInsightsView'
  * this is only the frame that stacks them. `usage` is undefined until the
  * first snapshot lands.
  */
-export function UsagePane({ usage, now }: { usage: UsageSummary | undefined; now: number }) {
+export function UsagePane({ usage }: { usage: UsageSummary | undefined }) {
   return (
     <div className="usagepane">
       <section className="usagepane-section">
@@ -18,7 +18,7 @@ export function UsagePane({ usage, now }: { usage: UsageSummary | undefined; now
           <Coins className="gpane-ic" strokeWidth={2} />
           <span className="titletype">Spend</span>
         </div>
-        {usage ? <SpendView usage={usage} now={now} /> : <div className="empty">Connecting…</div>}
+        {usage ? <SpendView usage={usage} /> : <div className="empty">Connecting…</div>}
       </section>
       <section className="usagepane-section">
         <div className="usagepane-head">

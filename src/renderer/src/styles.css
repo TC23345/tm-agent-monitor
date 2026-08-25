@@ -534,6 +534,27 @@ kbd {
 .pace.sev-critical { color: var(--st-question); }
 
 /* ---- spend view: today's tokens and value, per provider and project ---- */
+/* ---- attention + focus: a pane whose session is waiting, and the pane the keyboard owns ---- */
+.gpane-attn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  border-radius: 50%;
+  color: var(--st-question);
+  background: rgba(233, 162, 60, 0.14);
+  animation: pulse-soft 1.4s ease-in-out infinite;
+}
+.gpane-attn svg { width: 12px; height: 12px; }
+.pane-slot.is-focused > .gpane { box-shadow: inset 0 0 0 1px rgba(217, 119, 87, 0.55); }
+.pane-slot:focus { outline: none; }
+.conn--cdp { color: var(--accent-bright); font-variant-numeric: tabular-nums; }
+/* Snippet menu opens under its tool button, flush right so it stays in the pane. */
+.gpane-tools .menu-wrap { display: inline-flex; }
+.gpane-tools .menu-pop { left: auto; right: 0; top: calc(100% + 8px); }
+
 /* ---- usage pane: Spend then Insights in one scrolling column (.gpane-body scrolls) ---- */
 .usagepane { display: flex; flex-direction: column; gap: 18px; max-width: 720px; }
 .usagepane-head { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }

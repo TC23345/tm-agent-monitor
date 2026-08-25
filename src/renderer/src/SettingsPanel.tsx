@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AppSettings, AppSettingsPatch, ProviderId, SystemDiagnostic } from '@shared/types'
+import { providerStatus } from '@shared/health.mjs'
 import { ArrowLeft, CheckCircle2, CircleAlert, RefreshCw, X } from 'lucide-react'
 import { ProviderBadge } from './ProviderBadge'
 
@@ -246,7 +247,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 const result = diagnostics[`${provider}-hooks`]
                 return <div className="hook-block" key={provider}>
                   <div className="srow">
-                    <span className="slabel"><ProviderBadge provider={provider} />{provider === 'claude' ? 'Claude Code hooks' : provider === 'codex' ? 'Codex hooks' : 'Cursor hooks'}<span className="shint">{result?.detail ?? (health.installed ? 'installed' : 'not installed')}</span></span>
+                    <span className="slabel"><ProviderBadge provider={provider} />{provider === 'claude' ? 'Claude Code hooks' : provider === 'codex' ? 'Codex hooks' : 'Cursor hooks'}<span className="shint">{result?.detail ?? providerStatus(health, Date.now(), s.version).reason}</span></span>
                     <span className="sactions">
                       {provider === 'codex' && health.awaitingTrust && !health.needsRepair && <button className="hotkey-btn is-primary" disabled={hookBusy !== null} onClick={reviewCodexTrust}>Review trust</button>}
                       <button className="hotkey-btn is-compact" disabled={hookBusy !== null} onClick={() => manageHooks(provider, action)}>{hookBusy === provider ? 'Working…' : action === 'repair' ? 'Repair' : action === 'remove' ? 'Remove' : 'Install'}</button>

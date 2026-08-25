@@ -16,6 +16,7 @@ interface Props {
   style?: CSSProperties
   /** How far one arrow key moves the split. */
   step?: number
+  testId?: string
 }
 
 /**
@@ -26,7 +27,7 @@ interface Props {
  * The splitter owns no geometry: it reports a delta and the caller decides what
  * that means (see `@shared/layout.mjs`).
  */
-export function Splitter({ axis = 'x', onStart, onMove, onReset, label, title, className, style, step = 16 }: Props) {
+export function Splitter({ axis = 'x', onStart, onMove, onReset, label, title, className, style, step = 16, testId }: Props) {
   const along = (event: { clientX: number; clientY: number }) => (axis === 'x' ? event.clientX : event.clientY)
   const [less, more] = axis === 'x' ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown']
   const origin = useRef(0)
@@ -52,6 +53,7 @@ export function Splitter({ axis = 'x', onStart, onMove, onReset, label, title, c
       aria-label={label}
       title={title ?? `${label} — drag to resize, double-click to reset`}
       tabIndex={0}
+      data-testid={testId}
       className={`splitter splitter--${axis} ${dragging ? 'is-dragging' : ''} ${className ?? ''}`}
       style={style}
       onPointerDown={(event: PointerEvent<HTMLDivElement>) => {

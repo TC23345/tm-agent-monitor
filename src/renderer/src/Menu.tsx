@@ -1,5 +1,6 @@
 import { useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { Check } from 'lucide-react'
+import { tid } from './testid'
 
 /**
  * Dropdown panel with the gliding hover highlight: one absolutely-positioned
@@ -62,7 +63,7 @@ export function MenuItem({ icon, label, hint, disabled, onClick }: {
   onClick: () => void
 }) {
   return (
-    <button className="menu-item" disabled={disabled} onClick={onClick} title={hint}>
+    <button className="menu-item" disabled={disabled} onClick={onClick} title={hint} data-testid={tid('menu', label)}>
       <span className="menu-item-ic">{icon}</span>
       {label}
     </button>
@@ -79,7 +80,7 @@ export function MenuCheckItem({ icon, label, hint, checked, onClick }: {
   onClick: () => void
 }) {
   return (
-    <button className="menu-item" onClick={onClick} title={hint} aria-pressed={checked}>
+    <button className="menu-item" onClick={onClick} title={hint} aria-pressed={checked} data-testid={tid('menu', label)}>
       <span className="menu-item-ic">{icon}</span>
       {label}
       <span className={`menu-check ${checked ? '' : 'menu-check--off'}`}>

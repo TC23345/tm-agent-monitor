@@ -114,12 +114,12 @@ export function mockSnapshot(): StatusSnapshot {
     },
     agents: [
       {
-        id: 'claude:a1', provider: 'claude', rawSessionId: 'a1', project: 'compile-me', state: 'waiting', waitReason: 'permission',
+        id: 'claude:a1', provider: 'claude', rawSessionId: 'a1', project: 'compile-me', cwd: 'C:\\Projects\\compile-me', state: 'waiting', waitReason: 'permission',
         question: 'permission to use Bash', contextPct: 64, tokensOut: 18_400,
         model: 'claude-fable-5', since: ago(60_000), updatedAt: now
       },
       {
-        id: 'codex:a2', provider: 'codex', rawSessionId: 'a2', project: 'api-gateway', state: 'waiting', waitReason: 'question',
+        id: 'codex:a2', provider: 'codex', rawSessionId: 'a2', project: 'api-gateway', cwd: 'C:\\Projects\\api-gateway', state: 'waiting', waitReason: 'question',
         question: 'Should I switch auth to JWT?', contextPct: 88, tokensOut: 42_000,
         costUsd: 3.1, model: 'claude-fable-5', permissionMode: 'plan',
         recentQuestions: [

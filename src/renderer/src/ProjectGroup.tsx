@@ -5,17 +5,16 @@ import type { MenuState } from './AgentContextMenu'
 import { ChevronDown, ChevronRight } from './Icons'
 import { useCollapse } from './useCollapse'
 import { modelShort } from './format'
+import { tid } from './testid'
 
 /** A collapsible project header over its nested session rows. */
 export function ProjectGroup({
   group,
-  now,
   onRowMenu,
   forceWaitingOpen = false,
   dragHandle
 }: {
   group: Group
-  now: number
   onRowMenu: (menu: MenuState) => void
   forceWaitingOpen?: boolean
   /** Spread on the header so the group can be dragged into a manual order. */
@@ -42,7 +41,7 @@ export function ProjectGroup({
 
   return (
     <div className={`group ${group.needsInput > 0 ? 'group--alert' : ''}`}>
-      <button className="group-head" onClick={toggle} title={headTitle} {...dragHandle}>
+      <button className="group-head" onClick={toggle} title={headTitle} data-testid={tid('group', group.key)} {...dragHandle}>
         <Chevron className="group-chevron" strokeWidth={2.5} />
         <span className="group-name">{group.project}</span>
         {model && <span className="group-model">{model}</span>}
@@ -58,9 +57,9 @@ export function ProjectGroup({
             const expanded = expandedChildren.has(a.id) || (forceWaitingOpen && children.some((child) => child.state === 'waiting'))
             return (
               <div key={a.id} className="agent-tree">
-                <AgentRow agent={a} now={now} onRowMenu={onRowMenu} childCount={children.length} childrenExpanded={expanded} onToggleChildren={() => toggleChildren(a.id)} />
+                <AgentRow agent={a} onRowMenu={onRowMenu} childCount={children.length} childrenExpanded={expanded} onToggleChildren={() => toggleChildren(a.id)} />
                 {expanded && children.map((child) => (
-                  <AgentRow key={child.id} agent={child} now={now} onRowMenu={onRowMenu} nested />
+                  <AgentRow key={child.id} agent={child} onRowMenu={onRowMenu} nested />
                 ))}
               </div>
             )

@@ -3,6 +3,8 @@ import type { MenuState } from './AgentContextMenu'
 import { AgentIcon, RunningSpinner, ArrowUp } from './Icons'
 import { ProviderBadge } from './ProviderBadge'
 import { shortDuration, contextTone, compactNumber, modelShort, money } from './format'
+import { useNow } from './useNow'
+import { tid } from './testid'
 
 /** Short chip label + class for a non-default permission mode. */
 function modeChip(mode?: string): { label: string; cls: string } | null {
@@ -16,7 +18,6 @@ function modeChip(mode?: string): { label: string; cls: string } | null {
 /** One session within a project group. Project name lives in the group header. */
 export function AgentRow({
   agent,
-  now,
   onRowMenu,
   nested = false,
   childCount = 0,
@@ -24,13 +25,13 @@ export function AgentRow({
   onToggleChildren
 }: {
   agent: Agent
-  now: number
   onRowMenu: (menu: MenuState) => void
   nested?: boolean
   childCount?: number
   childrenExpanded?: boolean
   onToggleChildren?: () => void
 }) {
+  const now = useNow()
   const running = agent.state === 'running'
   const alert = agent.state === 'waiting' && agent.waitReason === 'question'
   const tone = contextTone(agent.contextPct)
@@ -54,6 +55,7 @@ export function AgentRow({
   return (
     <div
       className={`row ${nested ? 'row--nested' : ''} ${alert ? 'row--alert' : ''} ${agent.state === 'waiting' ? 'is-waiting' : ''}`}
+      data-testid={tid('agent', agent.id)}
       onContextMenu={(e) => {
         e.preventDefault()
         onRowMenu({

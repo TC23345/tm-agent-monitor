@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { SizeMode, StatusSnapshot, TerminalLaunch } from '@shared/types'
 import { UsageDashboard } from './UsageDashboard'
 import { ProjectGroup } from './ProjectGroup'
@@ -12,7 +12,10 @@ import { UsagePane } from './UsagePane'
 import { TopBar, type MenuName } from './TopBar'
 import { Pane } from './Pane'
 import { TerminalPane, type TerminalPaneHandle } from './TerminalPane'
-import { MenuCheckItem, MenuPop } from './Menu'
+import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
+import { SNIPPETS } from './snippets'
+import { tid } from './testid'
+import { nextWaiting, paneForAgent, waitingAgents, waitingFirst } from '@shared/attention.mjs'
 import { CommandPalette, type PaletteItem } from './CommandPalette'
 import { ProviderBadge } from './ProviderBadge'
 import { Settings as SettingsIcon } from './Icons'
@@ -34,8 +37,8 @@ import {
 } from './WorkspacePanes'
 import {
   AppWindow, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Coins, Columns3, Eraser, ExternalLink, Filter,
-  Folder, FolderPlus, Globe, Maximize2, Minimize2, Minus, Monitor, PanelLeft, PanelRight, Power, RotateCcw,
-  Ruler, SquareSplitHorizontal, SquareTerminal, Terminal, X
+  BellRing, Folder, FolderPlus, Globe, Maximize2, Minimize2, Minus, Monitor, PanelLeft, PanelRight, Power, RotateCcw,
+  Ruler, SquareSlash, SquareSplitHorizontal, SquareTerminal, Terminal, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
 
@@ -52,7 +55,14 @@ const GRID_GUTTER = 10
 
 export function App() {
   const [snap, setSnap] = useState<StatusSnapshot | null>(null)
-  const [now, setNow] = useState(Date.now())
+  // Read once: the app version (bridge drift) and the CDP port, if any.
+  const [appInfo, setAppInfo] = useState<{ version?: string; debugPort?: number }>({})
+  // The pane the keyboard owns (Ctrl+1…6, Ctrl+Shift+←/→, or a click), and
+  // the terminal pane whose snippet menu is open.
+  const [focusedPane, setFocusedPane] = useState<string | null>(null)
+  const [snippetsFor, setSnippetsFor] = useState<string | null>(null)
+  // Ctrl+Shift+W cycles waiting sessions; remember where the cycle is.
+  const lastRouted = useRef<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -151,9 +161,12 @@ export function App() {
     return () => window.removeEventListener('resize', on)
   }, [])
 
-  // Main owns sizeMode; hydrate the menu radio from settings once.
+  // Main owns sizeMode; hydrate the menu radio (and the app info) from settings once.
   useEffect(() => {
-    window.watch.getSettings().then((s) => setSizeMode(s.sizeMode)).catch(() => {})
+    window.watch.getSettings().then((s) => {
+      setSizeMode(s.sizeMode)
+      setAppInfo({ version: s.version, debugPort: s.debugPort })
+    }).catch(() => {})
   }, [])
   const applySizeMode = (mode: SizeMode) => {
     setSizeMode(mode) // optimistic — the window re-sizes in the same beat
@@ -173,12 +186,6 @@ export function App() {
       cancelAnimationFrame(raf)
       off()
     }
-  }, [])
-
-  // Tick once a second so durations / reset countdowns stay live between pushes.
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(t)
   }, [])
 
   // Escape closes an open menu, the palette, or a dialog, then un-zooms, and
@@ -202,6 +209,24 @@ export function App() {
         newTerminal('shell')
         return
       }
+      if (ctrl && e.shiftKey && (e.key === 'W' || e.key === 'w')) {
+        e.preventDefault()
+        routeToWaiting()
+        return
+      }
+      if (ctrl && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault()
+        stepFocus(e.key === 'ArrowRight' ? 1 : -1)
+        return
+      }
+      if (ctrl && !e.shiftKey && /^[1-6]$/.test(e.key)) {
+        const target = panes[Number(e.key) - 1]
+        if (target) {
+          e.preventDefault()
+          focusPane(target.id)
+        }
+        return
+      }
       if (inTerminal) return
       if (ctrl && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
         e.preventDefault()
@@ -215,6 +240,7 @@ export function App() {
       }
       if (e.key !== 'Escape') return
       if (menu) setMenu(null)
+      else if (snippetsFor) setSnippetsFor(null)
       else if (openMenu) setOpenMenu(null)
       else if (palette) setPalette(false)
       else if (newProjectOpen) setNewProjectOpen(false)
@@ -240,10 +266,14 @@ export function App() {
 
   const agents = snap?.agents ?? []
   const waitingParents = new Set(agents.filter((a) => a.state === 'waiting' && a.parentId).map((a) => a.parentId!))
-  const visibleAgents = waitingOnly
-    ? agents.filter((a) => a.state === 'waiting' || waitingParents.has(a.id))
-    : agents
-  const groups = applyOrder(groupByProject(visibleAgents), order)
+  const visibleAgents = useMemo(
+    () => (waitingOnly ? agents.filter((a) => a.state === 'waiting' || waitingParents.has(a.id)) : agents),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- waitingParents derives from agents
+    [agents, waitingOnly]
+  )
+  // Grouping is the priciest pure step on the render path; only agents, the
+  // dragged order, and the filter change it.
+  const groups = useMemo(() => applyOrder(groupByProject(visibleAgents), order), [visibleAgents, order])
   const waiting = snap?.waitingCount ?? 0
 
   // The root session touched most recently — the default folder for launches.
@@ -278,18 +308,8 @@ export function App() {
     setAllCollapsed(next)
     window.dispatchEvent(new CustomEvent(COLLAPSE_ALL_EVENT, { detail: next }))
   }
-  const providerHealth = snap ? Object.entries(snap.providers) : []
-  const reportingCount = providerHealth.filter(([, health]) => health.reporting).length
-  const providerCount = providerHealth.length
-  const awaitingTrust = providerHealth.some(([, health]) => health.awaitingTrust)
-  const noHooks = !!snap && !snap.mock && reportingCount === 0
-  const conn = {
-    state: (noHooks ? 'off' : awaitingTrust ? 'warn' : 'on') as 'on' | 'warn' | 'off',
-    label: snap?.mock ? 'mock data' : noHooks ? 'no reports' : awaitingTrust ? `${reportingCount}/${providerCount} · trust` : `${reportingCount}/${providerCount} providers`,
-    title: snap?.mock
-      ? 'Showing sample (mock) data — change in Settings'
-      : providerHealth.map(([provider, health]) => `${provider}: ${health.reporting ? 'reporting' : health.awaitingTrust ? 'awaiting trust' : health.installed ? 'installed, silent' : 'not installed'}`).join('\n')
-  }
+  const health = { providers: snap?.providers, mock: !!snap?.mock, version: appInfo.version }
+  const noHooks = !!snap && !snap.mock && Object.values(snap.providers).every((h) => !h.reporting)
 
   const agentList = !snap ? (
     <div className="empty">Connecting…</div>
@@ -321,7 +341,6 @@ export function App() {
       >
         <ProjectGroup
           group={group}
-          now={now}
           onRowMenu={setMenu}
           forceWaitingOpen={waitingOnly}
           dragHandle={{
@@ -345,7 +364,39 @@ export function App() {
   const addPane = (kind: PaneKind, term?: TerminalPaneConfig) => {
     if (panes.length >= MAX_PANES) return
     if (isUniqueKind(kind) && panes.some((p) => p.kind === kind)) return
-    setPanes([...panes, newPane(kind, term)])
+    const pane = newPane(kind, term)
+    setPanes([...panes, pane])
+    setFocusedPane(pane.id)
+  }
+
+  /** Give a pane the keyboard: a terminal takes real focus, anything else the slot. */
+  const focusPane = (paneId: string) => {
+    setFocusedPane(paneId)
+    const handle = termRefs.current.get(paneId)
+    if (handle) handle.focus()
+    else document.querySelector<HTMLElement>(`[data-pane="${paneId}"]`)?.focus()
+  }
+
+  const stepFocus = (delta: 1 | -1) => {
+    if (panes.length === 0) return
+    const at = panes.findIndex((p) => p.id === focusedPane)
+    const next = panes[(at + delta + panes.length) % panes.length]
+    focusPane(next.id)
+  }
+
+  /** Ctrl+Shift+W: the next waiting session — its own pane if it has one
+   * (zoomed into view if something else is zoomed), else its real window. */
+  const routeToWaiting = () => {
+    const target = nextWaiting(snap?.agents, lastRouted.current)
+    if (!target) return
+    lastRouted.current = target.id
+    const pane = paneForAgent(panes, target)
+    if (pane) {
+      if (zoom && zoom !== pane.id) setZoom(pane.id)
+      focusPane(pane.id)
+    } else {
+      window.watch.focusAgent(target.id)
+    }
   }
 
   /** User → Usage: open the pane, or bring the open one forward. `addPane`
@@ -379,6 +430,8 @@ export function App() {
     if (closing?.term?.sessionId) window.watch.disposeTerminal(closing.term.sessionId)
     const next = panes.filter((p) => p.id !== paneId)
     setPanes(next.length ? next : defaultPanes())
+    if (focusedPane === paneId) setFocusedPane(null)
+    if (snippetsFor === paneId) setSnippetsFor(null)
   }
 
   const commitPaneDrop = () => {
@@ -400,7 +453,7 @@ export function App() {
       case 'launcher':
         return <LauncherPane context={context} onNewProject={() => setNewProjectOpen(true)} onEmbedTerminal={newTerminal} />
       case 'usage':
-        return <UsagePane usage={snap?.usage} now={now} />
+        return <UsagePane usage={snap?.usage} />
       case 'terminal':
         return (
           <TerminalPane
@@ -429,7 +482,7 @@ export function App() {
   }
 
   const tool = (title: string, icon: ReactNode, onClick: () => void, disabled = false) => (
-    <button className="iconbtn iconbtn--sm" onClick={onClick} title={title} aria-label={title} disabled={disabled}>
+    <button className="iconbtn iconbtn--sm" onClick={onClick} title={title} aria-label={title} disabled={disabled} data-testid={tid('pane-tool', title)}>
       {icon}
     </button>
   )
@@ -456,6 +509,26 @@ export function App() {
             () => addPane('terminal', { launch: 'shell', cwd: term.cwd, label: term.label }),
             panes.length >= MAX_PANES
           )}
+          <span className="menu-wrap">
+            {tool('Snippets: type a command into this terminal', ic(SquareSlash), () => setSnippetsFor((cur) => (cur === pane.id ? null : pane.id)))}
+            {snippetsFor === pane.id && (
+              <MenuPop onAway={() => setSnippetsFor(null)} ignoreSelector=".gpane-tools .menu-wrap">
+                {SNIPPETS[term.launch].map((snip) => (
+                  <MenuItem
+                    key={snip.text}
+                    label={snip.label}
+                    hint={snip.hint}
+                    onClick={() => {
+                      setSnippetsFor(null)
+                      const sid = term.sessionId
+                      if (sid) window.watch.termInput(sid, `${snip.text}\r`)
+                      handle()?.focus()
+                    }}
+                  />
+                ))}
+              </MenuPop>
+            )}
+          </span>
           {tool('Clear the terminal', ic(Eraser), () => handle()?.clear())}
           {tool('Restart the shell', ic(RotateCcw), () => handle()?.restart())}
           {tool('Open an external terminal here', ic(ExternalLink), () => window.watch.openTerminal(term.cwd, term.launch === 'shell' ? 'shell' : term.launch))}
@@ -481,7 +554,7 @@ export function App() {
   const sidebarBody = (view: SidebarView) => {
     switch (view) {
       case 'limits':
-        return snap ? <UsageDashboard usage={snap.usage} now={now} /> : <div className="empty">Connecting…</div>
+        return snap ? <UsageDashboard usage={snap.usage} /> : <div className="empty">Connecting…</div>
       case 'windows':
         return <WindowsPane windows={desktop.windows} />
     }
@@ -494,6 +567,7 @@ export function App() {
         <div className="pane-head sideview-head">
           <button
             className="sidebar-title"
+            data-testid={tid('sideview', v.id)}
             onClick={() => toggleSidebarCollapsed(v.id)}
             aria-expanded={!rolled}
             title={rolled ? `Show ${v.label}` : `Collapse ${v.label}`}
@@ -623,16 +697,19 @@ export function App() {
     }
     if (sized) cmd('reset-sizes', 'Reset pane sizes', resetSizes, { icon: <Ruler strokeWidth={2} />, keywords: ['layout', 'splitter'] })
     if (order.length > 0) cmd('reset-order', 'Reset project order', clearOrder, { icon: <ChevronsUpDown strokeWidth={2} /> })
+    if (waitingAgents(agents).length > 0) cmd('route-waiting', 'Go to next waiting session', routeToWaiting, { icon: <BellRing strokeWidth={2} />, keys: ['Ctrl', 'Shift', 'W'], keywords: ['attention', 'question', 'input'] })
     cmd('settings', 'Settings…', () => setSettingsOpen(true), { icon: <SettingsIcon strokeWidth={2} />, keys: ['Ctrl', ','], keywords: ['hotkey', 'hooks', 'updates', 'preferences'] })
     cmd('hide', 'Hide to tray', () => window.watch.hide(), { icon: <Minus strokeWidth={2} />, keys: ['Esc'] })
     cmd('quit', 'Quit', () => window.watch.quit(), { icon: <Power strokeWidth={2} />, keywords: ['exit'] })
 
-    for (const a of agents.filter((x) => !x.parentId)) {
+    for (const a of waitingFirst(agents.filter((x) => !x.parentId))) {
       items.push({
         id: `agent:${a.id}`,
         section: 'agent',
         label: a.project,
-        detail: [a.state === 'waiting' ? 'waiting' : a.state, a.activity ?? a.question].filter(Boolean).join(' · '),
+        detail: a.state === 'waiting'
+          ? `waiting · ${a.question ?? a.activity ?? 'needs input'}`
+          : [a.state, a.activity].filter(Boolean).join(' · '),
         keywords: [a.provider, a.cwd ?? '', a.model ?? ''],
         icon: <ProviderBadge provider={a.provider} />,
         run: () => window.watch.focusAgent(a.id)
@@ -652,6 +729,13 @@ export function App() {
     return items
   }
 
+  // Which pane each waiting session lives in, for the header badge.
+  const paneAttention = new Map<string, string>()
+  for (const a of waitingAgents(agents)) {
+    const pane = paneForAgent(panes, a)
+    if (pane && !paneAttention.has(pane.id)) paneAttention.set(pane.id, a.question ?? a.activity ?? 'needs input')
+  }
+
   return (
     <div className={`app ${open ? 'is-open' : ''}`}>
       <TopBar
@@ -661,7 +745,8 @@ export function App() {
         canCollapse={groups.length > 1}
         allCollapsed={allCollapsed}
         onCollapseAll={collapseAll}
-        conn={conn}
+        health={health}
+        debugPort={appInfo.debugPort}
         panes={panes}
         onAddPane={addPane}
         onNewTerminal={newTerminal}
@@ -687,6 +772,7 @@ export function App() {
           <div className="pane-head sidebar-head">
             <button
               className="sidebar-title"
+              data-testid="sidebar-menu"
               onClick={() => setOpenMenu(openMenu === 'sidebar' ? null : 'sidebar')}
               aria-expanded={openMenu === 'sidebar'}
               title="Choose which views stack below the agent list"
@@ -718,6 +804,7 @@ export function App() {
 
         <Splitter
           className="splitter--frame"
+          testId="splitter-sidebar"
           label="Sidebar width"
           onStart={() => { sidebarDrag.current = sidebarWidth }}
           onMove={(delta) => patchSizes((current) => ({ ...current, sidebar: clampSidebarWidth(sidebarDrag.current + delta, frameW) }))}
@@ -740,9 +827,13 @@ export function App() {
           {panes.map((pane, index) => (
             <div
               key={pane.id}
-              className={`pane-slot ${paneDrag === pane.id ? 'is-dragging' : ''} ${
+              className={`pane-slot ${paneDrag === pane.id ? 'is-dragging' : ''} ${focusedPane === pane.id ? 'is-focused' : ''} ${
                 paneDrop?.id === pane.id && paneDrag && paneDrag !== pane.id ? (paneDrop.after ? 'pane-drop-after' : 'pane-drop-before') : ''
               }`}
+              data-pane={pane.id}
+              data-testid={tid('pane', pane.kind, index)}
+              tabIndex={-1}
+              onPointerDownCapture={() => { if (focusedPane !== pane.id) setFocusedPane(pane.id) }}
               style={zoomed
                 ? (pane.id === zoomed ? { gridColumn: 1, gridRow: 1 } : { display: 'none' })
                 : { gridColumn: (index % cols) * 2 + 1, gridRow: Math.floor(index / cols) * 2 + 1 }}
@@ -764,6 +855,7 @@ export function App() {
                 onClose={() => closePane(pane.id)}
                 context={paneContext(pane)}
                 tools={paneTools(pane)}
+                attention={paneAttention.get(pane.id)}
                 zoomed={zoomed === pane.id}
                 onZoom={panes.length > 1 ? () => setZoom((current) => (current === pane.id ? null : pane.id)) : undefined}
                 dragHandle={{
@@ -787,6 +879,7 @@ export function App() {
             <Splitter
               key={`col-${i}`}
               className="splitter--grid"
+              testId={`splitter-col-${i}`}
               label={`Width of column ${i + 1}`}
               style={{ gridColumn: (i + 1) * 2, gridRow: `1 / ${rows * 2}` }}
               onStart={() => beginTrackDrag('cols', i)}
@@ -799,6 +892,7 @@ export function App() {
               key={`row-${i}`}
               axis="y"
               className="splitter--grid"
+              testId={`splitter-row-${i}`}
               label={`Height of row ${i + 1}`}
               style={{ gridRow: (i + 1) * 2, gridColumn: `1 / ${cols * 2}` }}
               onStart={() => beginTrackDrag('rows', i)}

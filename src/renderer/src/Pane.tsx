@@ -1,5 +1,5 @@
 import type { DragEvent, ReactNode } from 'react'
-import { Maximize2, Minimize2, X } from 'lucide-react'
+import { BellRing, Maximize2, Minimize2, X } from 'lucide-react'
 import { PANE_KINDS, type PaneKind } from './panes'
 
 interface Props {
@@ -11,8 +11,11 @@ interface Props {
    * pane kind brings its own tools (restart, clear, split…) — the header is
    * the editor-title bar, not a content picker. */
   tools?: ReactNode
+  /** The waiting session that runs in this pane is asking this — a pulsing
+   * badge in the header says so before the terminal's own output does. */
+  attention?: string
   /** Zoom: this pane alone fills the grid. The others stay mounted and hidden,
-   * so a zoom never disturbes a running shell. */
+   * so a zoom never disturbs a running shell. */
   zoomed?: boolean
   onZoom?: () => void
   /** Grid drag-and-drop: the header is the handle; the slot around it drops. */
@@ -28,7 +31,7 @@ interface Props {
  * whose header carries its kind's tools. The kind itself is fixed for the
  * pane's life — swapping a terminal into a launcher would kill its shell, so
  * a different kind is a new pane (View → Add pane, or the palette). */
-export function Pane({ kind, onClose, context, tools, zoomed, onZoom, dragHandle, children }: Props) {
+export function Pane({ kind, onClose, context, tools, attention, zoomed, onZoom, dragHandle, children }: Props) {
   const meta = PANE_KINDS.find((p) => p.id === kind)!
   const Icon = meta.icon
   return (
@@ -54,6 +57,11 @@ export function Pane({ kind, onClose, context, tools, zoomed, onZoom, dragHandle
         <Icon className="gpane-ic" strokeWidth={2} />
         <span className="gpane-title" title={meta.hint}>{meta.label}</span>
         {context}
+        {attention && (
+          <span className="gpane-attn" title={`Waiting for your input: ${attention}`} data-testid="pane-attention">
+            <BellRing strokeWidth={2} />
+          </span>
+        )}
         <span className="gpane-actions">
           {tools && <span className="gpane-tools">{tools}</span>}
           {onZoom && (
@@ -63,11 +71,12 @@ export function Pane({ kind, onClose, context, tools, zoomed, onZoom, dragHandle
               title={zoomed ? 'Restore the grid (Esc, or double-click the header)' : 'Zoom this pane to fill the grid (double-click the header)'}
               aria-label={zoomed ? 'Restore the grid' : 'Zoom this pane'}
               aria-pressed={zoomed}
+              data-testid="pane-zoom"
             >
               {zoomed ? <Minimize2 className="gear gear--sm" strokeWidth={2} /> : <Maximize2 className="gear gear--sm" strokeWidth={2} />}
             </button>
           )}
-          <button className="iconbtn iconbtn--sm" onClick={onClose} title="Close this pane" aria-label="Close this pane">
+          <button className="iconbtn iconbtn--sm" onClick={onClose} title="Close this pane" aria-label="Close this pane" data-testid="pane-close">
             <X className="gear gear--sm" strokeWidth={2} />
           </button>
         </span>

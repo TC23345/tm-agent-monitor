@@ -6,8 +6,30 @@ import { Settings } from './Icons'
 import mark from './assets/icon.png'
 import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
 import { MAX_PANES, PANE_KINDS, isUniqueKind, type PaneCols, type PaneInstance, type PaneKind } from './panes'
-import type { SizeMode, TerminalLaunch } from '@shared/types'
+import type { ProviderHealth, ProviderId, SizeMode, TerminalLaunch } from '@shared/types'
+import { overallStatus } from '@shared/health.mjs'
 import { ProviderBadge } from './ProviderBadge'
+import { useNow } from './useNow'
+import { tid } from './testid'
+
+/** Provider health rolled up for the title bar — ticks so "silent for 12m"
+ * stays true between snapshots, and only this chip re-renders for it. */
+export interface HealthInput {
+  providers: Partial<Record<ProviderId, ProviderHealth>> | undefined
+  mock: boolean
+  version: string | undefined
+}
+
+export function ConnChip({ health }: { health: HealthInput }) {
+  const now = useNow()
+  const conn = overallStatus(health.providers, now, health.version, health.mock)
+  return (
+    <span className={`conn is-${conn.state}`} title={conn.title} data-testid="conn-chip">
+      <span className="conn-dot" />
+      {conn.label}
+    </span>
+  )
+}
 
 export type MenuName = 'file' | 'terminal' | 'view' | 'user'
 
@@ -18,7 +40,9 @@ interface Props {
   canCollapse: boolean
   allCollapsed: boolean
   onCollapseAll: () => void
-  conn: { state: 'on' | 'warn' | 'off'; label: string; title: string }
+  health: HealthInput
+  /** CDP port when the app was launched for automation; shown so an agent can find it. */
+  debugPort?: number
   panes: PaneInstance[]
   onAddPane: (kind: PaneKind) => void
   onNewTerminal: (launch: TerminalLaunch) => void
@@ -52,7 +76,7 @@ interface Props {
  */
 export function TopBar(props: Props) {
   const {
-    waiting, waitingOnly, onWaitingOnly, canCollapse, allCollapsed, onCollapseAll, conn,
+    waiting, waitingOnly, onWaitingOnly, canCollapse, allCollapsed, onCollapseAll, health, debugPort,
     panes, onAddPane, onNewTerminal, onNewProject, canResetOrder, onResetOrder, onSettings,
     sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, openMenu, onOpenMenu, onPalette, onUsage
   } = props
@@ -72,6 +96,7 @@ export function TopBar(props: Props) {
   const menuButton = (name: MenuName, label: string) => (
     <button
       className={`menu-btn ${openMenu === name ? 'menu-btn--open' : ''}`}
+      data-testid={tid('menu-btn', name)}
       onClick={() => onOpenMenu(openMenu === name ? null : name)}
       onMouseEnter={() => { if (openMenu && openMenu !== name) onOpenMenu(name) }}
     >
@@ -183,8 +208,8 @@ export function TopBar(props: Props) {
               <div className="menu-sep" />
               <MenuItem icon={<Settings strokeWidth={2} />} label="Settings…" hint="Hotkey, notifications, startup, updates, hooks (Ctrl+,)" onClick={run(onSettings)} />
               <div className="menu-sep" />
-              <div className="menu-status" title={conn.title}>
-                <span className={`conn is-${conn.state}`}><span className="conn-dot" />{conn.label}</span>
+              <div className="menu-status">
+                <ConnChip health={health} />
               </div>
             </MenuPop>
           )}
@@ -194,7 +219,7 @@ export function TopBar(props: Props) {
       {/* The command center: the palette's front door, where an IDE keeps its
           search box. Ctrl+Shift+P always opens it; Ctrl+P too, unless a
           terminal pane has focus and the key belongs to the shell. */}
-      <button className="cmdcenter" onClick={onPalette} title="Search commands, agents, and open windows (Ctrl+Shift+P)">
+      <button className="cmdcenter" onClick={onPalette} title="Search commands, agents, and open windows (Ctrl+Shift+P)" data-testid="cmdcenter">
         <Search className="cmdcenter-ic" strokeWidth={2} />
         <span className="cmdcenter-label">Search commands, agents, windows</span>
         <span className="cmdcenter-keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd></span>
@@ -210,10 +235,12 @@ export function TopBar(props: Props) {
             {waiting} waiting
           </button>
         )}
-        <div className={`conn is-${conn.state}`} title={conn.title}>
-          <span className="conn-dot" />
-          {conn.label}
-        </div>
+        {debugPort && (
+          <span className="conn conn--cdp" title={`Chrome DevTools Protocol on 127.0.0.1:${debugPort} — an agent can attach here (electron-debug MCP)`} data-testid="cdp-chip">
+            CDP :{debugPort}
+          </span>
+        )}
+        <ConnChip health={health} />
       </div>
     </header>
   )

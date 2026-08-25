@@ -284,6 +284,8 @@ export interface AppSettings {
   hasAdminKey: boolean
   port: number
   version: string
+  /** Chrome DevTools Protocol port when launched with --remote-debugging-port. */
+  debugPort?: number
   /** Local source checkout used by "Rebuild & relaunch" (CLAUDE_WATCH_REPO). */
   repoDir: string
   providers: Record<ProviderId, ProviderHealth>

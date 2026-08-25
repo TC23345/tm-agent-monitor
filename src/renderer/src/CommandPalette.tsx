@@ -86,6 +86,7 @@ export function CommandPalette({ items, onClose }: Props) {
           <input
             ref={inputRef}
             className="palette-input"
+            data-testid="palette-input"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search commands, agents, and windows  (> commands · @ agents · # windows)"
@@ -110,6 +111,7 @@ export function CommandPalette({ items, onClose }: Props) {
                   id={`palette-${item.id}`}
                   data-index={index}
                   role="option"
+                  data-testid={`palette:${item.id}`}
                   aria-selected={index === active}
                   className={`palette-row ${index === active ? 'is-active' : ''}`}
                   onMouseMove={() => { if (index !== active) setActive(index) }}

@@ -945,6 +945,13 @@ function setupAutoUpdate(): void {
 }
 
 // --- IPC --------------------------------------------------------------------
+/** The CDP port an agent can attach to, when this run exposes one. */
+function debugPort(): number | undefined {
+  const arg = process.argv.find((a) => a.startsWith('--remote-debugging-port='))
+  const port = arg ? Number(arg.slice(arg.indexOf('=') + 1)) : NaN
+  return Number.isInteger(port) && port > 0 ? port : undefined
+}
+
 function settingsView() {
   const userData = app.getPath('userData')
   const home = app.getPath('home')
@@ -957,6 +964,7 @@ function settingsView() {
     hasAdminKey: !!ADMIN_KEY,
     port: PORT,
     version: app.getVersion(),
+    debugPort: debugPort(),
     repoDir: config.repoDir,
     providers: buildSnapshot().providers,
     historySync: history.status(),

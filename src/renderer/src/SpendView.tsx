@@ -8,7 +8,7 @@ import { PROVIDER_NAME, ProviderDot, QuotaBar, byProvider, hasSpendDetail, zoneL
  * Estimated API-equivalent value and actual organization spend stay separate —
  * they are never summed together.
  */
-function AccountSpend({ account, now }: { account: UsageAccount; now: number }) {
+function AccountSpend({ account }: { account: UsageAccount }) {
   const byProject = account.todayByProject ?? []
   const prefix = account.actualSpend ? '' : '~'
   const suffix = account.valueComplete === false ? ' partial' : ''
@@ -32,12 +32,12 @@ function AccountSpend({ account, now }: { account: UsageAccount; now: number }) 
           ))}
         </div>
       )}
-      {account.budget && <QuotaBar q={account.budget} now={now} hint="Actual spend against configured budget" />}
+      {account.budget && <QuotaBar q={account.budget} hint="Actual spend against configured budget" />}
     </div>
   )
 }
 
-export function SpendView({ usage, now }: { usage: UsageSummary; now: number }) {
+export function SpendView({ usage }: { usage: UsageSummary }) {
   const groups = byProvider(usage.accounts)
     .map((group) => ({ ...group, accounts: group.accounts.filter(hasSpendDetail) }))
     .filter((group) => group.accounts.length > 0)
@@ -65,7 +65,7 @@ export function SpendView({ usage, now }: { usage: UsageSummary; now: number }) 
             <span className="titletype">{PROVIDER_NAME[group.provider]}</span>
           </div>
           {group.accounts.map((account) => (
-            <AccountSpend key={account.id} account={account} now={now} />
+            <AccountSpend key={account.id} account={account} />
           ))}
         </div>
       ))}

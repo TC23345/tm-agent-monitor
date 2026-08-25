@@ -1,3 +1,4 @@
+import { useNow } from './useNow'
 import type { ProviderId, Quota, UsageAccount } from '@shared/types'
 import { resetsIn } from './format'
 
@@ -42,7 +43,8 @@ export function ProviderDot({ provider }: { provider: ProviderId }) {
   return <span className={`prov-dot prov-dot--${provider}`} aria-hidden="true" />
 }
 
-export function QuotaBar({ q, now, hint }: { q: Quota; now: number; hint?: string }) {
+export function QuotaBar({ q, hint }: { q: Quota; hint?: string }) {
+  const now = useNow()
   const sev = q.severity ?? 'normal'
   return (
     <div className="quota" title={hint}>
