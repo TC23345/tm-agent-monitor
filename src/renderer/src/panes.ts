@@ -1,4 +1,4 @@
-import { Activity, AppWindow, Coins, SquareTerminal, Terminal } from 'lucide-react'
+import { Activity, AppWindow, Coins, Rss, SquareTerminal, Terminal } from 'lucide-react'
 import type { TerminalLaunch } from '@shared/types'
 import type { SizeBucket } from '@shared/layout.mjs'
 
@@ -8,7 +8,7 @@ import type { SizeBucket } from '@shared/layout.mjs'
  * and limit bars — lives in the Coding Agents sidebar as toggleable stacked
  * sections; see `SidebarView`.
  */
-export type PaneKind = 'launcher' | 'terminal' | 'usage'
+export type PaneKind = 'launcher' | 'terminal' | 'usage' | 'activity'
 
 /** What an embedded terminal pane runs. `sessionId` reattaches after a remount;
  * a stale id (fresh app run) just starts a new shell with the same launch. */
@@ -31,7 +31,8 @@ export interface PaneInstance {
 export const PANE_KINDS: { id: PaneKind; label: string; icon: typeof Activity; hint: string }[] = [
   { id: 'launcher', label: 'Launch', icon: SquareTerminal, hint: 'Start a terminal, editor, or browser' },
   { id: 'terminal', label: 'Terminal', icon: Terminal, hint: 'An embedded PowerShell terminal' },
-  { id: 'usage', label: 'Usage', icon: Coins, hint: 'Today’s spend and local usage insights' }
+  { id: 'usage', label: 'Usage', icon: Coins, hint: 'Today’s spend and local usage insights' },
+  { id: 'activity', label: 'Activity', icon: Rss, hint: 'What sessions asked, finished, started, and ended' }
 ]
 
 export const MAX_PANES = 6

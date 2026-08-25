@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { StatusSnapshot, AppSettings, AppSettingsPatch, DailyUsageDay, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights } from '../shared/types.js'
+import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, DailyUsageDay, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights, WorkspaceCommand } from '../shared/types.js'
 
 const api = {
   getStatus: (): Promise<StatusSnapshot> => ipcRenderer.invoke('status:get'),
@@ -62,6 +62,16 @@ const api = {
   /** Per-folder facts: `.tm.json` + package.json scripts, and git branch/dirty state. */
   getProjectCommands: (cwd: string): Promise<ProjectCommand[]> => ipcRenderer.invoke('project:commands', cwd),
   getGitStatus: (cwd: string): Promise<GitStatus | null> => ipcRenderer.invoke('git:status', cwd),
+  /** The activity feed: attention-worthy moments across sessions, newest first. */
+  getEvents: (): Promise<ActivityEvent[]> => ipcRenderer.invoke('agent:events'),
+  /** A command a second instance sent (`tm open …`); the renderer re-validates it. */
+  onCommand: (cb: (command: WorkspaceCommand) => void) => {
+    const listener = (_e: unknown, command: WorkspaceCommand) => cb(command)
+    ipcRenderer.on('workspace:command', listener)
+    return () => {
+      ipcRenderer.removeListener('workspace:command', listener)
+    }
+  },
   getUsageInsights: (): Promise<UsageInsights> => ipcRenderer.invoke('usage:insights'),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
   diagnoseSystem: (id?: string): Promise<SystemDiagnostic[]> => ipcRenderer.invoke('system:diagnose', id),

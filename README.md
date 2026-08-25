@@ -12,6 +12,8 @@ An IDE-style title bar, an agent sidebar, and a pane grid:
 
 **Layouts and launching.** View → Layouts saves the current panes, sizes, and sidebar views under a name and restores them later. Drag a project from the sidebar onto the grid to open a shell there (Shift for Claude Code). A session near its context limit shows an amber chip in the title bar and a *Compact now* tool on its pane.
 
+**Activity and automation.** User → *Activity feed* opens a pane of what every session asked, finished, started, and ended, newest first. `npm run tm -- open --cwd <folder> --launch claude` (or `tm layout <name>`, `tm palette`, `tm usage`, `tm activity`, `tm show`, `tm hide`) drives the running app from a terminal or a keybind. Settings → *Phone push* forwards a long-waiting session's question to an ntfy / Pushover URL.
+
 **Project awareness.** Project headers show the git branch and dirty count; the Launch pane lists the active folder's `.tm.json` commands and npm scripts and runs them in a new pane. Right-click a waiting session that runs in a pane to reply to it from the sidebar. Coming back after a while shows a one-line "while you were away" digest.
 
 **Attention routing.** A pane whose session is waiting on you shows a pulsing bell; **Ctrl+Shift+W** jumps to the longest-waiting session — its pane if it has one, otherwise its real window — and the palette lists waiting sessions first with their question. The connection chip says when each provider last reported, flags one that has gone silent, and warns when the installed hook bridge is older than the app.

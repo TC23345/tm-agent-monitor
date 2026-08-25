@@ -1,12 +1,4 @@
-import {
-  DEFAULTS,
-  type Agent,
-  type AgentEventV1,
-  type AppSettingsPatch,
-  type HookReport,
-  type ProviderId,
-  type ToolKind
-} from '../shared/types.js'
+import { DEFAULTS, type Agent, type AgentEventV1, type AppSettingsPatch, type HookReport, type ProviderId, type ToolKind, type ActivityEvent } from '../shared/types.js'
 import { estimateCostUsd } from '../shared/pricing.mjs'
 
 export type { AgentEventKind, ProviderId } from '../shared/types.js'
@@ -16,7 +8,7 @@ export type StoreEventV1 = AgentEventV1
 export function validateMutableSettingsPatch(value: unknown): AppSettingsPatch | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const input = value as Record<string, unknown>
-  const allowed = new Set(['hotkey', 'notifications', 'launchAtLogin', 'mock', 'sizeMode'])
+  const allowed = new Set(['hotkey', 'notifications', 'launchAtLogin', 'mock', 'sizeMode', 'pushUrl', 'pushAfterMin'])
   if (Object.keys(input).some((key) => !allowed.has(key))) return null
 
   const result: AppSettingsPatch = {}
@@ -35,8 +27,22 @@ export function validateMutableSettingsPatch(value: unknown): AppSettingsPatch |
       result[key] = input[key]
     }
   }
+  if ('pushUrl' in input) {
+    const url = input.pushUrl
+    if (typeof url !== 'string' || url.length > 512 || /[\s\0]/.test(url)) return null
+    if (url !== '' && !/^https?:\/\/\S+$/.test(url)) return null
+    result.pushUrl = url
+  }
+  if ('pushAfterMin' in input) {
+    const n = input.pushAfterMin
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 240) return null
+    result.pushAfterMin = n
+  }
   return result
 }
+
+/** Bounded ring of attention-worthy moments, newest last; the feed reverses it. */
+const MAX_EVENTS = 300
 
 function toolKind(name?: string): ToolKind {
   if (!name) return 'other'
@@ -100,8 +106,19 @@ export class AgentStore {
   private lastActorEventAt = new Map<string, number>()
   private endedSessions = new Map<string, number>()
   private sessionStartedAt = new Map<string, number>()
+  private events: ActivityEvent[] = []
 
   constructor(private readonly maxAgents = 1_000) {}
+
+  private record(e: ActivityEvent): void {
+    this.events.push(e)
+    if (this.events.length > MAX_EVENTS) this.events.splice(0, this.events.length - MAX_EVENTS)
+  }
+
+  /** Newest first. */
+  recentEvents(limit = 200): ActivityEvent[] {
+    return this.events.slice(-Math.max(0, limit)).reverse()
+  }
 
   apply(r: HookReport): void {
     const id = providerKey('claude', r.sessionId)
@@ -278,6 +295,8 @@ export class AgentStore {
     this.trimSeenEvents(event.timestamp)
 
     if (event.kind === 'session_ended') {
+      const gone = this.agents.get(rootId)
+      if (gone) this.record({ at: event.timestamp, kind: 'ended', agentId: rootId, provider: event.provider, project: gone.project, cwd: gone.cwd })
       this.endedSessions.set(rootId, event.timestamp)
       this.removeSession(rootId)
       return true
@@ -327,6 +346,7 @@ export class AgentStore {
     switch (event.kind) {
       case 'session_started':
         setState('idle'); next.activity = 'idle'; next.waitReason = undefined; next.question = undefined
+        if (!actorId) this.record({ at: event.timestamp, kind: 'started', agentId: id, provider: event.provider, project, cwd: next.cwd })
         break
       case 'prompt_submitted':
       case 'tool_started':
@@ -334,6 +354,7 @@ export class AgentStore {
       case 'subagent_started':
       case 'context_compacting':
       case 'context_compacted':
+        if (event.kind === 'context_compacted' && !actorId) this.record({ at: event.timestamp, kind: 'compacted', agentId: id, provider: event.provider, project, cwd: next.cwd })
         setState('running')
         next.tool = toolKind(event.toolName)
         next.activity = activityFor(next.tool, event.activity)
@@ -347,10 +368,12 @@ export class AgentStore {
         next.waitReason = reason
         next.question = message
         next.recentQuestions = [{ text: message, at: event.timestamp }, ...(prev?.recentQuestions ?? [])].slice(0, 5)
+        this.record({ at: event.timestamp, kind: 'waiting', agentId: id, provider: event.provider, project, cwd: next.cwd, text: message })
         break
       }
       case 'turn_completed':
       case 'subagent_completed':
+        if (event.kind === 'turn_completed' && !actorId) this.record({ at: event.timestamp, kind: 'finished', agentId: id, provider: event.provider, project, cwd: next.cwd })
         setState('complete')
         next.activity = 'finished — ready for you'
         next.waitReason = undefined

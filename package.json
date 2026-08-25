@@ -22,7 +22,8 @@
     "dist": "npm run build && npm run icons && electron-builder --win",
     "dist:dir": "npm run build && npm run icons && electron-builder --win --dir",
     "publish": "npm run build && npm run icons && electron-builder --win --publish always",
-    "debug:app": "node scripts/debug-app.mjs"
+    "debug:app": "node scripts/debug-app.mjs",
+    "tm": "node scripts/tm.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",

@@ -555,6 +555,26 @@ kbd {
 .gpane-tools .menu-wrap { display: inline-flex; }
 .gpane-tools .menu-pop { left: auto; right: 0; top: calc(100% + 8px); }
 
+/* ---- activity feed ---- */
+.feed { display: flex; flex-direction: column; gap: 2px; }
+.feed-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.feed-chip { padding: 3px 9px; border: 1px solid var(--hairline); border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 11.5px; cursor: pointer; }
+.feed-chip:hover { color: var(--text); background: var(--elev); }
+.feed-chip.is-active { color: var(--text); border-color: rgba(217, 119, 87, 0.5); background: rgba(217, 119, 87, 0.12); }
+.feed-row { display: grid; grid-template-columns: 16px auto minmax(60px, 0.6fr) 1.4fr auto; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.feed-row:hover { background: var(--elev); }
+.feed-ic { width: 14px; height: 14px; color: var(--muted); }
+.feed-row.is-waiting .feed-ic { color: var(--st-question); }
+.feed-row.is-finished .feed-ic { color: var(--st-complete); }
+.feed-row.is-compacted .feed-ic { color: var(--st-permission); }
+.feed-project { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.feed-text { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.feed-when { color: var(--faint); font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Text settings (push URL, minutes). */
+.sinput { width: 260px; max-width: 100%; padding: 5px 8px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 12.5px; }
+.sinput:focus { outline: none; border-color: var(--accent); }
+.sinput.is-invalid { border-color: var(--st-question); }
+
 /* ---- away digest: one dismissable line under the title bar ---- */
 .digest {
   flex: 0 0 auto;

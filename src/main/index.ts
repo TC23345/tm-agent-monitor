@@ -15,7 +15,8 @@ import { readPersonalToken, fetchWindow } from './subscriptionUsage.js'
 import { readCodexAuth, fetchCodexWindow } from './codexSubscriptionUsage.js'
 import { scanCodexUsage, type CodexRateLimits } from './codexUsage.mjs'
 import { scanUsageInsights } from './usageInsightsCore.mjs'
-import { mockSnapshot, mockHistory, mockUsageInsights, mockWindows } from './mock.js'
+import { mockSnapshot, mockHistory, mockUsageInsights, mockWindows, mockEvents } from './mock.js'
+import { parseWorkspaceArgs } from '../shared/workspaceCommand.mjs'
 import { focusHwnd, focusByPid, listDesktopWindows, available as winAvailable } from '../native/win32.mjs'
 import { buildWindowList } from '../shared/windows.mjs'
 import { parseProjectCommands } from '../shared/projectCommands.mjs'
@@ -61,6 +62,8 @@ interface Settings {
   notifications?: boolean
   mock?: boolean
   sizeMode?: SizeMode
+  pushUrl?: string
+  pushAfterMin?: number
   /** Set only after a real Codex hook event reaches this app installation. */
   codexHookTrustVerified?: boolean
 }
@@ -76,6 +79,28 @@ let settings: Settings = {}
 // Effective config: settings.json > env > default. Mutable so the panel changes them live.
 let hotkeyPref = config.hotkey
 let notify = config.notifications
+// Phone push for long waits (F19): a POST per waiting root session, once,
+// after it has waited pushAfterMin minutes. ntfy accepts a bare POST with a
+// Title header; Pushover-style endpoints take the same body.
+let pushUrl = ''
+let pushAfterMin = 10
+const pushed = new Map<string, number>()
+function checkPush(): void {
+  if (!pushUrl || mockMode) return
+  const snap = daemon.store.snapshot()
+  const cutoff = Date.now() - pushAfterMin * 60_000
+  const waiting = new Set<string>()
+  for (const a of snap) {
+    if (a.parentId || a.state !== 'waiting') continue
+    waiting.add(a.id)
+    if (a.since > cutoff || pushed.has(a.id)) continue
+    pushed.set(a.id, Date.now())
+    const title = `${PROVIDER_TOAST_LABEL[a.provider]} · ${a.project} needs input`
+    void fetch(pushUrl, { method: 'POST', headers: { Title: title, Priority: 'high', Tags: 'robot' }, body: a.question ?? 'Waiting for input' })
+      .catch((e) => console.error(`[push] ${(e as Error)?.message ?? e}`))
+  }
+  for (const id of pushed.keys()) if (!waiting.has(id)) pushed.delete(id)
+}
 let mockMode = config.mock
 const mockForced = process.argv.includes('--mock')
 
@@ -986,6 +1011,8 @@ function settingsView() {
     port: PORT,
     version: app.getVersion(),
     debugPort: debugPort(),
+    pushUrl,
+    pushAfterMin,
     repoDir: config.repoDir,
     providers: buildSnapshot().providers,
     historySync: history.status(),
@@ -1140,9 +1167,12 @@ function registerIpc(): void {
     if (patch.sizeMode) { applySizeMode(patch.sizeMode); settings.sizeMode = patch.sizeMode }
     if (typeof patch.mock === 'boolean' && !mockForced) { mockMode = patch.mock; settings.mock = patch.mock; pushStatus() }
     if (typeof patch.launchAtLogin === 'boolean') app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin, args: ['--hidden'] })
+    if (typeof patch.pushUrl === 'string') { pushUrl = patch.pushUrl; settings.pushUrl = patch.pushUrl; pushed.clear() }
+    if (typeof patch.pushAfterMin === 'number') { pushAfterMin = patch.pushAfterMin; settings.pushAfterMin = patch.pushAfterMin }
     saveSettings()
     return settingsView()
   })
+  ipcMain.handle('agent:events', () => (mockMode ? mockEvents() : daemon.store.recentEvents()))
   // Focus/launch routes never hide the workspace: it is not always-on-top, so
   // the surfaced window simply appears in front while the workspace waits behind.
   ipcMain.on('agent:focus', (_e, id: string) => {
@@ -1376,13 +1406,31 @@ const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
-  app.on('second-instance', () => toggleWindow())
+  // A second launch is either the user's toggle or a `tm …` command: the
+  // command shows the workspace and is handed to the renderer, which validates
+  // it again before acting.
+  app.on('second-instance', (_e, argv) => {
+    const command = parseWorkspaceArgs(argv)
+    if (!command) {
+      toggleWindow()
+      return
+    }
+    if (command.kind === 'hide') {
+      if (win?.isVisible()) hideWindow()
+      return
+    }
+    showWindow()
+    if (command.kind !== 'show') win?.webContents.send('workspace:command', command)
+  })
 
   app.whenReady().then(async () => {
     app.setName('TaylorMade Agents')
     if (process.platform === 'win32') app.setAppUserModelId('com.taylormade.agent-monitor')
 
     settings = loadSettings()
+    if (typeof settings.pushUrl === 'string' && /^https?:\/\/\S+$/.test(settings.pushUrl)) pushUrl = settings.pushUrl
+    if (Number.isInteger(settings.pushAfterMin) && settings.pushAfterMin! >= 1 && settings.pushAfterMin! <= 240) pushAfterMin = settings.pushAfterMin!
+    setInterval(checkPush, 60_000)
     loadUsageHistory()
     if (settings.hotkey) hotkeyPref = settings.hotkey
     // Capture tooling pins the boot view; the persisted mode must not override it.

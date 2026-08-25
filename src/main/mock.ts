@@ -1,4 +1,4 @@
-import type { StatusSnapshot, DailyUsageDay, DesktopWindow, UsageInsights } from '../shared/types.js'
+import type { StatusSnapshot, DailyUsageDay, DesktopWindow, UsageInsights, ActivityEvent } from '../shared/types.js'
 
 /** Sample desktop windows so the workspace switcher is populated in mock mode. */
 export function mockWindows(): DesktopWindow[] {
@@ -160,4 +160,19 @@ export function mockSnapshot(): StatusSnapshot {
       }
     ]
   }
+}
+
+/** A plausible feed for the sample workspace, newest first. */
+export function mockEvents(): ActivityEvent[] {
+  const now = Date.now()
+  const ago = (ms: number) => now - ms
+  return [
+    { at: ago(60_000), kind: 'waiting', agentId: 'claude:a1', provider: 'claude', project: 'compile-me', text: 'permission to use Bash' },
+    { at: ago(4 * 60_000), kind: 'finished', agentId: 'claude:a5', provider: 'claude', project: 'gs-referral' },
+    { at: ago(6 * 60_000), kind: 'waiting', agentId: 'codex:a2', provider: 'codex', project: 'api-gateway', text: 'Should I switch auth to JWT?' },
+    { at: ago(9 * 60_000), kind: 'compacted', agentId: 'claude:a3', provider: 'claude', project: 'claude-watch' },
+    { at: ago(14 * 60_000), kind: 'started', agentId: 'codex:a4', provider: 'codex', project: 'growth-saloon' },
+    { at: ago(31 * 60_000), kind: 'ended', agentId: 'claude:old', provider: 'claude', project: 'watch-firmware' },
+    { at: ago(48 * 60_000), kind: 'started', agentId: 'claude:a3', provider: 'claude', project: 'claude-watch' }
+  ]
 }

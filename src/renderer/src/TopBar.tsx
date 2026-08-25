@@ -1,6 +1,6 @@
 import {
   ChevronsDownUp, ChevronsUpDown, Code2, Coins, Columns3, Filter, Folder, FolderPlus, Globe,
-  LayoutTemplate, ListRestart, Minus, Monitor, PanelLeft, PanelRight, Power, Ruler, Save, Search, SquarePlus,
+  LayoutTemplate, ListRestart, Minus, Monitor, PanelLeft, PanelRight, Power, Rss, Ruler, Save, Search, SquarePlus,
   SquareTerminal, Terminal, Trash2
 } from 'lucide-react'
 import { Settings } from './Icons'
@@ -64,8 +64,9 @@ interface Props {
   onOpenMenu: (menu: MenuName | null) => void
   /** The command center: opens the palette. */
   onPalette: () => void
-  /** User → Usage: open the Usage pane, or bring the open one forward. */
+  /** User → Usage / Activity: open the pane, or bring the open one forward. */
   onUsage: () => void
+  onActivity: () => void
   /** Named layouts (View → Layouts). */
   layouts: string[]
   onSaveLayout: () => void
@@ -88,11 +89,12 @@ export function TopBar(props: Props) {
     waiting, waitingOnly, onWaitingOnly, canCollapse, allCollapsed, onCollapseAll, health, debugPort,
     panes, onAddPane, onNewTerminal, onNewProject, canResetOrder, onResetOrder, onSettings,
     sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, openMenu, onOpenMenu, onPalette, onUsage,
-    layouts, onSaveLayout, onApplyLayout, onDeleteLayout, hot, onFocusAgent
+    layouts, onSaveLayout, onApplyLayout, onDeleteLayout, hot, onFocusAgent, onActivity
   } = props
 
   const paneFull = panes.length >= MAX_PANES
   const hasUsage = panes.some((p) => p.kind === 'usage')
+  const hasActivity = panes.some((p) => p.kind === 'activity')
   const canAdd = (kind: PaneKind) =>
     !paneFull && (!isUniqueKind(kind) || !panes.some((p) => p.kind === kind))
 
@@ -224,6 +226,13 @@ export function TopBar(props: Props) {
                 hint={hasUsage ? 'Zoom the open Usage pane' : paneFull ? 'All six panes are open' : 'Open today’s spend and local usage insights in a pane'}
                 disabled={!hasUsage && paneFull}
                 onClick={run(onUsage)}
+              />
+              <MenuItem
+                icon={<Rss strokeWidth={2} />}
+                label="Activity feed"
+                hint={hasActivity ? 'Zoom the open Activity pane' : paneFull ? 'All six panes are open' : 'What sessions asked, finished, started, and ended — in a pane'}
+                disabled={!hasActivity && paneFull}
+                onClick={run(onActivity)}
               />
               <div className="menu-sep" />
               <MenuItem icon={<Settings strokeWidth={2} />} label="Settings…" hint="Hotkey, notifications, startup, updates, hooks (Ctrl+,)" onClick={run(onSettings)} />

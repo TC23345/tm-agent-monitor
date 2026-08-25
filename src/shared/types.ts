@@ -48,6 +48,20 @@ export interface Quota {
 
 export interface UsageSample { t: number; pct: number }
 
+/** One attention-worthy moment across sessions, for the activity feed. */
+export interface ActivityEvent {
+  at: number
+  kind: 'waiting' | 'finished' | 'started' | 'ended' | 'compacted'
+  agentId: string
+  provider: ProviderId
+  project: string
+  cwd?: string
+  text?: string
+}
+
+/** A command a second instance hands the running workspace (`tm …`). */
+export type { WorkspaceCommand } from './workspaceCommand.mjs'
+
 /** Per-folder facts served on demand (`project:commands`, `git:status`). */
 export type { ProjectCommand } from './projectCommands.mjs'
 export type { GitStatus } from './gitStatus.mjs'
@@ -277,6 +291,10 @@ export interface AppSettingsPatch {
   launchAtLogin?: boolean
   mock?: boolean
   sizeMode?: SizeMode
+  /** ntfy / Pushover-style POST target for long waits; '' clears it. */
+  pushUrl?: string
+  /** Minutes a session must have waited before it is pushed (1–240). */
+  pushAfterMin?: number
 }
 
 export interface AppSettings {
@@ -290,6 +308,8 @@ export interface AppSettings {
   version: string
   /** Chrome DevTools Protocol port when launched with --remote-debugging-port. */
   debugPort?: number
+  pushUrl: string
+  pushAfterMin: number
   /** Local source checkout used by "Rebuild & relaunch" (CLAUDE_WATCH_REPO). */
   repoDir: string
   providers: Record<ProviderId, ProviderHealth>

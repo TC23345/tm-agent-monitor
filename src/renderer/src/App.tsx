@@ -16,6 +16,8 @@ import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
 import { SNIPPETS } from './snippets'
 import { NameDialog } from './NameDialog'
 import { useProjectCommands } from './useProject'
+import { ActivityPane } from './ActivityPane'
+import { isWorkspaceCommand } from '@shared/workspaceCommand.mjs'
 import { describeDigest, digestSnapshots, type Digest } from '@shared/digest.mjs'
 import type { ProjectCommand } from '@shared/types'
 import { LAYOUT_NAME_MAX, loadLayouts, panesFromLayout, saveLayouts, snapshotLayout, type LayoutMap } from './layouts'
@@ -44,7 +46,7 @@ import {
   AppWindow, ChevronDown, ChevronsDownUp, Sunrise, ChevronsUpDown, Code2, Coins, Columns3, Eraser, ExternalLink, Filter,
   BellRing, Code2 as CursorIcon, Copy, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
   PanelLeft, PanelRight, Power, RotateCcw, Ruler, Save, Shrink, SquareSlash, SquareSplitHorizontal, SquareTerminal,
-  Play, Terminal, Trash2, X
+  Play, Rss, Terminal, Trash2, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
 
@@ -284,6 +286,25 @@ export function App() {
     return () => window.removeEventListener('keydown', listener, true)
   }, [])
 
+  // `tm …` from a terminal or keybind: main validated the argv, the renderer
+  // validates the shape again, then runs the same handlers the palette does.
+  const commandRef = useRef<(c: unknown) => void>(() => {})
+  commandRef.current = (raw: unknown) => {
+    if (!isWorkspaceCommand(raw)) return
+    switch (raw.kind) {
+      case 'palette': setPalette(true); break
+      case 'usage': openUsage(); break
+      case 'activity': openActivity(); break
+      case 'layout': applyLayout(raw.name); break
+      case 'open':
+        if (panes.length >= MAX_PANES) { window.watch.openTerminal(raw.cwd, raw.launch); break }
+        addPane('terminal', { launch: raw.launch, cwd: raw.cwd, label: raw.cwd ? raw.cwd.split(/[\\/]/).pop() : undefined, initialCommand: raw.command })
+        break
+      case 'show': case 'hide': break // handled in main
+    }
+  }
+  useEffect(() => window.watch.onCommand((c) => commandRef.current(c)), [])
+
   // The digest strip clears itself; nothing should nag.
   useEffect(() => {
     if (!digest) return
@@ -434,15 +455,26 @@ export function App() {
     }
   }
 
-  /** User → Usage: open the pane, or bring the open one forward. `addPane`
-   * already refuses a full grid; a lone pane has nothing to zoom over. */
-  const openUsage = () => {
-    const existing = panes.find((p) => p.kind === 'usage')
+  /** User → Usage / Activity: open the unique pane, or bring the open one
+   * forward. `addPane` already refuses a full grid; a lone pane has nothing
+   * to zoom over. */
+  const openUnique = (kind: PaneKind) => {
+    const existing = panes.find((p) => p.kind === kind)
     if (!existing) {
-      addPane('usage')
+      addPane(kind)
       return
     }
     if (panes.length > 1) setZoom(existing.id)
+  }
+  const openUsage = () => openUnique('usage')
+  const openActivity = () => openUnique('activity')
+
+  /** The agent a feed row or chip points at: its pane when it has one, else its window. */
+  const focusAgentAnywhere = (id: string) => {
+    const agent = agents.find((a) => a.id === id)
+    const pane = agent ? paneForAgent(panes, agent) : null
+    if (pane) focusPane(pane.id)
+    else window.watch.focusAgent(id)
   }
 
   /** Layouts: a named snapshot of panes, sizes, sidebar views, and columns.
@@ -539,6 +571,8 @@ export function App() {
         return <LauncherPane context={context} onNewProject={() => setNewProjectOpen(true)} onEmbedTerminal={newTerminal} commands={projectCommands} onRunCommand={runProjectCommand} />
       case 'usage':
         return <UsagePane usage={snap?.usage} />
+      case 'activity':
+        return <ActivityPane onFocusAgent={focusAgentAnywhere} />
       case 'terminal':
         return (
           <TerminalPane
@@ -752,6 +786,12 @@ export function App() {
     cmd('chrome', 'Open Chrome', () => window.watch.openChrome(), { icon: <Globe strokeWidth={2} />, keywords: ['browser'] })
     cmd('new-project', 'New project…', () => setNewProjectOpen(true), { icon: <FolderPlus strokeWidth={2} /> })
     cmd('projects-dir', 'Open Projects folder', () => window.watch.openProjectsDir(), { icon: <Folder strokeWidth={2} />, keywords: ['explorer'] })
+    const hasActivity = panes.some((p) => p.kind === 'activity')
+    cmd('activity', 'Activity feed', openActivity, {
+      icon: <Rss strokeWidth={2} />,
+      keywords: ['events', 'timeline', 'questions', 'history', 'log'],
+      detail: hasActivity ? 'zoom the open pane' : full ? 'all six panes are open' : undefined
+    })
     const hasUsage = panes.some((p) => p.kind === 'usage')
     cmd('usage', 'Usage: spend & insights', openUsage, {
       icon: <Coins strokeWidth={2} />,
@@ -877,17 +917,13 @@ export function App() {
         onOpenMenu={setOpenMenu}
         onPalette={() => setPalette((v) => !v)}
         onUsage={openUsage}
+        onActivity={openActivity}
         layouts={layoutNames}
         onSaveLayout={() => setLayoutDialog(true)}
         onApplyLayout={applyLayout}
         onDeleteLayout={deleteLayout}
         hot={hot}
-        onFocusAgent={(id) => {
-          const agent = agents.find((a) => a.id === id)
-          const pane = agent ? paneForAgent(panes, agent) : null
-          if (pane) focusPane(pane.id)
-          else window.watch.focusAgent(id)
-        }}
+        onFocusAgent={focusAgentAnywhere}
       />
 
       {digest && (

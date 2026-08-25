@@ -165,6 +165,15 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             </div>
 
             <div className="srow">
+              <span className="slabel">Phone push<span className="shint">POST a waiting session's question to an ntfy / Pushover URL</span></span>
+              <TextSetting value={s.pushUrl} placeholder="https://ntfy.sh/your-topic" onCommit={(v) => apply({ pushUrl: v })} validate={(v) => (v === '' || /^https?:\/\/\S+$/.test(v) ? null : 'Needs an http(s) URL')} testId="push-url" />
+            </div>
+            <div className="srow">
+              <span className="slabel">Push after<span className="shint">minutes a session has waited before it is pushed</span></span>
+              <TextSetting value={String(s.pushAfterMin)} placeholder="10" width={70} onCommit={(v) => { const n = Number(v); if (Number.isInteger(n) && n >= 1 && n <= 240) apply({ pushAfterMin: n }) }} validate={(v) => (/^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 240 ? null : '1–240')} testId="push-after" />
+            </div>
+
+            <div className="srow">
               <span className="slabel">Mock data<span className="shint">sample data for previewing</span></span>
               <Toggle on={s.mock} onClick={() => apply({ mock: !s.mock })} />
             </div>
@@ -268,5 +277,40 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         )}
       </div>
     </div>
+  )
+}
+
+/** A text setting that commits on Enter or blur, and never sends an invalid value. */
+function TextSetting({ value, placeholder, onCommit, validate, width, testId }: {
+  value: string
+  placeholder?: string
+  onCommit: (value: string) => void
+  validate?: (value: string) => string | null
+  width?: number
+  testId?: string
+}) {
+  const [draft, setDraft] = useState(value)
+  useEffect(() => { setDraft(value) }, [value])
+  const error = validate?.(draft.trim()) ?? null
+  const commit = () => {
+    const next = draft.trim()
+    if (error || next === value) return
+    onCommit(next)
+  }
+  return (
+    <span className="sinput-wrap">
+      <input
+        className={`sinput ${error ? 'is-invalid' : ''}`}
+        style={width ? { width } : undefined}
+        value={draft}
+        placeholder={placeholder}
+        spellCheck={false}
+        title={error ?? undefined}
+        data-testid={testId}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') { commit(); (e.target as HTMLInputElement).blur() } }}
+      />
+    </span>
   )
 }
