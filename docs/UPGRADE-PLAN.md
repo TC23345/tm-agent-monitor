@@ -32,7 +32,7 @@
 | O4 ✅ | **Register the keyboard listener once**, behind a ref. | Hygiene; removes a per-render allocation from O1's hot path. | `App.tsx` |
 | O5 ✅ | **Make pane/sidebar persistence testable.** Move `sanitize`, `readLayout`/`writeLayout`, `readSizes`, and the sidebar migrations into `src/shared/panes.mjs` with `.d.mts` + tests; `panes.ts` becomes a thin browser wrapper. | The v1→v2 sidebar migration and the "unknown ids are dropped" rule (which the Usage pane relies on) have no test. | new `src/shared/panes.mjs` |
 | O6 ✅ | **Lazy-load xterm.** `React.lazy` the `TerminalPane` module (~40% of the ~790 KB renderer bundle). | Faster renderer boot; no visible change since the window starts hidden. Lowest payoff. | `App.tsx` (`paneBody`) |
-| O7 | **Dependency currency.** Within-major now: `electron 42.5→42.10`, `koffi 3.0.2→3.1.6`, `lucide-react 1.21→1.34`, `mongodb 7.4→7.6`. Majors as separate, packaged-and-verified steps: **Electron 44** (re-verify `node-pty`/`koffi` prebuilds, `verify-asar-deps`, MCP smoke), **React 19** (`forwardRef` → `ref` prop; `@vitejs/plugin-react 6`), **Vite 8 / TypeScript 7** (electron-vite first). `node-pty` stays on the 1.2 beta — the 1.1.0 "latest" tag is older. | Chromium patches; native ABI coupling makes Electron its own PR. | `package.json` |
+| O7 ✅ (within-major) | **Dependency currency.** Shipped 2026-08-25: `electron 42.5→42.10`, `koffi 3.0.2→3.1.6`, `lucide-react 1.21→1.34`, `mongodb 7.4→7.6`. Majors as separate, packaged-and-verified steps: **Electron 44** (re-verify `node-pty`/`koffi` prebuilds, `verify-asar-deps`, MCP smoke), **React 19** (`forwardRef` → `ref` prop; `@vitejs/plugin-react 6`), **Vite 8 / TypeScript 7** (electron-vite first). `node-pty` stays on the 1.2 beta — the 1.1.0 "latest" tag is older. | Chromium patches; native ABI coupling makes Electron its own PR. | `package.json` |
 
 ## Features F1–F10 — surfacing what the app already collects
 
@@ -92,7 +92,7 @@ hours-long sessions reaches for.
 2. ✅ **Reports and launch** — F1, F5, F9, F17 (`0fd70c5`).
 3. ✅ **Talk back** — F14, F18, F15, F16 (`231aeb9`).
 4. ✅ **Feed and outside world** — F4, F19, F12.
-5. ✅ (part) **Agents and hygiene** — O5, O6, F11. **Open** — F6 terminal tabs, F7 launch profiles, F10 multi-machine, O7 (dependency majors).
+5. ✅ (part) **Agents and hygiene** — O5, O6, F11, O7 within-major bumps. **Open** — F6 terminal tabs, F7 launch profiles, F10 multi-machine, O7 majors (Electron 44, React 19, Vite 8 / TS 7).
 
 ### What sprint 5 needs that the others did not
 
