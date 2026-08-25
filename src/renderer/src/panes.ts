@@ -1,6 +1,19 @@
 import { Activity, AppWindow, Coins, Rss, SquareTerminal, Terminal } from 'lucide-react'
 import type { TerminalLaunch } from '@shared/types'
 import type { SizeBucket } from '@shared/layout.mjs'
+import {
+  emptySizes as emptySizesShared, readAllSizes, readPaneCols, sanitizeCollapsed, sanitizePanes, sanitizeSidebarViews,
+  type Sizes
+} from '@shared/panes.mjs'
+
+/** localStorage JSON, or null — every reader here tolerates null. */
+function readJson(key: string): unknown {
+  try {
+    return JSON.parse(localStorage.getItem(key) ?? 'null')
+  } catch {
+    return null
+  }
+}
 
 /**
  * The main frame belongs to work: the launcher, embedded terminal sessions,
@@ -52,52 +65,13 @@ export function isUniqueKind(kind: PaneKind): boolean {
 
 const STORAGE_KEY = 'tm.panes.v2'
 
-function isPaneKind(value: unknown): value is PaneKind {
-  return PANE_KINDS.some((p) => p.id === value)
-}
-
-function sanitize(raw: unknown): PaneInstance[] {
-  if (!Array.isArray(raw)) return []
-  const out: PaneInstance[] = []
-  const seen = new Set<PaneKind>()
-  for (const item of raw) {
-    if (typeof item !== 'object' || item === null) continue
-    const { id, kind, term } = item as Partial<PaneInstance>
-    if (typeof id !== 'string' || !isPaneKind(kind)) continue
-    if (isUniqueKind(kind)) {
-      if (seen.has(kind)) continue
-      seen.add(kind)
-    }
-    if (kind === 'terminal') {
-      const launch = term?.launch === 'claude' || term?.launch === 'codex' ? term.launch : 'shell'
-      out.push({
-        id,
-        kind,
-        term: {
-          launch,
-          cwd: typeof term?.cwd === 'string' ? term.cwd : undefined,
-          label: typeof term?.label === 'string' ? term.label : undefined,
-          sessionId: typeof term?.sessionId === 'string' ? term.sessionId : undefined,
-          initialCommand: typeof term?.initialCommand === 'string' ? term.initialCommand : undefined
-        }
-      })
-    } else {
-      out.push({ id, kind })
-    }
-    if (out.length === MAX_PANES) break
-  }
-  return out
-}
+const PANE_KIND_IDS = PANE_KINDS.map((p) => p.id)
 
 export function loadPanes(): PaneInstance[] {
-  try {
-    // Older layouts stored data-view kinds here; sanitize drops them (they moved
-    // to the sidebar) and an emptied layout falls back to the default.
-    const panes = sanitize(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null'))
-    return panes.length ? panes : defaultPanes()
-  } catch {
-    return defaultPanes()
-  }
+  // Parsing lives in @shared/panes.mjs (tested): retired kinds drop, unique
+  // kinds dedupe, and an emptied layout falls back to the default.
+  const panes = sanitizePanes(readJson(STORAGE_KEY), { kinds: PANE_KIND_IDS, isUnique: isUniqueKind, maxPanes: MAX_PANES })
+  return panes.length ? panes : defaultPanes()
 }
 
 export function savePanes(panes: PaneInstance[]): void {
@@ -134,26 +108,12 @@ const SIDEBAR_KEY = 'tm.sidebar.v2'
 const LEGACY_SIDEBAR_KEY = 'tm.sidebar.v1'
 const DEFAULT_SIDEBAR: SidebarView[] = ['windows', 'limits']
 
-function isSidebarView(value: unknown): value is SidebarView {
-  return SIDEBAR_VIEWS.some((v) => v.id === value)
-}
+const SIDEBAR_IDS = SIDEBAR_VIEWS.map((v) => v.id)
 
 export function loadSidebarViews(): SidebarView[] {
-  try {
-    const raw = JSON.parse(localStorage.getItem(SIDEBAR_KEY) ?? 'null')
-    if (Array.isArray(raw)) return [...new Set(raw.filter(isSidebarView))]
-    // One-time v1 migration: keep the user's toggles but surface the new
-    // collapsed Open windows section once. Hiding it again sticks (v2).
-    const legacy = JSON.parse(localStorage.getItem(LEGACY_SIDEBAR_KEY) ?? 'null')
-    if (Array.isArray(legacy)) {
-      const views = [...new Set(legacy.filter(isSidebarView))]
-      if (!views.includes('windows')) views.push('windows')
-      return views
-    }
-    return [...DEFAULT_SIDEBAR]
-  } catch {
-    return [...DEFAULT_SIDEBAR]
-  }
+  // v2 wins; v1 migrates once (keeping the toggles, surfacing Open windows);
+  // ids no longer in the catalog fall out — that is how a retired view goes.
+  return sanitizeSidebarViews(readJson(SIDEBAR_KEY), readJson(LEGACY_SIDEBAR_KEY), { ids: SIDEBAR_IDS, defaults: DEFAULT_SIDEBAR })
 }
 
 export function saveSidebarViews(views: SidebarView[]): void {
@@ -170,13 +130,7 @@ const COLLAPSED_KEY = 'tm.sidebar.collapsed.v1'
 const DEFAULT_COLLAPSED: SidebarView[] = ['windows']
 
 export function loadSidebarCollapsed(): SidebarView[] {
-  try {
-    const raw = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? 'null')
-    if (!Array.isArray(raw)) return [...DEFAULT_COLLAPSED]
-    return [...new Set(raw.filter(isSidebarView))]
-  } catch {
-    return [...DEFAULT_COLLAPSED]
-  }
+  return sanitizeCollapsed(readJson(COLLAPSED_KEY), { ids: SIDEBAR_IDS, defaults: DEFAULT_COLLAPSED })
 }
 
 export function saveSidebarCollapsed(views: SidebarView[]): void {
@@ -201,12 +155,8 @@ export type PaneFractions = Record<string, number[]>
 const LAYOUT_KEY = 'tm.layout.v1'
 
 function readLayout(): Record<string, unknown> {
-  try {
-    const raw = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? 'null')
-    return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
-  } catch {
-    return {}
-  }
+  const raw = readJson(LAYOUT_KEY)
+  return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
 }
 
 function writeLayout(patch: Record<string, unknown>): void {
@@ -218,8 +168,7 @@ function writeLayout(patch: Record<string, unknown>): void {
 }
 
 export function loadPaneCols(): PaneCols {
-  const cols = readLayout().cols
-  return cols === 1 || cols === 2 || cols === 3 || cols === 'auto' ? cols : 'auto'
+  return readPaneCols(readLayout())
 }
 
 export function savePaneCols(cols: PaneCols): void {
@@ -230,49 +179,18 @@ export function savePaneCols(cols: PaneCols): void {
  * at half the width, and the transient Alt+Q half view must not overwrite it.
  * `sidebar` stays null until dragged, so an untouched sidebar keeps following
  * the responsive default instead of freezing today's number into storage. */
-export interface PaneSizes {
-  sidebar: number | null
-  cols: PaneFractions
-  rows: PaneFractions
-}
+export type PaneSizes = Sizes
 
 export type AllSizes = Record<SizeBucket, PaneSizes>
 
 export function emptySizes(): PaneSizes {
-  return { sidebar: null, cols: {}, rows: {} }
-}
-
-function readFractions(raw: unknown): PaneFractions {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
-  const out: PaneFractions = {}
-  for (const [count, list] of Object.entries(raw as Record<string, unknown>)) {
-    if (!/^[1-9]\d*$/.test(count) || !Array.isArray(list)) continue
-    if (list.every((n) => typeof n === 'number' && Number.isFinite(n) && n > 0)) out[count] = list as number[]
-  }
-  return out
-}
-
-function readWidth(raw: unknown): number | null {
-  return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : null
-}
-
-function readSizes(raw: unknown): PaneSizes {
-  if (typeof raw !== 'object' || raw === null) return emptySizes()
-  const { sidebar, cols, rows } = raw as Record<string, unknown>
-  return { sidebar: readWidth(sidebar), cols: readFractions(cols), rows: readFractions(rows) }
+  return emptySizesShared()
 }
 
 export function loadSizes(): AllSizes {
-  const stored = readLayout()
-  const buckets = stored.sizes
-  if (typeof buckets === 'object' && buckets !== null) {
-    const { full, half } = buckets as Record<string, unknown>
-    return { full: readSizes(full), half: readSizes(half) }
-  }
-  // Pre-bucket layouts held one set of sizes at the top level. The user sized
-  // whichever view they were in; seeding both beats discarding the drag.
-  const legacy: PaneSizes = { sidebar: readWidth(stored.sidebar), cols: readFractions(stored.fracs), rows: {} }
-  return { full: legacy, half: { ...legacy, cols: { ...legacy.cols } } }
+  // Bucketed sizes, or a pre-bucket layout seeding both buckets — see
+  // readAllSizes in @shared/panes.mjs.
+  return readAllSizes(readLayout())
 }
 
 export function saveSizes(sizes: AllSizes): void {

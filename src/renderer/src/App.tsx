@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { SizeMode, StatusSnapshot, TerminalLaunch } from '@shared/types'
 import { UsageDashboard } from './UsageDashboard'
 import { ProjectGroup } from './ProjectGroup'
@@ -11,7 +11,10 @@ import { COLLAPSE_ALL_EVENT } from './useCollapse'
 import { UsagePane } from './UsagePane'
 import { TopBar, type MenuName } from './TopBar'
 import { Pane } from './Pane'
-import { TerminalPane, type TerminalPaneHandle } from './TerminalPane'
+import type { TerminalPaneHandle } from './TerminalPane'
+// xterm and its addon are ~40% of the renderer bundle; a workspace with no
+// terminal pane never parses them. The ref still reaches the real component.
+const TerminalPane = lazy(() => import('./TerminalPane').then((m) => ({ default: m.TerminalPane })))
 import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
 import { SNIPPETS } from './snippets'
 import { NameDialog } from './NameDialog'
@@ -364,7 +367,7 @@ export function App() {
     setAllCollapsed(next)
     window.dispatchEvent(new CustomEvent(COLLAPSE_ALL_EVENT, { detail: next }))
   }
-  const health = { providers: snap?.providers, mock: !!snap?.mock, version: appInfo.version }
+  const health = { providers: snap?.providers, mock: !!snap?.mock }
   const noHooks = !!snap && !snap.mock && Object.values(snap.providers).every((h) => !h.reporting)
 
   const agentList = !snap ? (
@@ -575,14 +578,16 @@ export function App() {
         return <ActivityPane onFocusAgent={focusAgentAnywhere} />
       case 'terminal':
         return (
-          <TerminalPane
-            ref={(handle) => {
-              if (handle) termRefs.current.set(pane.id, handle)
-              else termRefs.current.delete(pane.id)
-            }}
-            config={pane.term!}
-            onConfig={(patch) => updateTerm(pane.id, patch)}
-          />
+          <Suspense fallback={<div className="empty">Starting terminal…</div>}>
+            <TerminalPane
+              ref={(handle) => {
+                if (handle) termRefs.current.set(pane.id, handle)
+                else termRefs.current.delete(pane.id)
+              }}
+              config={pane.term!}
+              onConfig={(patch) => updateTerm(pane.id, patch)}
+            />
+          </Suspense>
         )
     }
   }

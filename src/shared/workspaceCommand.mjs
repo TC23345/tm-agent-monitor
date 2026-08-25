@@ -73,6 +73,7 @@ export function isWorkspaceCommand(value) {
 
 export const USAGE = `tm — drive the TaylorMade Agent Monitor workspace
 
+  tm status [--json]     what is running / waiting, from the live app (no window)
   tm show | hide | palette | usage | activity
   tm open [--cwd <folder>] [--launch shell|claude|codex] [--run "<command>"]
   tm layout <name>

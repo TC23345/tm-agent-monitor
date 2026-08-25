@@ -18,12 +18,11 @@ import { tid } from './testid'
 export interface HealthInput {
   providers: Partial<Record<ProviderId, ProviderHealth>> | undefined
   mock: boolean
-  version: string | undefined
 }
 
 export function ConnChip({ health }: { health: HealthInput }) {
   const now = useNow()
-  const conn = overallStatus(health.providers, now, health.version, health.mock)
+  const conn = overallStatus(health.providers, now, health.mock)
   return (
     <span className={`conn is-${conn.state}`} title={conn.title} data-testid="conn-chip">
       <span className="conn-dot" />

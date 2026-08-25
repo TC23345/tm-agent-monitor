@@ -1448,7 +1448,7 @@ if (!gotLock) {
 
     if (process.env.CLAUDE_WATCH_SELFTEST) console.log(`[selftest] win32 native focus available: ${winAvailable()}`)
 
-    daemon = new Daemon(PORT, { token: bridgeToken() })
+    daemon = new Daemon(PORT, { token: bridgeToken(), snapshot: () => buildSnapshot() })
     const daemonStarted = await daemon.start()
     if (daemonStarted) {
       publishEndpoint()

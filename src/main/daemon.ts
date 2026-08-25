@@ -12,6 +12,9 @@ export interface DaemonOptions {
   token?: string
   maxAgents?: number
   maxBodyBytes?: number
+  /** The full StatusSnapshot (agents, usage, providers) for GET /v1/status —
+   * what the renderer sees, for a token holder such as `tm status --json`. */
+  snapshot?: () => unknown
 }
 
 /**
@@ -20,6 +23,7 @@ export interface DaemonOptions {
  * POST /report     legacy Claude compatibility payload
  * POST /v1/events  provider-neutral AgentEventV1
  * GET  /status     authenticated diagnostic snapshot
+ * GET  /v1/status  authenticated full StatusSnapshot (agents, usage, providers)
  * GET  /health     authenticated liveness diagnostic
  */
 export class Daemon {
@@ -30,11 +34,13 @@ export class Daemon {
   private readonly providerLastReportAt: Record<ProviderId, number> = { claude: 0, codex: 0, cursor: 0 }
   private readonly token: string
   private readonly maxBodyBytes: number
+  private readonly snapshotProvider?: () => unknown
 
   constructor(private port: number, options: DaemonOptions | string = {}) {
     const normalized = typeof options === 'string' ? { token: options } : options
     this.token = normalized.token?.trim() || randomBytes(32).toString('base64url')
     this.maxBodyBytes = normalized.maxBodyBytes ?? 256 * 1024
+    this.snapshotProvider = normalized.snapshot
     this.store = new AgentStore(normalized.maxAgents)
     this.server = http.createServer((req, res) => this.handle(req, res))
     this.server.on('error', (err) => {
@@ -92,7 +98,7 @@ export class Daemon {
       return this.json(res, 400, { error: 'invalid request target' })
     }
 
-    const allowedMethod = route === '/health' || route === '/status' ? 'GET'
+    const allowedMethod = route === '/health' || route === '/status' || route === '/v1/status' ? 'GET'
       : route === '/report' || route === '/v1/events' ? 'POST'
         : undefined
     if (!allowedMethod) return this.json(res, 404, { error: 'not found' })
@@ -107,6 +113,10 @@ export class Daemon {
 
     if (route === '/health') {
       return this.json(res, 200, { ok: true, schemaVersion: 1 })
+    }
+    if (route === '/v1/status') {
+      const snapshot = this.snapshotProvider?.()
+      return this.json(res, 200, snapshot ?? { agents: this.store.snapshot(), schemaVersion: 1 })
     }
     if (route === '/status') {
       return this.json(res, 200, {

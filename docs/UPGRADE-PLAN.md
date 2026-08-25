@@ -30,8 +30,8 @@
 | O2 ✅ | **Debounce layout persistence.** Trailing 200ms write, flushed on unmount, instead of a synchronous `localStorage` write per splitter `pointermove`. | Drag smoothness. | `App.tsx` |
 | O3 ✅ | **Skip no-op window-list updates.** `useDesktopWindows` keeps the previous reference when hwnd/pid/title/agent tuples are equal. | The poll is `EnumWindows` + a process snapshot; the re-render was avoidable. | `WorkspacePanes.tsx` |
 | O4 ✅ | **Register the keyboard listener once**, behind a ref. | Hygiene; removes a per-render allocation from O1's hot path. | `App.tsx` |
-| O5 | **Make pane/sidebar persistence testable.** Move `sanitize`, `readLayout`/`writeLayout`, `readSizes`, and the sidebar migrations into `src/shared/panes.mjs` with `.d.mts` + tests; `panes.ts` becomes a thin browser wrapper. | The v1→v2 sidebar migration and the "unknown ids are dropped" rule (which the Usage pane relies on) have no test. | new `src/shared/panes.mjs` |
-| O6 | **Lazy-load xterm.** `React.lazy` the `TerminalPane` module (~40% of the ~790 KB renderer bundle). | Faster renderer boot; no visible change since the window starts hidden. Lowest payoff. | `App.tsx` (`paneBody`) |
+| O5 ✅ | **Make pane/sidebar persistence testable.** Move `sanitize`, `readLayout`/`writeLayout`, `readSizes`, and the sidebar migrations into `src/shared/panes.mjs` with `.d.mts` + tests; `panes.ts` becomes a thin browser wrapper. | The v1→v2 sidebar migration and the "unknown ids are dropped" rule (which the Usage pane relies on) have no test. | new `src/shared/panes.mjs` |
+| O6 ✅ | **Lazy-load xterm.** `React.lazy` the `TerminalPane` module (~40% of the ~790 KB renderer bundle). | Faster renderer boot; no visible change since the window starts hidden. Lowest payoff. | `App.tsx` (`paneBody`) |
 | O7 | **Dependency currency.** Within-major now: `electron 42.5→42.10`, `koffi 3.0.2→3.1.6`, `lucide-react 1.21→1.34`, `mongodb 7.4→7.6`. Majors as separate, packaged-and-verified steps: **Electron 44** (re-verify `node-pty`/`koffi` prebuilds, `verify-asar-deps`, MCP smoke), **React 19** (`forwardRef` → `ref` prop; `@vitejs/plugin-react 6`), **Vite 8 / TypeScript 7** (electron-vite first). `node-pty` stays on the 1.2 beta — the 1.1.0 "latest" tag is older. | Chromium patches; native ABI coupling makes Electron its own PR. | `package.json` |
 
 ## Features F1–F10 — surfacing what the app already collects
@@ -57,7 +57,7 @@ hours-long sessions reaches for.
 
 | # | Feature | Grounded in | Effort |
 |---|---------|-------------|--------|
-| F11 | **Status API for agents.** Expose the live `StatusSnapshot` as a tiny MCP server (stdio, `tm-agent-monitor status`) or `tm status --json`, so a Claude Code session can ask *what else is running, what's waiting, which daemon/CDP ports are taken* — and avoid launching a second session in a project that already has one. | `status:get` already returns everything; the daemon already listens on loopback with a bearer token — a read-only `GET /v1/status` for holders of the token is the smallest form. | M |
+| F11 ✅ | **Status API for agents.** Expose the live `StatusSnapshot` as a tiny MCP server (stdio, `tm-agent-monitor status`) or `tm status --json`, so a Claude Code session can ask *what else is running, what's waiting, which daemon/CDP ports are taken* — and avoid launching a second session in a project that already has one. | `status:get` already returns everything; the daemon already listens on loopback with a bearer token — a read-only `GET /v1/status` for holders of the token is the smallest form. | M |
 | F12 ✅ | **Scriptable workspace.** `tm open --pane terminal --cwd … --launch claude`, `tm layout build`, or a `tm-agent://` deep link: a second instance forwards its argv to the running one (`requestSingleInstanceLock` already hands `second-instance` the argv), main forwards a validated command to the renderer, which runs the same handler the palette does. | `second-instance` event, the palette's command table, `addPane`. | M |
 | F13 ✅ | **Automation-stable targets.** `data-testid` on every interactive element (menus, palette rows, pane tools, splitters, agent rows) and a title-bar chip "CDP :9222" when main sees `--remote-debugging-port`. | The MCP loop currently targets aria-labels and class names, which drift. | S |
 | F14 ✅ | **Answer a waiting session from the monitor.** For a session running in an embedded pane (matched by cwd + provider, as in F3), the agent row's context menu gets a reply box that writes to its PTY; external sessions fall back to focus. | `question` is already on the row; `termInput(sessionId, data)` exists. | M |
@@ -92,7 +92,7 @@ hours-long sessions reaches for.
 2. ✅ **Reports and launch** — F1, F5, F9, F17 (`0fd70c5`).
 3. ✅ **Talk back** — F14, F18, F15, F16 (`231aeb9`).
 4. ✅ **Feed and outside world** — F4, F19, F12.
-5. **Open** — F6 terminal tabs, F7 launch profiles, F10 multi-machine, F11 status API, O5 (testable pane persistence), O6 (lazy xterm), O7 (dependency majors).
+5. ✅ (part) **Agents and hygiene** — O5, O6, F11. **Open** — F6 terminal tabs, F7 launch profiles, F10 multi-machine, O7 (dependency majors).
 
 ### What sprint 5 needs that the others did not
 

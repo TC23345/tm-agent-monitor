@@ -10,6 +10,12 @@
 /** A provider that was reporting and then went quiet this long is suspect. */
 export const SILENT_AFTER_MS = 10 * 60 * 1000
 
+/** The hook-bridge protocol this app speaks. `ProviderHealth.bridgeVersion`
+ * is the version the *installed* hooks carry — a schema version, not the app
+ * version — so drift means "the hooks on disk were written by an older
+ * installer": repair them. */
+export const BRIDGE_VERSION = '1'
+
 const LABEL = { claude: 'Claude Code', codex: 'Codex', cursor: 'Cursor' }
 
 export function providerLabel(provider) {
@@ -32,15 +38,16 @@ export function ago(ms) {
  * One provider's status: tone is what the chip colours, reason is the text a
  * tooltip or Settings row shows. Ordered by what the user should act on first.
  */
-export function providerStatus(health, now, appVersion, options = {}) {
+export function providerStatus(health, now, options = {}) {
   const silentAfter = options.silentAfterMs ?? SILENT_AFTER_MS
+  const expected = options.bridgeVersion ?? BRIDGE_VERSION
   const h = health ?? {}
   if (!h.installed) return { tone: 'off', reason: 'not installed' }
   if (h.needsRepair) return { tone: 'warn', reason: 'hooks need repair' }
   if (h.awaitingTrust) return { tone: 'warn', reason: 'awaiting trust review in /hooks' }
   if (typeof h.error === 'string' && h.error.trim()) return { tone: 'warn', reason: `hook error: ${h.error.trim()}` }
-  if (h.bridgeVersion && appVersion && h.bridgeVersion !== appVersion) {
-    return { tone: 'warn', reason: `bridge v${h.bridgeVersion} — app is v${appVersion}, repair the hooks` }
+  if (h.bridgeVersion && h.bridgeVersion !== expected) {
+    return { tone: 'warn', reason: `hook bridge v${h.bridgeVersion} — this app expects v${expected}, repair the hooks` }
   }
   const last = typeof h.lastReportAt === 'number' ? h.lastReportAt : null
   if (h.reporting) {
@@ -55,10 +62,10 @@ export function providerStatus(health, now, appVersion, options = {}) {
  * short-circuits to sample data. Silence and version drift surface as `warn`
  * even when every provider is otherwise reporting.
  */
-export function overallStatus(providers, now, appVersion, mock = false, options = {}) {
+export function overallStatus(providers, now, mock = false, options = {}) {
   if (mock) return { state: 'on', label: 'mock data', title: 'Showing sample (mock) data — change in Settings' }
   const entries = Object.entries(providers ?? {})
-  const statuses = entries.map(([id, h]) => [id, providerStatus(h, now, appVersion, options)])
+  const statuses = entries.map(([id, h]) => [id, providerStatus(h, now, options)])
   const reporting = statuses.filter(([, s]) => s.tone === 'on' || s.tone === 'warn').length
   const installed = entries.filter(([, h]) => h && h.installed).length
   const warn = statuses.filter(([, s]) => s.tone === 'warn')

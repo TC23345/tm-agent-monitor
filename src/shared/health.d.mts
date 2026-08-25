@@ -12,18 +12,18 @@ export interface OverallStatus {
 }
 
 export const SILENT_AFTER_MS: number
+export const BRIDGE_VERSION: string
+export interface HealthOptions {
+  silentAfterMs?: number
+  /** Override the expected hook-bridge version (tests). */
+  bridgeVersion?: string
+}
 export function providerLabel(provider: ProviderId | string): string
 export function ago(ms: number): string
-export function providerStatus(
-  health: ProviderHealth | undefined,
-  now: number,
-  appVersion: string | undefined,
-  options?: { silentAfterMs?: number }
-): ProviderStatus
+export function providerStatus(health: ProviderHealth | undefined, now: number, options?: HealthOptions): ProviderStatus
 export function overallStatus(
   providers: Partial<Record<ProviderId, ProviderHealth>> | undefined,
   now: number,
-  appVersion: string | undefined,
   mock?: boolean,
-  options?: { silentAfterMs?: number }
+  options?: HealthOptions
 ): OverallStatus
