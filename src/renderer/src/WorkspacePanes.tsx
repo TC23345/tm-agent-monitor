@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type MouseEvent } from 'react'
-import type { DesktopWindow, DesktopWindowKind, TerminalLaunch } from '@shared/types'
+import type { DesktopWindow, DesktopWindowKind, ProjectCommand, TerminalLaunch } from '@shared/types'
+import { tid } from './testid'
 import { groupWindows } from '@shared/windows.mjs'
-import { Bot, Code2, Folder, FolderPlus, Globe, RefreshCw, SquareTerminal } from 'lucide-react'
+import { Bot, Code2, Folder, FolderPlus, Globe, RefreshCw, SquareTerminal, Play } from 'lucide-react'
 import { ProviderBadge } from './ProviderBadge'
 
 /** How often the open-window list re-reads Win32 while the workspace is on screen. */
@@ -41,10 +42,13 @@ export function LaunchContextChip({ context }: { context: LaunchContext }) {
 
 /** Start a terminal, editor, or browser — in the active project or at home.
  * Terminal launches open embedded panes; Shift-click opens an external window. */
-export function LauncherPane({ context, onNewProject, onEmbedTerminal }: {
+export function LauncherPane({ context, onNewProject, onEmbedTerminal, commands = [], onRunCommand }: {
   context: LaunchContext
   onNewProject: () => void
   onEmbedTerminal: (launch: TerminalLaunch) => void
+  /** This folder's `.tm.json` commands and npm scripts, run in a new pane. */
+  commands?: ProjectCommand[]
+  onRunCommand?: (command: ProjectCommand) => void
 }) {
   const where = context.cwd ? `${context.label ?? context.cwd}` : 'your home folder'
   const inProject = ` in ${where}`
@@ -80,6 +84,25 @@ export function LauncherPane({ context, onNewProject, onEmbedTerminal }: {
           New project
         </button>
       </div>
+      {commands.length > 0 && onRunCommand && (
+        <div className="launch-cmds" data-testid="launch-commands">
+          <div className="launch-cmds-label">{context.label ?? 'Project'} commands</div>
+          <div className="launch-cmds-row">
+            {commands.map((c) => (
+              <button
+                key={c.command}
+                className={`launch-cmd ${c.source === 'tm' ? 'is-tm' : ''}`}
+                onClick={() => onRunCommand(c)}
+                title={`${c.command}\nRuns in a new terminal pane${inProject}${c.source === 'tm' ? ' · from .tm.json' : ' · npm script'}`}
+                data-testid={tid('launch-cmd', c.label)}
+              >
+                <Play className="launch-cmd-ic" strokeWidth={2} />
+                {c.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <button className="linkbtn" onClick={() => window.watch.openProjectsDir()} title="Open the Projects folder in File Explorer">
         <Folder className="launch-ic" strokeWidth={2} />
         Projects folder

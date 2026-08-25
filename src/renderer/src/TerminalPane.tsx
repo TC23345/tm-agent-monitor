@@ -102,6 +102,10 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function Termi
       pending = []
       ready = true
       onConfigRef.current({ sessionId: created.id })
+      // A project command runs once, in the new shell, after the prompt has
+      // had a moment to appear; the persisted config keeps it only as a label.
+      const first = configRef.current.initialCommand
+      if (first) window.setTimeout(() => { if (!disposed && sessionId === created.id) window.watch.termInput(created.id, `${first}\r`) }, 700)
     }
 
     const init = async () => {

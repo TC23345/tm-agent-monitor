@@ -66,7 +66,9 @@ export function AgentRow({
           provider: agent.provider,
           focusHwnd: agent.focusHwnd,
           focusPid: agent.focusPid,
-          recentQuestions: agent.recentQuestions
+          recentQuestions: agent.recentQuestions,
+          waiting: agent.state === 'waiting',
+          question: agent.question
         })
       }}
       title={rowTitle}

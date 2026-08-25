@@ -3,7 +3,8 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
+import { statSync } from 'node:fs'
 import { Daemon } from './daemon.js'
 import { TerminalManager } from './terminals.js'
 import { fetchApiUsage } from './usage.js'
@@ -17,6 +18,8 @@ import { scanUsageInsights } from './usageInsightsCore.mjs'
 import { mockSnapshot, mockHistory, mockUsageInsights, mockWindows } from './mock.js'
 import { focusHwnd, focusByPid, listDesktopWindows, available as winAvailable } from '../native/win32.mjs'
 import { buildWindowList } from '../shared/windows.mjs'
+import { parseProjectCommands } from '../shared/projectCommands.mjs'
+import { parseGitStatus, type GitStatus } from '../shared/gitStatus.mjs'
 import { estimateCostUsd } from '../shared/pricing.mjs'
 // electron-updater is CommonJS — a *named* ESM import fails at runtime ("Named
 // export 'autoUpdater' not found"), so import the default export and destructure.
@@ -1288,6 +1291,44 @@ function registerIpc(): void {
     } catch (e) {
       return { ok: false, error: (e as Error).message }
     }
+  })
+  // Per-folder facts. The folder must exist; reads are bounded; git is run
+  // with a timeout and cached so a sidebar full of projects is cheap.
+  const isDir = (p: unknown): p is string => {
+    if (typeof p !== 'string' || p.length === 0 || p.length > 4096) return false
+    try { return statSync(p).isDirectory() } catch { return false }
+  }
+  const readSmall = (p: string): string | null => {
+    try {
+      if (statSync(p).size > 256 * 1024) return null
+      return readFileSync(p, 'utf8')
+    } catch {
+      return null
+    }
+  }
+  ipcMain.handle('project:commands', (_e, cwd: unknown) => {
+    if (!isDir(cwd)) return []
+    return parseProjectCommands({ tmJson: readSmall(join(cwd, '.tm.json')), packageJson: readSmall(join(cwd, 'package.json')) })
+  })
+  const gitCache = new Map<string, { at: number; value: GitStatus | null }>()
+  const GIT_CACHE_MS = 30_000
+  ipcMain.handle('git:status', (_e, cwd: unknown): Promise<GitStatus | null> => {
+    if (!isDir(cwd)) return Promise.resolve(null)
+    const hit = gitCache.get(cwd)
+    if (hit && Date.now() - hit.at < GIT_CACHE_MS) return Promise.resolve(hit.value)
+    return new Promise((resolve) => {
+      execFile('git', ['-C', cwd, 'status', '--porcelain=v1', '-b'], { timeout: 4000, windowsHide: true, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+        let value: GitStatus | null = null
+        if (!err) {
+          value = parseGitStatus(String(stdout))
+          if (value) {
+            try { value.worktree = statSync(join(cwd, '.git')).isFile() } catch { /* not a repo root */ }
+          }
+        }
+        gitCache.set(cwd, { at: Date.now(), value })
+        resolve(value)
+      })
+    })
   })
   ipcMain.handle('history:recent', async () => {
     if (mockMode) return mockHistory()

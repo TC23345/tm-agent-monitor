@@ -6,6 +6,8 @@ import { ChevronDown, ChevronRight } from './Icons'
 import { useCollapse } from './useCollapse'
 import { modelShort } from './format'
 import { tid } from './testid'
+import { useGitStatus } from './useProject'
+import { describeGitStatus } from '@shared/gitStatus.mjs'
 
 /** A collapsible project header over its nested session rows. */
 export function ProjectGroup({
@@ -33,6 +35,8 @@ export function ProjectGroup({
     })
   }
 
+  const git = useGitStatus(group.cwd)
+  const gitText = describeGitStatus(git)
   const n = group.agents.length
   const headTitle = `${group.cwd ?? group.project}\n${n} session${n === 1 ? '' : 's'} in this project · click to collapse/expand · drag to reorder`
   // Show the model on the header only when every session here agrees on one.
@@ -45,6 +49,15 @@ export function ProjectGroup({
         <Chevron className="group-chevron" strokeWidth={2.5} />
         <span className="group-name">{group.project}</span>
         {model && <span className="group-model">{model}</span>}
+        {gitText && (
+          <span
+            className={`group-git ${git?.dirty ? 'is-dirty' : ''}`}
+            title={`${git?.worktree ? 'Linked worktree · ' : ''}branch ${git?.branch ?? '(detached)'}${git?.dirty ? ` · ${git.dirty} changed path${git.dirty === 1 ? '' : 's'}` : ' · clean'}${git?.ahead ? ` · ${git.ahead} ahead` : ''}${git?.behind ? ` · ${git.behind} behind` : ''}`}
+            data-testid="group-git"
+          >
+            {git?.worktree ? '⑂ ' : ''}{gitText}
+          </span>
+        )}
         {group.needsInput > 0 && (
           <span className="group-dot" title={`${group.needsInput} session${group.needsInput === 1 ? '' : 's'} here waiting for your input`} />
         )}

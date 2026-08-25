@@ -15,6 +15,9 @@ import { TerminalPane, type TerminalPaneHandle } from './TerminalPane'
 import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
 import { SNIPPETS } from './snippets'
 import { NameDialog } from './NameDialog'
+import { useProjectCommands } from './useProject'
+import { describeDigest, digestSnapshots, type Digest } from '@shared/digest.mjs'
+import type { ProjectCommand } from '@shared/types'
 import { LAYOUT_NAME_MAX, loadLayouts, panesFromLayout, saveLayouts, snapshotLayout, type LayoutMap } from './layouts'
 import { tid } from './testid'
 import { nextWaiting, paneForAgent, waitingAgents, waitingFirst } from '@shared/attention.mjs'
@@ -38,10 +41,10 @@ import {
   type LaunchContext
 } from './WorkspacePanes'
 import {
-  AppWindow, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Coins, Columns3, Eraser, ExternalLink, Filter,
+  AppWindow, ChevronDown, ChevronsDownUp, Sunrise, ChevronsUpDown, Code2, Coins, Columns3, Eraser, ExternalLink, Filter,
   BellRing, Code2 as CursorIcon, Copy, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
   PanelLeft, PanelRight, Power, RotateCcw, Ruler, Save, Shrink, SquareSlash, SquareSplitHorizontal, SquareTerminal,
-  Terminal, Trash2, X
+  Play, Terminal, Trash2, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
 
@@ -70,6 +73,10 @@ export function App() {
   const [layouts, setLayouts] = useState<LayoutMap>(loadLayouts)
   const [layoutDialog, setLayoutDialog] = useState(false)
   const [gridDropHot, setGridDropHot] = useState(false)
+  // "While you were away": the snapshot at hide, diffed against the one at summon.
+  const away = useRef<{ at: number; snap: StatusSnapshot | null } | null>(null)
+  const snapRef = useRef<StatusSnapshot | null>(null)
+  const [digest, setDigest] = useState<Digest | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -131,6 +138,7 @@ export function App() {
     const off = window.watch.onStatus(setSnap)
     return off
   }, [])
+  snapRef.current = snap
 
   useEffect(() => savePanes(panes), [panes])
   useEffect(() => saveSidebarViews(sidebarViews), [sidebarViews])
@@ -187,8 +195,19 @@ export function App() {
   useEffect(() => {
     const raf = requestAnimationFrame(() => setOpen(true))
     const off = window.watch.onWindowPhase((phase) => {
-      if (phase === 'exit') setOpen(false)
-      else requestAnimationFrame(() => setOpen(true))
+      if (phase === 'exit') {
+        setOpen(false)
+        away.current = { at: Date.now(), snap: snapRef.current }
+      } else {
+        requestAnimationFrame(() => setOpen(true))
+        const gone = away.current
+        away.current = null
+        // Only a real absence earns a strip; a quick flip is not "away".
+        if (gone && Date.now() - gone.at > 60_000) {
+          const d = digestSnapshots(gone.snap, snapRef.current, Date.now() - gone.at)
+          setDigest(d.empty ? null : d)
+        }
+      }
     })
     return () => {
       cancelAnimationFrame(raf)
@@ -264,6 +283,13 @@ export function App() {
     window.addEventListener('keydown', listener, true)
     return () => window.removeEventListener('keydown', listener, true)
   }, [])
+
+  // The digest strip clears itself; nothing should nag.
+  useEffect(() => {
+    if (!digest) return
+    const t = window.setTimeout(() => setDigest(null), 30_000)
+    return () => window.clearTimeout(t)
+  }, [digest])
 
   // The palette lists open windows: refresh once per open rather than polling.
   useEffect(() => {
@@ -455,6 +481,13 @@ export function App() {
   const hotAgents = agents.filter((a) => !a.parentId && a.contextRising && (a.contextPct ?? 0) >= 85)
   const hot = hotAgents.map((a) => ({ id: a.id, project: a.project, pct: Math.round(a.contextPct ?? 0) }))
 
+  /** This folder's commands (`.tm.json`, npm scripts) run in a fresh pane. */
+  const projectCommands = useProjectCommands(context.cwd)
+  const runProjectCommand = (command: ProjectCommand) => {
+    if (panes.length >= MAX_PANES) return
+    addPane('terminal', { launch: 'shell', cwd: context.cwd, label: context.label, initialCommand: command.command })
+  }
+
   /** A project group dropped on the grid: a shell there (Shift for Claude Code). */
   const dropProject = (key: string, claude: boolean) => {
     const group = groups.find((g) => g.key === key)
@@ -503,7 +536,7 @@ export function App() {
   const paneBody = (pane: PaneInstance) => {
     switch (pane.kind) {
       case 'launcher':
-        return <LauncherPane context={context} onNewProject={() => setNewProjectOpen(true)} onEmbedTerminal={newTerminal} />
+        return <LauncherPane context={context} onNewProject={() => setNewProjectOpen(true)} onEmbedTerminal={newTerminal} commands={projectCommands} onRunCommand={runProjectCommand} />
       case 'usage':
         return <UsagePane usage={snap?.usage} />
       case 'terminal':
@@ -754,6 +787,11 @@ export function App() {
       cmd(`cols-${c}`, `Columns: ${c === 'auto' ? 'Auto' : c}`, () => setPaneCols(c), { icon: <Columns3 strokeWidth={2} />, detail: paneCols === c ? 'current' : undefined, keywords: ['grid', 'layout'] })
     }
     if (sized) cmd('reset-sizes', 'Reset pane sizes', resetSizes, { icon: <Ruler strokeWidth={2} />, keywords: ['layout', 'splitter'] })
+    if (!full) {
+      for (const c of projectCommands) {
+        cmd(`run:${c.command}`, `Run: ${c.label}`, () => runProjectCommand(c), { icon: <Play strokeWidth={2} />, detail: `${c.command} · ${context.label ?? 'this folder'}`, keywords: ['project', 'script', 'npm', c.command] })
+      }
+    }
     cmd('save-layout', 'Save current layout…', () => setLayoutDialog(true), { icon: <Save strokeWidth={2} />, keywords: ['workspace', 'preset'] })
     for (const name of layoutNames) {
       cmd(`layout:${name}`, `Layout: ${name}`, () => applyLayout(name), { icon: <LayoutTemplate strokeWidth={2} />, keywords: ['workspace', 'preset', 'apply'] })
@@ -851,6 +889,19 @@ export function App() {
           else window.watch.focusAgent(id)
         }}
       />
+
+      {digest && (
+        <div className="digest" role="status" data-testid="digest">
+          <Sunrise className="digest-ic" strokeWidth={2} />
+          <span className="digest-text">While you were away — {describeDigest(digest)}</span>
+          {digest.waiting[0] && (
+            <button className="digest-link" onClick={() => { setDigest(null); routeToWaiting() }}>Go to {digest.waiting[0].project}</button>
+          )}
+          <button className="iconbtn iconbtn--sm" onClick={() => setDigest(null)} title="Dismiss" aria-label="Dismiss digest">
+            <X className="gear gear--sm" strokeWidth={2} />
+          </button>
+        </div>
+      )}
 
       <div className="frame" ref={frameRef}>
         <aside className="sidebar" style={{ flexBasis: sidebarWidth }}>
@@ -1021,7 +1072,16 @@ export function App() {
           onClose={() => setLayoutDialog(false)}
         />
       )}
-      {menu && <AgentContextMenu menu={menu} onClose={() => setMenu(null)} />}
+      {menu && (
+        <AgentContextMenu
+          menu={menu}
+          onClose={() => setMenu(null)}
+          replySession={(() => {
+            const agent = agents.find((a) => a.id === menu.id)
+            return agent ? paneForAgent(panes, agent)?.term?.sessionId : undefined
+          })()}
+        />
+      )}
     </div>
   )
 }

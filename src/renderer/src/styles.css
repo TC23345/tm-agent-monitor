@@ -555,6 +555,55 @@ kbd {
 .gpane-tools .menu-wrap { display: inline-flex; }
 .gpane-tools .menu-pop { left: auto; right: 0; top: calc(100% + 8px); }
 
+/* ---- away digest: one dismissable line under the title bar ---- */
+.digest {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--hairline);
+  background: rgba(217, 119, 87, 0.08);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.digest-ic { width: 14px; height: 14px; color: var(--accent-bright); flex: 0 0 auto; }
+.digest-text { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.digest-link { border: 0; background: transparent; color: var(--accent-bright); font: inherit; cursor: pointer; padding: 0 4px; }
+.digest-link:hover { text-decoration: underline; }
+/* Git state on a project header; dirty paths turn it amber. */
+.group-git { font-size: 11px; font-weight: 600; color: var(--faint); letter-spacing: 0.2px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.group-git.is-dirty { color: var(--st-permission); }
+/* Project commands under the launch buttons. */
+.launch-cmds { margin-top: 12px; }
+.launch-cmds-label { font-size: 11px; font-weight: 750; letter-spacing: 0.9px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.launch-cmds-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.launch-cmd {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background-color 100ms ease, border-color 100ms ease;
+}
+.launch-cmd:hover { background: var(--elev); border-color: var(--border); }
+.launch-cmd.is-tm { border-color: rgba(217, 119, 87, 0.4); }
+.launch-cmd-ic { width: 12px; height: 12px; color: var(--muted); }
+/* Reply box at the top of a waiting session's context menu. */
+.ctxmenu-reply { padding: 8px 10px 10px; border-bottom: 1px solid var(--hairline); margin-bottom: 4px; }
+.ctxmenu-reply-q { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; margin-bottom: 6px; }
+.ctxmenu-reply-row { display: flex; gap: 6px; }
+.ctxmenu-reply-input { flex: 1 1 auto; min-width: 0; padding: 5px 8px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 12.5px; }
+.ctxmenu-reply-input:focus { outline: none; border-color: var(--accent); }
+.ctxmenu-reply-send { padding: 5px 10px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.ctxmenu-reply-send:disabled { opacity: 0.45; cursor: default; }
+
 /* ---- history: thirty stacked bars, then the model mix ---- */
 .hist { display: flex; flex-direction: column; gap: 10px; }
 .hist-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }

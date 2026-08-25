@@ -14,10 +14,26 @@ export interface MenuState {
   focusPid?: number
   /** Recent questions this session raised (newest first). */
   recentQuestions?: { text: string; at: number }[]
+  /** Waiting on the user right now, and for what. */
+  waiting?: boolean
+  question?: string
 }
 
 /** Right-click actions for a session row. Closes on action, click-outside, Esc. */
-export function AgentContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => void }) {
+export function AgentContextMenu({ menu, onClose, replySession }: {
+  menu: MenuState
+  onClose: () => void
+  /** The embedded terminal session this agent runs in, when it has one —
+   * then a reply can be typed straight into it from here. */
+  replySession?: string
+}) {
+  const [reply, setReply] = useState('')
+  const canReply = !!replySession && !!menu.waiting
+  const sendReply = () => {
+    if (!replySession || !reply.trim()) return
+    window.watch.termInput(replySession, `${reply}\r`)
+    onClose()
+  }
   const overlayRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ x: menu.x, y: menu.y })
@@ -78,6 +94,26 @@ export function AgentContextMenu({ menu, onClose }: { menu: MenuState; onClose: 
         style={{ left: pos.x, top: pos.y }}
         onClick={(e) => e.stopPropagation()}
       >
+        {canReply && (
+          <div className="ctxmenu-reply" data-testid="ctxmenu-reply">
+            <div className="ctxmenu-reply-q" title={menu.question}>{menu.question ?? 'Waiting for input'}</div>
+            <div className="ctxmenu-reply-row">
+              <input
+                autoFocus
+                className="ctxmenu-reply-input"
+                placeholder="Type a reply — Enter sends it to the pane"
+                value={reply}
+                spellCheck={false}
+                onChange={(e) => setReply(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') sendReply()
+                  e.stopPropagation()
+                }}
+              />
+              <button className="ctxmenu-reply-send" onClick={sendReply} disabled={!reply.trim()} title="Send to the session's terminal pane">Send</button>
+            </div>
+          </div>
+        )}
         <button
           className="ctxmenu-item"
           onClick={focusTerminal}

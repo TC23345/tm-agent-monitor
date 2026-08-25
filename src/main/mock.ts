@@ -129,10 +129,10 @@ export function mockSnapshot(): StatusSnapshot {
         since: ago(6 * 60_000), updatedAt: now
       },
       {
-        id: 'claude:a3', provider: 'claude', rawSessionId: 'a3', project: 'claude-watch', cwd: 'C:\\Projects\\claude-watch', state: 'running', tool: 'edit',
+        id: 'claude:a3', provider: 'claude', rawSessionId: 'a3', project: 'claude-watch', cwd: process.cwd(), state: 'running', tool: 'edit',
         activity: 'editing StatusModel.swift', contextPct: 92, contextRising: true,
         tokensOut: 96_500, costUsd: 5.4, model: 'claude-opus-4-8', activeTasks: 2,
-        since: ago(2 * 60_000), updatedAt: now
+        since: ago(2 * 60_000), updatedAt: now + 1
       },
       {
         id: 'codex:a4', provider: 'codex', rawSessionId: 'a4', project: 'growth-saloon', state: 'running', tool: 'bash',
@@ -156,7 +156,7 @@ export function mockSnapshot(): StatusSnapshot {
         activity: 'idle', contextPct: 12, since: ago(15 * 60_000), updatedAt: now
       },
       {
-        id: 'claude:a3:child-1', provider: 'claude', rawSessionId: 'a3', parentId: 'claude:a3', actorId: 'child-1', project: 'claude-watch', cwd: 'C:\\Projects\\claude-watch', state: 'running', tool: 'search', activity: 'reviewing reducer tests', since: ago(40_000), updatedAt: now
+        id: 'claude:a3:child-1', provider: 'claude', rawSessionId: 'a3', parentId: 'claude:a3', actorId: 'child-1', project: 'claude-watch', cwd: process.cwd(), state: 'running', tool: 'search', activity: 'reviewing reducer tests', since: ago(40_000), updatedAt: now
       }
     ]
   }

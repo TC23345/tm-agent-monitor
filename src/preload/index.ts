@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { StatusSnapshot, AppSettings, AppSettingsPatch, DailyUsageDay, DesktopWindow, ProviderId, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights } from '../shared/types.js'
+import type { StatusSnapshot, AppSettings, AppSettingsPatch, DailyUsageDay, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights } from '../shared/types.js'
 
 const api = {
   getStatus: (): Promise<StatusSnapshot> => ipcRenderer.invoke('status:get'),
@@ -59,6 +59,9 @@ const api = {
     ipcRenderer.invoke('project:create', name),
   hide: () => ipcRenderer.send('window:hide'),
   getHistory: (): Promise<DailyUsageDay[]> => ipcRenderer.invoke('history:recent'),
+  /** Per-folder facts: `.tm.json` + package.json scripts, and git branch/dirty state. */
+  getProjectCommands: (cwd: string): Promise<ProjectCommand[]> => ipcRenderer.invoke('project:commands', cwd),
+  getGitStatus: (cwd: string): Promise<GitStatus | null> => ipcRenderer.invoke('git:status', cwd),
   getUsageInsights: (): Promise<UsageInsights> => ipcRenderer.invoke('usage:insights'),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
   diagnoseSystem: (id?: string): Promise<SystemDiagnostic[]> => ipcRenderer.invoke('system:diagnose', id),

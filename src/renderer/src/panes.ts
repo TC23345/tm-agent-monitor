@@ -17,6 +17,9 @@ export interface TerminalPaneConfig {
   cwd?: string
   label?: string
   sessionId?: string
+  /** Typed into a freshly created shell once it is up (a project command).
+   * Never replayed on reattach — the command already ran. */
+  initialCommand?: string
 }
 
 export interface PaneInstance {
@@ -73,7 +76,8 @@ function sanitize(raw: unknown): PaneInstance[] {
           launch,
           cwd: typeof term?.cwd === 'string' ? term.cwd : undefined,
           label: typeof term?.label === 'string' ? term.label : undefined,
-          sessionId: typeof term?.sessionId === 'string' ? term.sessionId : undefined
+          sessionId: typeof term?.sessionId === 'string' ? term.sessionId : undefined,
+          initialCommand: typeof term?.initialCommand === 'string' ? term.initialCommand : undefined
         }
       })
     } else {

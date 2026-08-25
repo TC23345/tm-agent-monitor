@@ -48,6 +48,10 @@ export interface Quota {
 
 export interface UsageSample { t: number; pct: number }
 
+/** Per-folder facts served on demand (`project:commands`, `git:status`). */
+export type { ProjectCommand } from './projectCommands.mjs'
+export type { GitStatus } from './gitStatus.mjs'
+
 export interface ProjectUsage {
   project: string
   tokensOut: number
