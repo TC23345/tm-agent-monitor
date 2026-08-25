@@ -23,8 +23,9 @@ Options:
   --out <path>        PNG output path (default: ./electron-capture.png)
   --packaged          Run dist/win-unpacked/*.exe instead of the dev build
   --app <path>        Explicit app entry: built main .js, or packaged .exe
-  --view <name>       CLAUDE_WATCH_CAPTURE_VIEW (settings | projects | spend |
-                      insights | insights-week | comma-separated pane kinds)
+  --view <name>       CLAUDE_WATCH_CAPTURE_VIEW (settings | projects | usage |
+                      insights-week | comma-separated pane kinds and sidebar
+                      views: launcher, terminal, usage, windows, limits)
   --delay <ms>        CLAUDE_WATCH_CAPTURE_DELAY_MS; lower it to catch an
                       animation mid-flight instead of at rest (default: 1600)
   --port <n>          CLAUDE_WATCH_PORT (default: 7460, avoiding the installed
@@ -39,7 +40,7 @@ Exit codes:
 
 Examples:
   node capture-window.mjs --out /tmp/agents.png
-  node capture-window.mjs --view spend --out /tmp/spend.png
+  node capture-window.mjs --view usage --out /tmp/usage.png
   node capture-window.mjs --delay 120 --out /tmp/mid-animation.png
   node capture-window.mjs --packaged --out /tmp/packaged.png
 `

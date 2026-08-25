@@ -1,5 +1,5 @@
 import {
-  ChevronsDownUp, ChevronsUpDown, Code2, Columns3, Filter, Folder, FolderPlus, Globe,
+  ChevronsDownUp, ChevronsUpDown, Code2, Coins, Columns3, Filter, Folder, FolderPlus, Globe,
   ListRestart, Minus, Monitor, PanelLeft, PanelRight, Power, Ruler, Search, SquarePlus, SquareTerminal, Terminal
 } from 'lucide-react'
 import { Settings } from './Icons'
@@ -39,6 +39,8 @@ interface Props {
   onOpenMenu: (menu: MenuName | null) => void
   /** The command center: opens the palette. */
   onPalette: () => void
+  /** User → Usage: open the Usage pane, or bring the open one forward. */
+  onUsage: () => void
 }
 
 /**
@@ -52,10 +54,11 @@ export function TopBar(props: Props) {
   const {
     waiting, waitingOnly, onWaitingOnly, canCollapse, allCollapsed, onCollapseAll, conn,
     panes, onAddPane, onNewTerminal, onNewProject, canResetOrder, onResetOrder, onSettings,
-    sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, openMenu, onOpenMenu, onPalette
+    sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, openMenu, onOpenMenu, onPalette, onUsage
   } = props
 
   const paneFull = panes.length >= MAX_PANES
+  const hasUsage = panes.some((p) => p.kind === 'usage')
   const canAdd = (kind: PaneKind) =>
     !paneFull && (!isUniqueKind(kind) || !panes.some((p) => p.kind === kind))
 
@@ -170,6 +173,14 @@ export function TopBar(props: Props) {
           {menuButton('user', 'User')}
           {openMenu === 'user' && (
             <MenuPop {...away}>
+              <MenuItem
+                icon={<Coins strokeWidth={2} />}
+                label="Usage: spend & insights"
+                hint={hasUsage ? 'Zoom the open Usage pane' : paneFull ? 'All six panes are open' : 'Open today’s spend and local usage insights in a pane'}
+                disabled={!hasUsage && paneFull}
+                onClick={run(onUsage)}
+              />
+              <div className="menu-sep" />
               <MenuItem icon={<Settings strokeWidth={2} />} label="Settings…" hint="Hotkey, notifications, startup, updates, hooks (Ctrl+,)" onClick={run(onSettings)} />
               <div className="menu-sep" />
               <div className="menu-status" title={conn.title}>

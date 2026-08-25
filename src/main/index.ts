@@ -1393,12 +1393,14 @@ if (!gotLock) {
               await sleep(300)
             }
           } else if (captureView) {
-            // Layout is renderer state: seed the stored sidebar views (data
-            // panes) and main-frame panes (launcher/terminal), then reload.
-            const parts = captureView.startsWith('insights') ? ['insights'] : captureView.split(',')
-            const sidebar = parts.filter((k) => ['limits', 'spend', 'windows', 'insights'].includes(k))
+            // Layout is renderer state: seed the stored sidebar views and
+            // main-frame panes, then reload. `spend`/`insights` were sidebar
+            // views; they now live in the `usage` pane, so both map to it.
+            const parts = (captureView.startsWith('insights') ? ['usage'] : captureView.split(','))
+              .map((k) => (k === 'spend' || k === 'insights' ? 'usage' : k))
+            const sidebar = parts.filter((k) => ['limits', 'windows'].includes(k))
             const panes = parts
-              .filter((k) => k === 'launcher' || k === 'terminal')
+              .filter((k) => k === 'launcher' || k === 'terminal' || k === 'usage')
               .map((kind, i) => ({ id: `capture-${i}`, kind, ...(kind === 'terminal' ? { term: { launch: 'shell' } } : {}) }))
             await win!.webContents.executeJavaScript(
               // The current key, and by default no rolled-up sections: a capture

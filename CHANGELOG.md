@@ -15,6 +15,8 @@ Layout customization, on top of the 0.3.0 workspace.
 - **Command palette.** Ctrl+Shift+P (or the command center in the title bar, or Ctrl+P outside a terminal) opens a fuzzy-searched list of every command, every live agent, and every open window; `>` `@` `#` narrow the sections, `Tab` cycles them.
 - **IDE-style title bar.** One row: the brand mark and menus at the left, the command center in the middle, status at the right — replacing the wordmark row.
 - **Pane tool strips.** The pane header's content dropdown is gone; the kind is fixed and the header carries that kind's tools — terminals get split, clear, restart, external terminal, and open folder; the launcher gets new project and Projects folder. Ctrl+Shift+` opens a new terminal, Ctrl+, opens Settings.
+- **Usage pane.** Spend and Insights leave the sidebar and combine into one Usage pane in the grid — today's spend, then local usage insights, one scrolling column — opened from User → *Usage: spend & insights* (or View → Add pane, or the palette). The sidebar keeps Open windows and Limits; a stored Spend/Insights sidebar toggle is dropped silently.
+- Idle-cost trims: layout sizes persist on a trailing 200ms write instead of per mouse event; the window-list poll no longer re-renders when nothing changed; the keyboard listener is registered once.
 - **Rebuild & relaunch** now hands the installer the same arguments `electron-updater` uses (`--updated /S --force-run`), so the silent install relaunches the app itself.
 - Agent tooling: `.mcp.json` registers `electron-mcp-server` and `npm run debug:app` launches a CDP-driveable copy of the app; docs libraries for Context7 are listed in `CLAUDE.md`.
 

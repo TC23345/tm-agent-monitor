@@ -93,6 +93,16 @@ export function LauncherPane({ context, onNewProject, onEmbedTerminal }: {
  * native window (electron/electron#10547 is still open), so this switches to them
  * with Win32 focus rather than embedding them.
  */
+/** Equal enough that nothing rendered from the list would change. */
+function sameWindows(a: DesktopWindow[] | null, b: DesktopWindow[]): boolean {
+  if (!a || a.length !== b.length) return false
+  return a.every((w, i) => {
+    const o = b[i]
+    return w.hwnd === o.hwnd && w.pid === o.pid && w.title === o.title && w.app === o.app && w.kind === o.kind
+      && w.agentId === o.agentId && w.agentProvider === o.agentProvider
+  })
+}
+
 export function useDesktopWindows(enabled: boolean) {
   const [windows, setWindows] = useState<DesktopWindow[] | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -100,7 +110,9 @@ export function useDesktopWindows(enabled: boolean) {
   const refresh = useCallback(() => {
     setRefreshing(true)
     window.watch.listWindows()
-      .then(setWindows)
+      // Keep the old reference when nothing changed: every poll is a fresh
+      // array from main, and a new reference re-renders the sidebar for nothing.
+      .then((list) => setWindows((prev) => (sameWindows(prev, list) ? prev : list)))
       .catch(() => setWindows([]))
       .finally(() => setRefreshing(false))
   }, [])

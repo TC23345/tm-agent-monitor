@@ -8,8 +8,7 @@ import { groupByProject } from './group'
 import { applyOrder, useGroupOrder } from './useGroupOrder'
 import { SettingsPanel } from './SettingsPanel'
 import { COLLAPSE_ALL_EVENT } from './useCollapse'
-import { UsageInsightsView } from './UsageInsightsView'
-import { SpendView } from './SpendView'
+import { UsagePane } from './UsagePane'
 import { TopBar, type MenuName } from './TopBar'
 import { Pane } from './Pane'
 import { TerminalPane, type TerminalPaneHandle } from './TerminalPane'
@@ -18,7 +17,7 @@ import { CommandPalette, type PaletteItem } from './CommandPalette'
 import { ProviderBadge } from './ProviderBadge'
 import { Settings as SettingsIcon } from './Icons'
 import {
-  MAX_PANES, SIDEBAR_VIEWS, defaultPanes, emptySizes, isTopSidebarView, isUniqueKind, loadPaneCols,
+  MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, defaultPanes, emptySizes, isTopSidebarView, isUniqueKind, loadPaneCols,
   loadPanes, loadSidebarCollapsed, loadSidebarViews, loadSizes, newPane, savePaneCols, savePanes,
   saveSidebarCollapsed, saveSidebarViews, saveSizes,
   type AllSizes, type PaneCols, type PaneInstance, type PaneKind, type PaneSizes, type SidebarView,
@@ -34,9 +33,9 @@ import {
   type LaunchContext
 } from './WorkspacePanes'
 import {
-  AppWindow, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Columns3, Eraser, ExternalLink, Filter,
+  AppWindow, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Coins, Columns3, Eraser, ExternalLink, Filter,
   Folder, FolderPlus, Globe, Maximize2, Minimize2, Minus, Monitor, PanelLeft, PanelRight, Power, RotateCcw,
-  Ruler, SquarePlus, SquareSplitHorizontal, SquareTerminal, Terminal, X
+  Ruler, SquareSplitHorizontal, SquareTerminal, Terminal, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
 
@@ -120,7 +119,18 @@ export function App() {
   useEffect(() => saveSidebarViews(sidebarViews), [sidebarViews])
   useEffect(() => saveSidebarCollapsed(sidebarCollapsed), [sidebarCollapsed])
   useEffect(() => savePaneCols(paneCols), [paneCols])
-  useEffect(() => saveSizes(allSizes), [allSizes])
+  // Sizes change on every splitter pointermove; a synchronous localStorage
+  // write per mouse event is the wrong price. Trailing 200ms, flushed on unmount.
+  const pendingSizes = useRef<AllSizes | null>(null)
+  useEffect(() => {
+    pendingSizes.current = allSizes
+    const t = window.setTimeout(() => {
+      saveSizes(allSizes)
+      pendingSizes.current = null
+    }, 200)
+    return () => window.clearTimeout(t)
+  }, [allSizes])
+  useEffect(() => () => { if (pendingSizes.current) saveSizes(pendingSizes.current) }, [])
 
   // Re-cap the columns when the window bounds change (size-mode switch, other
   // display). The window never resizes with content, so this only fires on real
@@ -178,8 +188,8 @@ export function App() {
   // workspace, and Ctrl+P is the shell's too. Only the Ctrl+Shift chords reach
   // past a focused terminal, which is why the palette's canonical shortcut is
   // Ctrl+Shift+P rather than Ctrl+P alone.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+  const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => {})
+  onKeyRef.current = (e: KeyboardEvent) => {
       const inTerminal = !!(e.target as HTMLElement)?.closest?.('.termpane')
       const ctrl = e.ctrlKey && !e.altKey && !e.metaKey
       if (ctrl && e.shiftKey && (e.key === 'P' || e.key === 'p')) {
@@ -210,12 +220,15 @@ export function App() {
       else if (newProjectOpen) setNewProjectOpen(false)
       else if (zoom) setZoom(null)
       else if (!settingsOpen) window.watch.hide()
-    }
-    // Capture phase: xterm stops propagation of keys it handles, and a chord
-    // meant for the app must win before the shell sees it.
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  })
+  }
+  // Capture phase: xterm stops propagation of keys it handles, and a chord
+  // meant for the app must win before the shell sees it. Subscribed once; the
+  // ref above carries the latest closure.
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => onKeyRef.current(e)
+    window.addEventListener('keydown', listener, true)
+    return () => window.removeEventListener('keydown', listener, true)
+  }, [])
 
   // The palette lists open windows: refresh once per open rather than polling.
   useEffect(() => {
@@ -335,6 +348,17 @@ export function App() {
     setPanes([...panes, newPane(kind, term)])
   }
 
+  /** User → Usage: open the pane, or bring the open one forward. `addPane`
+   * already refuses a full grid; a lone pane has nothing to zoom over. */
+  const openUsage = () => {
+    const existing = panes.find((p) => p.kind === 'usage')
+    if (!existing) {
+      addPane('usage')
+      return
+    }
+    if (panes.length > 1) setZoom(existing.id)
+  }
+
   /** Embedded launch: a terminal pane in the current context. When the grid is
    * full it degrades to the old behavior — an external window. */
   const newTerminal = (launch: TerminalLaunch) => {
@@ -375,6 +399,8 @@ export function App() {
     switch (pane.kind) {
       case 'launcher':
         return <LauncherPane context={context} onNewProject={() => setNewProjectOpen(true)} onEmbedTerminal={newTerminal} />
+      case 'usage':
+        return <UsagePane usage={snap?.usage} now={now} />
       case 'terminal':
         return (
           <TerminalPane
@@ -456,12 +482,8 @@ export function App() {
     switch (view) {
       case 'limits':
         return snap ? <UsageDashboard usage={snap.usage} now={now} /> : <div className="empty">Connecting…</div>
-      case 'spend':
-        return snap ? <SpendView usage={snap.usage} now={now} /> : <div className="empty">Connecting…</div>
       case 'windows':
         return <WindowsPane windows={desktop.windows} />
-      case 'insights':
-        return <UsageInsightsView />
     }
   }
 
@@ -565,9 +587,23 @@ export function App() {
     cmd('chrome', 'Open Chrome', () => window.watch.openChrome(), { icon: <Globe strokeWidth={2} />, keywords: ['browser'] })
     cmd('new-project', 'New project…', () => setNewProjectOpen(true), { icon: <FolderPlus strokeWidth={2} /> })
     cmd('projects-dir', 'Open Projects folder', () => window.watch.openProjectsDir(), { icon: <Folder strokeWidth={2} />, keywords: ['explorer'] })
-    if (!panes.some((p) => p.kind === 'launcher') && !full) cmd('add-launcher', 'Add pane: Launch', () => addPane('launcher'), { icon: <SquarePlus strokeWidth={2} /> })
+    const hasUsage = panes.some((p) => p.kind === 'usage')
+    cmd('usage', 'Usage: spend & insights', openUsage, {
+      icon: <Coins strokeWidth={2} />,
+      keywords: ['spend', 'insights', 'tokens', 'cost', 'value', 'report'],
+      detail: hasUsage ? 'zoom the open pane' : full ? 'all six panes are open' : undefined
+    })
+    if (!full) {
+      for (const k of PANE_KINDS) {
+        if (isUniqueKind(k.id) && !panes.some((p) => p.kind === k.id)) {
+          cmd(`add-${k.id}`, `Add pane: ${k.label}`, () => addPane(k.id), { icon: <k.icon strokeWidth={2} />, keywords: ['pane', 'view'] })
+        }
+      }
+    }
     for (const pane of panes) {
-      const kindLabel = pane.kind === 'launcher' ? 'Launch' : `Terminal${pane.term?.label ? ` · ${pane.term.label}` : ''}`
+      const kindLabel = pane.kind === 'terminal'
+        ? `Terminal${pane.term?.label ? ` · ${pane.term.label}` : ''}`
+        : PANE_KINDS.find((k) => k.id === pane.kind)!.label
       if (panes.length > 1) {
         cmd(`zoom:${pane.id}`, zoomed === pane.id ? `Restore grid` : `Zoom pane: ${kindLabel}`, () => setZoom(zoomed === pane.id ? null : pane.id), { icon: zoomed === pane.id ? <Minimize2 strokeWidth={2} /> : <Maximize2 strokeWidth={2} />, keywords: ['maximize', 'focus'] })
       }
@@ -642,6 +678,7 @@ export function App() {
         openMenu={openMenu === 'sidebar' ? null : openMenu}
         onOpenMenu={setOpenMenu}
         onPalette={() => setPalette((v) => !v)}
+        onUsage={openUsage}
       />
 
       <div className="frame" ref={frameRef}>

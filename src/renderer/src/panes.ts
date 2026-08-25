@@ -1,13 +1,14 @@
-import { Activity, AppWindow, ChartColumn, Coins, SquareTerminal, Terminal } from 'lucide-react'
+import { Activity, AppWindow, Coins, SquareTerminal, Terminal } from 'lucide-react'
 import type { TerminalLaunch } from '@shared/types'
 import type { SizeBucket } from '@shared/layout.mjs'
 
 /**
- * The main frame belongs to work: the launcher and embedded terminal sessions.
- * The data views (limits, spend, open windows, insights) live in the Coding
- * Agents sidebar as toggleable stacked sections — see `SidebarView`.
+ * The main frame belongs to work: the launcher, embedded terminal sessions,
+ * and the Usage report (spend + insights). At-a-glance status — open windows
+ * and limit bars — lives in the Coding Agents sidebar as toggleable stacked
+ * sections; see `SidebarView`.
  */
-export type PaneKind = 'launcher' | 'terminal'
+export type PaneKind = 'launcher' | 'terminal' | 'usage'
 
 /** What an embedded terminal pane runs. `sessionId` reattaches after a remount;
  * a stale id (fresh app run) just starts a new shell with the same launch. */
@@ -26,7 +27,8 @@ export interface PaneInstance {
 
 export const PANE_KINDS: { id: PaneKind; label: string; icon: typeof Activity; hint: string }[] = [
   { id: 'launcher', label: 'Launch', icon: SquareTerminal, hint: 'Start a terminal, editor, or browser' },
-  { id: 'terminal', label: 'Terminal', icon: Terminal, hint: 'An embedded PowerShell terminal' }
+  { id: 'terminal', label: 'Terminal', icon: Terminal, hint: 'An embedded PowerShell terminal' },
+  { id: 'usage', label: 'Usage', icon: Coins, hint: 'Today’s spend and local usage insights' }
 ]
 
 export const MAX_PANES = 6
@@ -104,13 +106,14 @@ export function savePanes(panes: PaneInstance[]): void {
 /** Data views stacked in the sidebar, toggled from the sidebar menu. The
  * `SIDEBAR_TOP` views pin above the agent list; the rest stack below, both in
  * catalog order. */
-export type SidebarView = 'limits' | 'spend' | 'windows' | 'insights'
+export type SidebarView = 'windows' | 'limits'
 
+/** Spend and Insights used to be sidebar views; they moved into the `usage`
+ * pane. Their stored ids fall out of every sidebar key through `isSidebarView`,
+ * which is derived from this catalog, so no migration is needed. */
 export const SIDEBAR_VIEWS: { id: SidebarView; label: string; icon: typeof Activity; hint: string }[] = [
   { id: 'windows', label: 'Open windows', icon: AppWindow, hint: 'Switch to an open terminal, editor, or browser' },
-  { id: 'limits', label: 'Limits', icon: Activity, hint: 'Provider usage limits' },
-  { id: 'spend', label: 'Spend', icon: Coins, hint: 'Today’s tokens and value per provider and project' },
-  { id: 'insights', label: 'Insights', icon: ChartColumn, hint: 'Local Claude and Codex usage patterns' }
+  { id: 'limits', label: 'Limits', icon: Activity, hint: 'Provider usage limits' }
 ]
 
 /** Views that pin above the agent list, in this order. Open windows leads: it
