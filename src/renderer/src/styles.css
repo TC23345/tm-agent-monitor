@@ -555,6 +555,38 @@ kbd {
 .gpane-tools .menu-wrap { display: inline-flex; }
 .gpane-tools .menu-pop { left: auto; right: 0; top: calc(100% + 8px); }
 
+/* ---- history: thirty stacked bars, then the model mix ---- */
+.hist { display: flex; flex-direction: column; gap: 10px; }
+.hist-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.hist-summary-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--muted); }
+.hist-summary-total { font-size: 13px; font-weight: 600; color: var(--text); text-align: right; }
+.hist-bars { display: flex; align-items: flex-end; gap: 3px; height: 96px; padding: 0 1px; border-bottom: 1px solid var(--hairline); }
+.hist-bar { flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column-reverse; border-radius: 2px 2px 0 0; overflow: hidden; background: rgba(255, 255, 255, 0.025); }
+.hist-bar.is-today { outline: 1px solid rgba(217, 119, 87, 0.5); outline-offset: 1px; }
+.hist-seg { display: block; width: 100%; transition: height 220ms ease; }
+.hist-seg.is-claude, .hist-swatch.is-claude { background: var(--accent); }
+.hist-seg.is-codex, .hist-swatch.is-codex { background: #5aa9ff; }
+.hist-seg.is-other, .hist-swatch.is-other { background: var(--faint); }
+.hist-axis { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--faint); }
+.hist-providers { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted); }
+.hist-prov { display: inline-flex; align-items: center; gap: 6px; }
+.hist-swatch { width: 9px; height: 9px; border-radius: 2px; }
+.hist-mix { margin-top: 6px; }
+.hist-mix-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--muted); }
+.hist-mix-flag { font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--st-permission); }
+.hist-mix-row { display: grid; grid-template-columns: minmax(80px, 1.2fr) 3fr auto auto 3.2em; align-items: center; gap: 10px; padding: 3px 0; font-size: 12.5px; }
+.hist-mix-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.hist-mix-track { height: 6px; border-radius: 999px; background: var(--track); overflow: hidden; }
+.hist-mix-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+.hist-mix-num { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hist-mix-pct { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* A project group dragged over the grid launches there. */
+.grid.is-drop-target { box-shadow: inset 0 0 0 2px rgba(217, 119, 87, 0.45); border-radius: 8px; }
+/* Sessions near their context limit: amber, not the red of "needs input". */
+.needs--hot { background: rgba(233, 162, 60, 0.18); color: var(--st-permission); box-shadow: none; }
+.needs--hot:hover { filter: none; background: rgba(233, 162, 60, 0.28); }
+
 /* ---- usage pane: Spend then Insights in one scrolling column (.gpane-body scrolls) ---- */
 .usagepane { display: flex; flex-direction: column; gap: 18px; max-width: 720px; }
 .usagepane-head { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }

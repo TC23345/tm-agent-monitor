@@ -14,6 +14,8 @@ import { Pane } from './Pane'
 import { TerminalPane, type TerminalPaneHandle } from './TerminalPane'
 import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
 import { SNIPPETS } from './snippets'
+import { NameDialog } from './NameDialog'
+import { LAYOUT_NAME_MAX, loadLayouts, panesFromLayout, saveLayouts, snapshotLayout, type LayoutMap } from './layouts'
 import { tid } from './testid'
 import { nextWaiting, paneForAgent, waitingAgents, waitingFirst } from '@shared/attention.mjs'
 import { CommandPalette, type PaletteItem } from './CommandPalette'
@@ -37,8 +39,9 @@ import {
 } from './WorkspacePanes'
 import {
   AppWindow, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Coins, Columns3, Eraser, ExternalLink, Filter,
-  BellRing, Folder, FolderPlus, Globe, Maximize2, Minimize2, Minus, Monitor, PanelLeft, PanelRight, Power, RotateCcw,
-  Ruler, SquareSlash, SquareSplitHorizontal, SquareTerminal, Terminal, X
+  BellRing, Code2 as CursorIcon, Copy, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
+  PanelLeft, PanelRight, Power, RotateCcw, Ruler, Save, Shrink, SquareSlash, SquareSplitHorizontal, SquareTerminal,
+  Terminal, Trash2, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
 
@@ -63,6 +66,10 @@ export function App() {
   const [snippetsFor, setSnippetsFor] = useState<string | null>(null)
   // Ctrl+Shift+W cycles waiting sessions; remember where the cycle is.
   const lastRouted = useRef<string | null>(null)
+  // Named layouts and the save-as prompt; a project group dragged over the grid.
+  const [layouts, setLayouts] = useState<LayoutMap>(loadLayouts)
+  const [layoutDialog, setLayoutDialog] = useState(false)
+  const [gridDropHot, setGridDropHot] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -129,6 +136,7 @@ export function App() {
   useEffect(() => saveSidebarViews(sidebarViews), [sidebarViews])
   useEffect(() => saveSidebarCollapsed(sidebarCollapsed), [sidebarCollapsed])
   useEffect(() => savePaneCols(paneCols), [paneCols])
+  useEffect(() => saveLayouts(layouts), [layouts])
   // Sizes change on every splitter pointermove; a synchronous localStorage
   // write per mouse event is the wrong price. Trailing 200ms, flushed on unmount.
   const pendingSizes = useRef<AllSizes | null>(null)
@@ -243,6 +251,7 @@ export function App() {
       else if (snippetsFor) setSnippetsFor(null)
       else if (openMenu) setOpenMenu(null)
       else if (palette) setPalette(false)
+      else if (layoutDialog) setLayoutDialog(false)
       else if (newProjectOpen) setNewProjectOpen(false)
       else if (zoom) setZoom(null)
       else if (!settingsOpen) window.watch.hide()
@@ -410,6 +419,49 @@ export function App() {
     if (panes.length > 1) setZoom(existing.id)
   }
 
+  /** Layouts: a named snapshot of panes, sizes, sidebar views, and columns.
+   * Applying one replaces the grid — open shells are disposed first so nothing
+   * keeps running unseen — and restores terminals as fresh shells. */
+  const saveLayoutAs = (name: string) => {
+    setLayouts((current) => ({
+      ...current,
+      [name]: snapshotLayout({ panes, sizes: allSizes, sidebar: sidebarViews, collapsed: sidebarCollapsed, cols: paneCols })
+    }))
+    setLayoutDialog(false)
+  }
+  const applyLayout = (name: string) => {
+    const layout = layouts[name]
+    if (!layout) return
+    for (const p of panes) if (p.term?.sessionId) window.watch.disposeTerminal(p.term.sessionId)
+    const next = panesFromLayout(layout)
+    setPanes(next.length ? next : defaultPanes())
+    setAllSizes(layout.sizes)
+    setSidebarViews(layout.sidebar)
+    setSidebarCollapsed(layout.collapsed)
+    setPaneCols(layout.cols)
+    setZoom(null)
+    setFocusedPane(null)
+  }
+  const deleteLayout = (name: string) =>
+    setLayouts((current) => {
+      const next = { ...current }
+      delete next[name]
+      return next
+    })
+  const layoutNames = Object.keys(layouts).sort((a, b) => a.localeCompare(b))
+
+  /** Root sessions near their context limit and still climbing — the title
+   * bar chip, the notification in main, and the Compact tool all key off this. */
+  const hotAgents = agents.filter((a) => !a.parentId && a.contextRising && (a.contextPct ?? 0) >= 85)
+  const hot = hotAgents.map((a) => ({ id: a.id, project: a.project, pct: Math.round(a.contextPct ?? 0) }))
+
+  /** A project group dropped on the grid: a shell there (Shift for Claude Code). */
+  const dropProject = (key: string, claude: boolean) => {
+    const group = groups.find((g) => g.key === key)
+    if (!group?.cwd) return
+    addPane('terminal', { launch: claude ? 'claude' : 'shell', cwd: group.cwd, label: group.project })
+  }
+
   /** Embedded launch: a terminal pane in the current context. When the grid is
    * full it degrades to the old behavior — an external window. */
   const newTerminal = (launch: TerminalLaunch) => {
@@ -501,8 +553,14 @@ export function App() {
     if (pane.kind === 'terminal' && pane.term) {
       const term = pane.term
       const handle = () => termRefs.current.get(pane.id)
+      const hotHere = term.launch === 'claude' ? hotAgents.find((a) => paneForAgent([pane], a)?.id === pane.id) : undefined
       return (
         <>
+          {hotHere && tool(
+            `Compact now — ${Math.round(hotHere.contextPct ?? 0)}% of context used and rising`,
+            ic(Shrink),
+            () => { if (term.sessionId) window.watch.termInput(term.sessionId, '/compact\r'); handle()?.focus() }
+          )}
           {tool(
             panes.length >= MAX_PANES ? 'All six panes are open' : 'Split: another terminal in this folder',
             ic(SquareSplitHorizontal),
@@ -696,6 +754,13 @@ export function App() {
       cmd(`cols-${c}`, `Columns: ${c === 'auto' ? 'Auto' : c}`, () => setPaneCols(c), { icon: <Columns3 strokeWidth={2} />, detail: paneCols === c ? 'current' : undefined, keywords: ['grid', 'layout'] })
     }
     if (sized) cmd('reset-sizes', 'Reset pane sizes', resetSizes, { icon: <Ruler strokeWidth={2} />, keywords: ['layout', 'splitter'] })
+    cmd('save-layout', 'Save current layout…', () => setLayoutDialog(true), { icon: <Save strokeWidth={2} />, keywords: ['workspace', 'preset'] })
+    for (const name of layoutNames) {
+      cmd(`layout:${name}`, `Layout: ${name}`, () => applyLayout(name), { icon: <LayoutTemplate strokeWidth={2} />, keywords: ['workspace', 'preset', 'apply'] })
+    }
+    for (const name of layoutNames) {
+      cmd(`layout-delete:${name}`, `Delete layout: ${name}`, () => deleteLayout(name), { icon: <Trash2 strokeWidth={2} />, keywords: ['workspace', 'preset'] })
+    }
     if (order.length > 0) cmd('reset-order', 'Reset project order', clearOrder, { icon: <ChevronsUpDown strokeWidth={2} /> })
     if (waitingAgents(agents).length > 0) cmd('route-waiting', 'Go to next waiting session', routeToWaiting, { icon: <BellRing strokeWidth={2} />, keys: ['Ctrl', 'Shift', 'W'], keywords: ['attention', 'question', 'input'] })
     cmd('settings', 'Settings…', () => setSettingsOpen(true), { icon: <SettingsIcon strokeWidth={2} />, keys: ['Ctrl', ','], keywords: ['hotkey', 'hooks', 'updates', 'preferences'] })
@@ -714,6 +779,16 @@ export function App() {
         icon: <ProviderBadge provider={a.provider} />,
         run: () => window.watch.focusAgent(a.id)
       })
+    }
+    // Per-session actions, after the focus rows so `@` still leads with sessions.
+    for (const a of agents.filter((x) => !x.parentId && x.cwd)) {
+      const cwd = a.cwd!
+      const sub = (id: string, label: string, icon: ReactNode, run: () => void) =>
+        items.push({ id: `agent:${a.id}:${id}`, section: 'agent', label: `${a.project} — ${label}`, detail: cwd, keywords: [a.provider, label], icon, run })
+      if (!full) sub('terminal', 'terminal here', <Terminal strokeWidth={2} />, () => addPane('terminal', { launch: 'shell', cwd, label: a.project }))
+      sub('folder', 'open folder', <Folder strokeWidth={2} />, () => window.watch.openPath(cwd))
+      sub('cursor', 'open in Cursor', <CursorIcon strokeWidth={2} />, () => window.watch.openCursor(cwd))
+      sub('copy', 'copy path', <Copy strokeWidth={2} />, () => window.watch.copyText(cwd))
     }
     for (const w of paletteWindows) {
       items.push({
@@ -764,6 +839,17 @@ export function App() {
         onOpenMenu={setOpenMenu}
         onPalette={() => setPalette((v) => !v)}
         onUsage={openUsage}
+        layouts={layoutNames}
+        onSaveLayout={() => setLayoutDialog(true)}
+        onApplyLayout={applyLayout}
+        onDeleteLayout={deleteLayout}
+        hot={hot}
+        onFocusAgent={(id) => {
+          const agent = agents.find((a) => a.id === id)
+          const pane = agent ? paneForAgent(panes, agent) : null
+          if (pane) focusPane(pane.id)
+          else window.watch.focusAgent(id)
+        }}
       />
 
       <div className="frame" ref={frameRef}>
@@ -815,8 +901,26 @@ export function App() {
             live, so panes are placed explicitly instead of auto-flowing. A
             zoomed grid is one track — its splitters have nothing to split. */}
         <main
-          className={`grid ${zoomed ? 'is-zoomed' : ''}`}
+          className={`grid ${zoomed ? 'is-zoomed' : ''} ${gridDropHot ? 'is-drop-target' : ''}`}
           ref={gridRef}
+          onDragOver={(event) => {
+            if (!dragKey) return
+            event.preventDefault()
+            event.dataTransfer.dropEffect = 'copy'
+            if (!gridDropHot) setGridDropHot(true)
+          }}
+          onDragLeave={(event) => {
+            if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+            setGridDropHot(false)
+          }}
+          onDrop={(event) => {
+            if (!dragKey) return
+            event.preventDefault()
+            dropProject(dragKey, event.shiftKey)
+            setGridDropHot(false)
+            setDragKey(null)
+            setDrop(null)
+          }}
           style={{
             gridTemplateColumns: zoomed ? '1fr' : columnTemplate(colFracs, GRID_GUTTER),
             gridTemplateRows: zoomed ? '1fr' : columnTemplate(rowFracs, GRID_GUTTER),
@@ -906,6 +1010,17 @@ export function App() {
       {palette && <CommandPalette items={paletteItems()} onClose={() => setPalette(false)} />}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       {newProjectOpen && <NewProject onClose={() => setNewProjectOpen(false)} />}
+      {layoutDialog && (
+        <NameDialog
+          title="Save layout"
+          placeholder="Build"
+          hint="Saves the open panes (terminals by launch and folder), the dragged sizes, the sidebar views, and the column choice. Same name overwrites."
+          action="Save layout"
+          validate={(v) => (v.length > LAYOUT_NAME_MAX ? `Keep it under ${LAYOUT_NAME_MAX} characters` : null)}
+          onSubmit={saveLayoutAs}
+          onClose={() => setLayoutDialog(false)}
+        />
+      )}
       {menu && <AgentContextMenu menu={menu} onClose={() => setMenu(null)} />}
     </div>
   )

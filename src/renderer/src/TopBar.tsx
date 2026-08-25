@@ -1,6 +1,7 @@
 import {
   ChevronsDownUp, ChevronsUpDown, Code2, Coins, Columns3, Filter, Folder, FolderPlus, Globe,
-  ListRestart, Minus, Monitor, PanelLeft, PanelRight, Power, Ruler, Search, SquarePlus, SquareTerminal, Terminal
+  LayoutTemplate, ListRestart, Minus, Monitor, PanelLeft, PanelRight, Power, Ruler, Save, Search, SquarePlus,
+  SquareTerminal, Terminal, Trash2
 } from 'lucide-react'
 import { Settings } from './Icons'
 import mark from './assets/icon.png'
@@ -65,6 +66,14 @@ interface Props {
   onPalette: () => void
   /** User → Usage: open the Usage pane, or bring the open one forward. */
   onUsage: () => void
+  /** Named layouts (View → Layouts). */
+  layouts: string[]
+  onSaveLayout: () => void
+  onApplyLayout: (name: string) => void
+  onDeleteLayout: (name: string) => void
+  /** Root sessions near their context limit and still climbing. */
+  hot: { id: string; project: string; pct: number }[]
+  onFocusAgent: (id: string) => void
 }
 
 /**
@@ -78,7 +87,8 @@ export function TopBar(props: Props) {
   const {
     waiting, waitingOnly, onWaitingOnly, canCollapse, allCollapsed, onCollapseAll, health, debugPort,
     panes, onAddPane, onNewTerminal, onNewProject, canResetOrder, onResetOrder, onSettings,
-    sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, openMenu, onOpenMenu, onPalette, onUsage
+    sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, openMenu, onOpenMenu, onPalette, onUsage,
+    layouts, onSaveLayout, onApplyLayout, onDeleteLayout, hot, onFocusAgent
   } = props
 
   const paneFull = panes.length >= MAX_PANES
@@ -183,6 +193,16 @@ export function TopBar(props: Props) {
               <MenuCheckItem label="2 columns" checked={paneCols === 2} onClick={() => onPaneCols(2)} />
               <MenuCheckItem label="3 columns" checked={paneCols === 3} onClick={() => onPaneCols(3)} />
               <div className="menu-sep" />
+              <div className="menu-label"><LayoutTemplate className="menu-label-ic" strokeWidth={2} />Layouts</div>
+              <MenuItem icon={<Save strokeWidth={2} />} label="Save current layout…" hint="Panes, sizes, and sidebar views under a name" onClick={run(onSaveLayout)} />
+              {layouts.map((name) => (
+                <MenuItem key={`apply:${name}`} icon={<LayoutTemplate strokeWidth={2} />} label={name} hint={`Apply layout “${name}”`} onClick={run(() => onApplyLayout(name))} />
+              ))}
+              {layouts.length > 0 && <div className="menu-label"><Trash2 className="menu-label-ic" strokeWidth={2} />Delete layout</div>}
+              {layouts.map((name) => (
+                <MenuItem key={`delete:${name}`} icon={<Trash2 strokeWidth={2} />} label={name} hint={`Forget layout “${name}”`} onClick={run(() => onDeleteLayout(name))} />
+              ))}
+              <div className="menu-sep" />
               <MenuItem
                 icon={<Ruler strokeWidth={2} />}
                 label="Reset pane sizes"
@@ -226,6 +246,16 @@ export function TopBar(props: Props) {
       </button>
 
       <div className="topbar-status">
+        {hot.length > 0 && (
+          <button
+            className="needs needs--hot"
+            onClick={() => onFocusAgent(hot[0].id)}
+            title={hot.map((h) => `${h.project}: ${h.pct}% of context used and rising`).join('\n') + '\nClick to focus — /compact soon, or start fresh'}
+            data-testid="hot-chip"
+          >
+            {hot.length === 1 ? `${hot[0].project} · ${hot[0].pct}% ctx ↑` : `${hot.length} sessions near context limit`}
+          </button>
+        )}
         {waiting > 0 && (
           <button
             className={`needs ${waitingOnly ? 'needs--active' : ''}`}

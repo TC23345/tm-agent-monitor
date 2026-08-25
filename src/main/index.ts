@@ -126,6 +126,8 @@ let codexRefresh: Promise<void> | null = null
 let insightsCache: UsageInsights | undefined
 let insightsRefresh: Promise<UsageInsights> | null = null
 let prevWaiting = new Set<string>()
+// Edge-triggered like prevWaiting: one nudge when a session first crosses ~85% context and is still climbing.
+let prevHot = new Set<string>()
 const trustPendingSince = new Map<ProviderId, number>()
 
 function rolloutQuota(window: { usedPct?: number; resetsAt?: number; windowMinutes?: number } | undefined, tone: 'amber' | 'blue') {
@@ -723,6 +725,22 @@ function notifyTransitions(snap: StatusSnapshot): void {
     }
   }
   prevWaiting = nowWaiting
+
+  const nowHot = new Set(snap.agents.filter((a) => !a.parentId && a.contextRising && (a.contextPct ?? 0) >= 85).map((a) => a.id))
+  if (win && !win.isVisible()) {
+    for (const a of snap.agents) {
+      if (nowHot.has(a.id) && !prevHot.has(a.id)) {
+        const note = new Notification({
+          title: `${PROVIDER_TOAST_LABEL[a.provider]} · ${a.project} is near its context limit`,
+          body: `${Math.round(a.contextPct ?? 0)}% used and rising — /compact soon, or start fresh`,
+          icon: notificationIcon(a.provider)
+        })
+        note.on('click', () => { if (!focusAgentById(a.id)) showWindow() })
+        note.show()
+      }
+    }
+  }
+  prevHot = nowHot
 }
 
 function focusAgentById(id: string): boolean {

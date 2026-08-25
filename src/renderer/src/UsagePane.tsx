@@ -1,7 +1,8 @@
-import { ChartColumn, Coins } from 'lucide-react'
+import { ChartColumn, Coins, History } from 'lucide-react'
 import type { UsageSummary } from '@shared/types'
 import { SpendView } from './SpendView'
 import { UsageInsightsView } from './UsageInsightsView'
+import { HistorySection } from './HistorySection'
 
 /**
  * The Usage pane: today's spend, then local usage insights, as one scrolling
@@ -26,6 +27,13 @@ export function UsagePane({ usage }: { usage: UsageSummary | undefined }) {
           <span className="titletype">Insights</span>
         </div>
         <UsageInsightsView />
+      </section>
+      <section className="usagepane-section">
+        <div className="usagepane-head">
+          <History className="gpane-ic" strokeWidth={2} />
+          <span className="titletype">History</span>
+        </div>
+        <HistorySection />
       </section>
     </div>
   )
