@@ -15,7 +15,7 @@ import type { TerminalPaneHandle } from './TerminalPane'
 // xterm and its addon are ~40% of the renderer bundle; a workspace with no
 // terminal pane never parses them. The ref still reaches the real component.
 const TerminalPane = lazy(() => import('./TerminalPane').then((m) => ({ default: m.TerminalPane })))
-import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
+import { MenuItem, MenuPop } from './Menu'
 import { SNIPPETS } from './snippets'
 import { NameDialog } from './NameDialog'
 import { useProjectCommands } from './useProject'
@@ -30,7 +30,7 @@ import { CommandPalette, type PaletteItem } from './CommandPalette'
 import { ProviderBadge } from './ProviderBadge'
 import { Settings as SettingsIcon } from './Icons'
 import {
-  MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, defaultPanes, emptySizes, isTopSidebarView, isUniqueKind, loadPaneCols,
+  MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, defaultPanes, emptySizes, isUniqueKind, loadPaneCols,
   loadPanes, loadSidebarCollapsed, loadSidebarViews, loadSizes, newPane, savePaneCols, savePanes,
   saveSidebarCollapsed, saveSidebarViews, saveSizes,
   type AllSizes, type PaneCols, type PaneInstance, type PaneKind, type PaneSizes, type SidebarView,
@@ -44,10 +44,10 @@ import {
 import { WindowsPane, WindowsRefreshButton, useDesktopWindows } from './WorkspacePanes'
 import { LaunchNav, type LaunchTarget } from './LaunchNav'
 import {
-  AppWindow, ChevronDown, ChevronsDownUp, Sunrise, ChevronsUpDown, Code2, Coins, Columns3, Eraser, ExternalLink, Filter,
-  BellRing, Code2 as CursorIcon, Copy, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
-  PanelLeft, PanelRight, Power, RotateCcw, Ruler, Save, Shrink, SquareSlash, SquareSplitHorizontal, SquareTerminal,
-  Play, Rss, Terminal, Trash2, X
+  AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Code2 as CursorIcon, Coins, Columns3, Copy,
+  Eraser, ExternalLink, Filter, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
+  PanelLeft, PanelRight, Play, Power, RotateCcw, Rss, Ruler, Save, Shrink, SquareSlash, SquareSplitHorizontal,
+  SquareTerminal, Sunrise, Terminal, Trash2, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
 
@@ -579,6 +579,8 @@ export function App() {
 
   const paneBody = (pane: PaneInstance) => {
     switch (pane.kind) {
+      case 'agents':
+        return <div className="agents-inner">{agentList}</div>
       case 'usage':
         return <UsagePane usage={snap?.usage} />
       case 'activity':
@@ -601,6 +603,10 @@ export function App() {
 
   /** What sits after the title: a terminal's launch + folder label. */
   const paneContext = (pane: PaneInstance) => {
+    if (pane.kind === 'agents') {
+      const roots = agents.filter((a) => !a.parentId).length
+      return roots > 0 ? <span className="pane-count">{roots}</span> : null
+    }
     if (pane.kind === 'terminal' && pane.term) {
       const label = pane.term.launch === 'shell' ? null : pane.term.launch === 'codex' ? 'Codex' : 'Claude Code'
       const where = pane.term.label ?? (pane.term.cwd ? pane.term.cwd.split(/[\\/]/).pop() : null)
@@ -619,6 +625,24 @@ export function App() {
 
   /** The header tool strip, per kind — an editor title bar's actions. */
   const paneTools = (pane: PaneInstance) => {
+    if (pane.kind === 'agents') {
+      return (
+        <>
+          {tool(
+            waitingOnly ? 'Show every session' : 'Show only sessions waiting on you',
+            ic(Filter),
+            () => setWaitingOnly((v) => !v),
+            waiting === 0 && !waitingOnly
+          )}
+          {tool(
+            allCollapsed ? 'Expand all projects' : 'Collapse all projects',
+            ic(allCollapsed ? ChevronsUpDown : ChevronsDownUp),
+            collapseAll,
+            groups.length < 2
+          )}
+        </>
+      )
+    }
     if (pane.kind === 'terminal' && pane.term) {
       const term = pane.term
       const handle = () => termRefs.current.get(pane.id)
@@ -715,11 +739,9 @@ export function App() {
     )
   }
 
-  // Sections render in the fixed catalog order so toggling never reshuffles.
-  // Open windows and Limits pin above the agent list; the rest stack below it.
+  // Sections stack under the launch nav in the fixed catalog order (Limits
+  // first), so toggling one never reshuffles the rest.
   const activeViews = SIDEBAR_VIEWS.filter((v) => sidebarViews.includes(v.id))
-  const topViews = activeViews.filter((v) => isTopSidebarView(v.id))
-  const belowViews = activeViews.filter((v) => !isTopSidebarView(v.id))
 
   // Live geometry for this bucket. The column count still composes choice, pane
   // count and the viewport cap; the fractions only re-split what that leaves.
@@ -925,6 +947,8 @@ export function App() {
         onSaveLayout={() => setLayoutDialog(true)}
         onApplyLayout={applyLayout}
         onDeleteLayout={deleteLayout}
+        sidebarViews={sidebarViews}
+        onToggleSidebarView={toggleSidebarView}
         hot={hot}
         onFocusAgent={focusAgentAnywhere}
       />
@@ -955,38 +979,7 @@ export function App() {
             onRunCommand={runProjectCommand}
             onDropFolder={dropLaunchFolder}
           />
-          {topViews.map((v) => sideSection(v, true))}
-          <div className="pane-head sidebar-head">
-            <button
-              className="sidebar-title"
-              data-testid="sidebar-menu"
-              onClick={() => setOpenMenu(openMenu === 'sidebar' ? null : 'sidebar')}
-              aria-expanded={openMenu === 'sidebar'}
-              title="Choose which views stack below the agent list"
-            >
-              <span className="pane-title">Coding agents</span>
-              <ChevronDown className="sidebar-caret" strokeWidth={2} />
-            </button>
-            {agents.length > 0 && <span className="pane-count">{agents.filter((a) => !a.parentId).length}</span>}
-            {openMenu === 'sidebar' && (
-              <MenuPop onAway={() => setOpenMenu(null)} ignoreSelector=".sidebar-head">
-                {SIDEBAR_VIEWS.map((v) => (
-                  <MenuCheckItem
-                    key={v.id}
-                    icon={<v.icon strokeWidth={2} />}
-                    label={v.label}
-                    hint={v.hint}
-                    checked={sidebarViews.includes(v.id)}
-                    onClick={() => toggleSidebarView(v.id)}
-                  />
-                ))}
-              </MenuPop>
-            )}
-          </div>
-          <div className="pane-scroll">
-            <div className="agents-inner">{agentList}</div>
-          </div>
-          {belowViews.map((v) => sideSection(v))}
+          {activeViews.map((v, i) => sideSection(v, i === 0))}
         </aside>
 
         <Splitter

@@ -6,7 +6,7 @@ import {
 import { Settings } from './Icons'
 import mark from './assets/icon.png'
 import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
-import { MAX_PANES, PANE_KINDS, isUniqueKind, type PaneCols, type PaneInstance, type PaneKind } from './panes'
+import { MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, isUniqueKind, type PaneCols, type PaneInstance, type PaneKind, type SidebarView } from './panes'
 import type { ProviderHealth, ProviderId, SizeMode, TerminalLaunch } from '@shared/types'
 import { overallStatus } from '@shared/health.mjs'
 import { ProviderBadge } from './ProviderBadge'
@@ -71,6 +71,9 @@ interface Props {
   onSaveLayout: () => void
   onApplyLayout: (name: string) => void
   onDeleteLayout: (name: string) => void
+  /** Sidebar sections (Limits, Open windows) and their toggles. */
+  sidebarViews: SidebarView[]
+  onToggleSidebarView: (view: SidebarView) => void
   /** Root sessions near their context limit and still climbing. */
   hot: { id: string; project: string; pct: number }[]
   onFocusAgent: (id: string) => void
@@ -88,7 +91,8 @@ export function TopBar(props: Props) {
     waiting, waitingOnly, onWaitingOnly, canCollapse, allCollapsed, onCollapseAll, health, debugPort,
     panes, onAddPane, onNewTerminal, onNewProject, canResetOrder, onResetOrder, onSettings,
     sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, openMenu, onOpenMenu, onPalette, onUsage,
-    layouts, onSaveLayout, onApplyLayout, onDeleteLayout, hot, onFocusAgent, onActivity
+    layouts, onSaveLayout, onApplyLayout, onDeleteLayout, hot, onFocusAgent, onActivity,
+    sidebarViews, onToggleSidebarView
   } = props
 
   const paneFull = panes.length >= MAX_PANES
@@ -165,6 +169,30 @@ export function TopBar(props: Props) {
                   hint={p.hint}
                   disabled={!canAdd(p.id)}
                   onClick={run(() => onAddPane(p.id))}
+                />
+              ))}
+              <div className="menu-sep" />
+              <div className="menu-label"><PanelLeft className="menu-label-ic" strokeWidth={2} />Sidebar</div>
+              {SIDEBAR_VIEWS.map((v) => (
+                <MenuCheckItem
+                  key={v.id}
+                  icon={<v.icon strokeWidth={2} />}
+                  label={v.label}
+                  hint={v.hint}
+                  checked={sidebarViews.includes(v.id)}
+                  onClick={() => onToggleSidebarView(v.id)}
+                />
+              ))}
+              <div className="menu-sep" />
+              <div className="menu-label"><PanelLeft className="menu-label-ic" strokeWidth={2} />Sidebar</div>
+              {SIDEBAR_VIEWS.map((v) => (
+                <MenuCheckItem
+                  key={v.id}
+                  icon={<v.icon strokeWidth={2} />}
+                  label={v.label}
+                  hint={v.hint}
+                  checked={sidebarViews.includes(v.id)}
+                  onClick={() => onToggleSidebarView(v.id)}
                 />
               ))}
               <div className="menu-sep" />

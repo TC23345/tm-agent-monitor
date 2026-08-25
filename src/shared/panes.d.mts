@@ -24,6 +24,14 @@ export function sanitizePanes<K extends string>(
   raw: unknown,
   options: { kinds: readonly K[]; isUnique: (kind: K) => boolean; maxPanes: number; launches?: readonly string[] }
 ): SanitizedPane<K>[]
+export function migratePanesV3<K extends string>(
+  rawV2: unknown,
+  options: { newId: string; kinds: readonly K[]; isUnique: (kind: K) => boolean; maxPanes: number; launches?: readonly string[] }
+): SanitizedPane<K>[]
+export function migratePanesV3<K extends string>(
+  rawV2: unknown,
+  options: { newId: string; kinds: readonly K[]; isUnique: (kind: K) => boolean; maxPanes: number; launches?: readonly string[] }
+): SanitizedPane<K>[]
 export function sanitizeSidebarViews<V extends string>(raw: unknown, legacyRaw: unknown, options: { ids: readonly V[]; defaults: readonly V[] }): V[]
 export function sanitizeCollapsed<V extends string>(raw: unknown, options: { ids: readonly V[]; defaults: readonly V[] }): V[]
 export function readPaneCols(raw: unknown): 'auto' | 1 | 2 | 3

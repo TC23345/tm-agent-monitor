@@ -1,9 +1,9 @@
-import { Activity, AppWindow, Coins, Rss, Terminal } from 'lucide-react'
+import { Activity, AppWindow, Bot, Coins, Rss, Terminal } from 'lucide-react'
 import type { TerminalLaunch } from '@shared/types'
 import type { SizeBucket } from '@shared/layout.mjs'
 import {
-  emptySizes as emptySizesShared, readAllSizes, readPaneCols, sanitizeCollapsed, sanitizePanes, sanitizeSidebarViews,
-  type Sizes
+  emptySizes as emptySizesShared, migratePanesV3, readAllSizes, readPaneCols, sanitizeCollapsed, sanitizePanes,
+  sanitizeSidebarViews, type Sizes
 } from '@shared/panes.mjs'
 
 /** localStorage JSON, or null — every reader here tolerates null. */
@@ -22,7 +22,7 @@ function readJson(key: string): unknown {
  * a pane. At-a-glance status — open windows and limit bars — stacks in the
  * sidebar as toggleable sections; see `SidebarView`.
  */
-export type PaneKind = 'terminal' | 'usage' | 'activity'
+export type PaneKind = 'agents' | 'terminal' | 'usage' | 'activity'
 
 /** What an embedded terminal pane runs. `sessionId` reattaches after a remount;
  * a stale id (fresh app run) just starts a new shell with the same launch. */
@@ -43,6 +43,7 @@ export interface PaneInstance {
 }
 
 export const PANE_KINDS: { id: PaneKind; label: string; icon: typeof Activity; hint: string }[] = [
+  { id: 'agents', label: 'Agents', icon: Bot, hint: 'Live Claude Code, Codex, and Cursor sessions by project' },
   { id: 'terminal', label: 'Terminal', icon: Terminal, hint: 'An embedded PowerShell terminal' },
   { id: 'usage', label: 'Usage', icon: Coins, hint: 'Today’s spend and local usage insights' },
   { id: 'activity', label: 'Activity', icon: Rss, hint: 'What sessions asked, finished, started, and ended' }
@@ -54,10 +55,10 @@ export function newPane(kind: PaneKind, term?: TerminalPaneConfig): PaneInstance
   return { id: crypto.randomUUID(), kind, term: kind === 'terminal' ? (term ?? { launch: 'shell' }) : undefined }
 }
 
-/** No panes: the grid shows its empty state and the sidebar's launch nav is
- * how work starts. Nothing is spawned before the user asks. */
+/** The agent list is what this app is for, so it is the one pane a fresh
+ * workspace opens. Nothing is spawned before the user asks. */
 export function defaultPanes(): PaneInstance[] {
-  return []
+  return [newPane('agents')]
 }
 
 /** Kinds that may appear only once. Terminals repeat — one shell per pane. */
@@ -65,14 +66,23 @@ export function isUniqueKind(kind: PaneKind): boolean {
   return kind !== 'terminal'
 }
 
-const STORAGE_KEY = 'tm.panes.v2'
+const STORAGE_KEY = 'tm.panes.v3'
+const LEGACY_PANES_KEY = 'tm.panes.v2'
 
 const PANE_KIND_IDS = PANE_KINDS.map((p) => p.id)
 
 export function loadPanes(): PaneInstance[] {
   // Parsing lives in @shared/panes.mjs (tested): retired kinds drop, unique
   // kinds dedupe, and an emptied layout falls back to the default.
-  const panes = sanitizePanes(readJson(STORAGE_KEY), { kinds: PANE_KIND_IDS, isUnique: isUniqueKind, maxPanes: MAX_PANES })
+  const stored = readJson(STORAGE_KEY)
+  const opts = { kinds: PANE_KIND_IDS, isUnique: isUniqueKind, maxPanes: MAX_PANES }
+  if (stored === null) {
+    // One-time v2 migration: the agent list moved out of the sidebar, so a
+    // layout saved before that gets an Agents pane in front of its panes.
+    const migrated = migratePanesV3(readJson(LEGACY_PANES_KEY), { ...opts, newId: crypto.randomUUID() })
+    return migrated.length ? migrated : defaultPanes()
+  }
+  const panes = sanitizePanes(stored, opts)
   return panes.length ? panes : defaultPanes()
 }
 
@@ -93,14 +103,14 @@ export type SidebarView = 'windows' | 'limits'
  * pane. Their stored ids fall out of every sidebar key through `isSidebarView`,
  * which is derived from this catalog, so no migration is needed. */
 export const SIDEBAR_VIEWS: { id: SidebarView; label: string; icon: typeof Activity; hint: string }[] = [
-  { id: 'windows', label: 'Open windows', icon: AppWindow, hint: 'Switch to an open terminal, editor, or browser' },
-  { id: 'limits', label: 'Limits', icon: Activity, hint: 'Provider usage limits' }
+  { id: 'limits', label: 'Limits', icon: Activity, hint: 'Provider usage limits' },
+  { id: 'windows', label: 'Open windows', icon: AppWindow, hint: 'Switch to an open terminal, editor, or browser' }
 ]
 
 /** Views that pin above the agent list, in this order. Open windows leads: it
  * starts rolled up, so it costs one header row and is one click from the switcher.
  * Everything else stacks below the agents. */
-export const SIDEBAR_TOP: SidebarView[] = ['windows', 'limits']
+export const SIDEBAR_TOP: SidebarView[] = ['limits', 'windows']
 
 export function isTopSidebarView(view: SidebarView): boolean {
   return SIDEBAR_TOP.includes(view)
@@ -108,7 +118,7 @@ export function isTopSidebarView(view: SidebarView): boolean {
 
 const SIDEBAR_KEY = 'tm.sidebar.v2'
 const LEGACY_SIDEBAR_KEY = 'tm.sidebar.v1'
-const DEFAULT_SIDEBAR: SidebarView[] = ['windows', 'limits']
+const DEFAULT_SIDEBAR: SidebarView[] = ['limits', 'windows']
 
 const SIDEBAR_IDS = SIDEBAR_VIEWS.map((v) => v.id)
 

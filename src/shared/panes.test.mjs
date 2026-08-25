@@ -1,16 +1,16 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { emptySizes, readAllSizes, readPaneCols, sanitizeCollapsed, sanitizePanes, sanitizeSidebarViews } from './panes.mjs'
+import { emptySizes, migratePanesV3, readAllSizes, readPaneCols, sanitizeCollapsed, sanitizePanes, sanitizeSidebarViews } from './panes.mjs'
 
-const KINDS = ['launcher', 'terminal', 'usage', 'activity']
+const KINDS = ['agents', 'terminal', 'usage', 'activity']
 const opts = { kinds: KINDS, isUnique: (k) => k !== 'terminal', maxPanes: 6 }
 
 test('panes: unknown kinds drop, unique kinds dedupe, terminals keep only known fields, the cap holds', () => {
   const raw = [
-    { id: 'a', kind: 'launcher' },
+    { id: 'a', kind: 'agents' },
     { id: 'b', kind: 'spend' },                       // retired kind
     { id: 'c', kind: 'terminal', term: { launch: 'zsh', cwd: 'C:\\p', label: 5, sessionId: 's1', initialCommand: 'npm test', extra: 1 } },
-    { id: 'd', kind: 'launcher' },                    // duplicate unique
+    { id: 'd', kind: 'agents' },                      // duplicate unique
     { id: 'e', kind: 'terminal' },
     null, 'junk', { kind: 'usage' },                  // malformed
     { id: 'f', kind: 'usage' },
@@ -21,6 +21,36 @@ test('panes: unknown kinds drop, unique kinds dedupe, terminals keep only known 
   assert.deepEqual(panes[1].term, { launch: 'shell', cwd: 'C:\\p', label: undefined, sessionId: 's1', initialCommand: 'npm test' })
   assert.deepEqual(panes[2].term, { launch: 'shell', cwd: undefined, label: undefined, sessionId: undefined, initialCommand: undefined })
   assert.deepEqual(sanitizePanes('nope', opts), [])
+})
+
+test('the v3 migration puts an Agents pane first, once, and respects the cap', () => {
+  const v2 = [{ id: 't', kind: 'terminal' }, { id: 'u', kind: 'usage' }]
+  assert.deepEqual(migratePanesV3(v2, { ...opts, newId: 'new' }).map((p) => p.kind), ['agents', 'terminal', 'usage'])
+  // Already migrated (or hand-made): left alone.
+  const withAgents = [{ id: 'a', kind: 'agents' }, { id: 't', kind: 'terminal' }]
+  assert.deepEqual(migratePanesV3(withAgents, { ...opts, newId: 'new' }).map((p) => p.id), ['a', 't'])
+  // A full layout drops its last pane rather than exceeding MAX_PANES.
+  const full = Array.from({ length: 6 }, (_, i) => ({ id: `t${i}`, kind: 'terminal' }))
+  const migrated = migratePanesV3(full, { ...opts, newId: 'new' })
+  assert.equal(migrated.length, 6)
+  assert.deepEqual(migrated.map((p) => p.id), ['new', 't0', 't1', 't2', 't3', 't4'])
+  // Nothing stored: just the Agents pane.
+  assert.deepEqual(migratePanesV3(null, { ...opts, newId: 'new' }).map((p) => p.kind), ['agents'])
+})
+
+test('the v3 migration puts an Agents pane first, once, and respects the cap', () => {
+  const v2 = [{ id: 't', kind: 'terminal' }, { id: 'u', kind: 'usage' }]
+  assert.deepEqual(migratePanesV3(v2, { ...opts, newId: 'new' }).map((p) => p.kind), ['agents', 'terminal', 'usage'])
+  // Already migrated (or hand-made): left alone.
+  const withAgents = [{ id: 'a', kind: 'agents' }, { id: 't', kind: 'terminal' }]
+  assert.deepEqual(migratePanesV3(withAgents, { ...opts, newId: 'new' }).map((p) => p.id), ['a', 't'])
+  // A full layout drops its last pane rather than exceeding MAX_PANES.
+  const full = Array.from({ length: 6 }, (_, i) => ({ id: `t${i}`, kind: 'terminal' }))
+  const migrated = migratePanesV3(full, { ...opts, newId: 'new' })
+  assert.equal(migrated.length, 6)
+  assert.deepEqual(migrated.map((p) => p.id), ['new', 't0', 't1', 't2', 't3', 't4'])
+  // Nothing stored: just the Agents pane.
+  assert.deepEqual(migratePanesV3(null, { ...opts, newId: 'new' }).map((p) => p.kind), ['agents'])
 })
 
 test('sidebar views: v2 wins, v1 migrates once and surfaces Open windows, else defaults; retired ids vanish', () => {

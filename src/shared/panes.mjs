@@ -68,6 +68,17 @@ export function sanitizeCollapsed(raw, { ids, defaults }) {
   return [...new Set(raw.filter((v) => known.has(v)))]
 }
 
+/**
+ * v2 → v3: the agent list left the sidebar for its own pane, so a layout
+ * saved before that has nowhere to show sessions. Put an Agents pane first
+ * (space permitting) and keep everything else in order.
+ */
+export function migratePanesV3(rawV2, { newId, maxPanes, ...options }) {
+  const panes = sanitizePanes(rawV2, { maxPanes, ...options })
+  if (panes.some((p) => p.kind === 'agents')) return panes
+  return [{ id: newId, kind: 'agents' }, ...panes].slice(0, maxPanes)
+}
+
 export function readPaneCols(raw) {
   const cols = isRecord(raw) ? raw.cols : undefined
   return cols === 1 || cols === 2 || cols === 3 || cols === 'auto' ? cols : 'auto'
