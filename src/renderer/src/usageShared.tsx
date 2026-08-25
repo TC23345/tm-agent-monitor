@@ -46,12 +46,18 @@ export function ProviderDot({ provider }: { provider: ProviderId }) {
 export function QuotaBar({ q, hint }: { q: Quota; hint?: string }) {
   const now = useNow()
   const sev = q.severity ?? 'normal'
+  // A spent window is a fact, not a measurement: what matters is when it comes
+  // back, so that is what the row says loudest. (Red is reserved for "a session
+  // needs you", so escalation here is weight and wording, not hue.)
+  const spent = q.usedPct >= 99.5
   return (
-    <div className="quota" title={hint}>
+    <div className={`quota ${spent ? 'is-spent' : ''}`} title={hint}>
       <div className="quota-head">
         <span className="quota-label">{q.label}</span>
-        <span className="quota-reset">{resetsIn(q.resetsAt, now)}</span>
-        <span className={`quota-pct sev-${sev}`}>{Math.round(q.usedPct)}%</span>
+        <span className={`quota-reset ${spent ? 'quota-reset--back' : ''}`}>
+          {spent ? resetsIn(q.resetsAt, now, 'back in') : resetsIn(q.resetsAt, now)}
+        </span>
+        <span className={`quota-pct sev-${sev}`}>{spent ? 'spent' : `${Math.round(q.usedPct)}%`}</span>
       </div>
       <div className="quota-track"><div className={`quota-fill quota-fill--${q.tone} sev-${sev}`} style={{ width: `${Math.min(100, q.usedPct)}%` }} /></div>
     </div>

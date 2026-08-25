@@ -4,6 +4,7 @@ import { AgentIcon, RunningSpinner, ArrowUp } from './Icons'
 import { ProviderBadge } from './ProviderBadge'
 import { shortDuration, contextTone, compactNumber, modelShort, money } from './format'
 import { useNow } from './useNow'
+import { useSessionNames } from './sessionNames'
 import { tid } from './testid'
 
 /** Short chip label + class for a non-default permission mode. */
@@ -32,6 +33,9 @@ export function AgentRow({
   onToggleChildren?: () => void
 }) {
   const now = useNow()
+  // What a person called this session, if anything. The activity text says what
+  // it is doing; only a name says what it is for.
+  const name = useSessionNames()[agent.id]
   const running = agent.state === 'running'
   const alert = agent.state === 'waiting' && agent.waitReason === 'question'
   const tone = contextTone(agent.contextPct)
@@ -66,6 +70,7 @@ export function AgentRow({
           provider: agent.provider,
           focusHwnd: agent.focusHwnd,
           focusPid: agent.focusPid,
+          name,
           recentQuestions: agent.recentQuestions,
           waiting: agent.state === 'waiting',
           question: agent.question
@@ -76,7 +81,8 @@ export function AgentRow({
       <button className="row-focus" onClick={() => window.watch.focusAgent(agent.id)}>
         <AgentIcon agent={agent} />
         <ProviderBadge provider={agent.provider} />
-        <span className="row-text">{text}</span>
+        {name && <span className="row-name" title={name}>{name}</span>}
+        <span className={`row-text ${name ? 'row-text--dim' : ''}`}>{text}</span>
         {mode && (
           <span className={`row-mode ${mode.cls}`} title={`Permission mode: ${agent.permissionMode}`}>
             {mode.label}

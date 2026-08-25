@@ -528,6 +528,8 @@ kbd {
 .quota-label { font-size: 13px; font-weight: 600; color: var(--text); }
 .quota-reset { font-size: 12px; color: var(--faint); }
 .quota-pct { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--muted); }
+.quota-reset--back { color: var(--pressure-hot); font-weight: 650; }
+.quota.is-spent .quota-label { color: var(--text); }
 .quota-pct.sev-warning { color: var(--pressure); }
 .quota-pct.sev-critical { color: var(--pressure-hot); }
 .quota-track { height: 6px; border-radius: 4px; background: var(--track); overflow: hidden; }
@@ -539,6 +541,9 @@ kbd {
 
 /* Burn-rate projection under the Session bar. */
 .pace { margin-top: 4px; font-size: 12px; font-weight: 600; }
+/* Belongs to the bar above it, so it sits tight against it and keeps its
+   distance from the next label. */
+.pace { margin: -4px 0 12px; }
 .pace.sev-warning { color: var(--pressure); }
 .pace.sev-critical { color: var(--pressure-hot); }
 
@@ -869,6 +874,16 @@ kbd {
 .row--nested { margin-left: 25px; padding-left: 8px; opacity: 0.9; border-left-color: var(--hairline); }
 .row--alert { background: rgba(242, 101, 91, 0.09); border-left-color: var(--st-question); }
 /* Natural width (not flex:1) so the tokens chip hugs the text; still shrinks + truncates. */
+.row-name {
+  flex: 0 0 auto;
+  max-width: 45%;
+  font-weight: 650;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-text--dim { color: var(--faint); }
 .row-text { flex: 0 1 auto; min-width: 0; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-meta { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; margin-left: auto; }
 
@@ -1467,6 +1482,12 @@ kbd {
   border-top: 1px solid var(--hairline);
 }
 .sideview-head { margin-bottom: 8px; }
+/* Collapse (a chevron, undone by clicking again) and hide (recoverable only
+   through View → Sidebar) are an order of magnitude apart in cost, so they do
+   not get the same weight: hide fades in on hover or keyboard focus. */
+.sideview-hide { opacity: 0; transition: opacity 120ms ease; }
+.sideview-head:hover .sideview-hide,
+.sideview-head:focus-within .sideview-hide { opacity: 1; }
 /* Limits pins above the agent list: its rule flips to the bottom edge. */
 .sideview--top {
   margin-top: 0;

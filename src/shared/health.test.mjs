@@ -46,7 +46,10 @@ test('the chip rolls providers up, worst first', () => {
   const providers = { claude: live, codex: { installed: true, awaitingTrust: false, reporting: false }, cursor: { installed: false, awaitingTrust: false, reporting: false } }
   const ok = overallStatus(providers, NOW)
   assert.equal(ok.state, 'on')
-  assert.equal(ok.label, '1/3 providers')
+  // Healthy names what is live; a fraction would read as a failure.
+  assert.equal(ok.label, 'Claude Code live')
+  assert.equal(overallStatus({ claude: live, codex: { ...live } }, NOW).label, 'Claude Code + Codex live')
+  assert.equal(overallStatus({ claude: live, codex: { ...live }, cursor: { ...live } }, NOW).label, '3 providers live')
   assert.match(ok.title, /Claude Code: reporting · last 30s ago\nCodex: installed, no reports yet\nCursor: not installed/)
 
   const silent = overallStatus({ ...providers, claude: { ...live, lastReportAt: NOW - 20 * 60_000 } }, NOW)

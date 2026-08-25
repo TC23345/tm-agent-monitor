@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { FolderOpen, Copy, SquareTerminal, Folder, Crosshair, MessageSquareText } from 'lucide-react'
+import { FolderOpen, Copy, SquareTerminal, Folder, Crosshair, MessageSquareText, Tag } from 'lucide-react'
 import { ChevronDown, ChevronRight } from './Icons'
 import type { ProviderId } from '@shared/types'
 
@@ -17,15 +17,19 @@ export interface MenuState {
   /** Waiting on the user right now, and for what. */
   waiting?: boolean
   question?: string
+  /** What this session has been named, if anything. */
+  name?: string
 }
 
 /** Right-click actions for a session row. Closes on action, click-outside, Esc. */
-export function AgentContextMenu({ menu, onClose, replySession }: {
+export function AgentContextMenu({ menu, onClose, replySession, onRename }: {
   menu: MenuState
   onClose: () => void
   /** The embedded terminal session this agent runs in, when it has one —
    * then a reply can be typed straight into it from here. */
   replySession?: string
+  /** Name this session so the row says what it is for, not just what it is doing. */
+  onRename: (id: string) => void
 }) {
   const [reply, setReply] = useState('')
   const canReply = !!replySession && !!menu.waiting
@@ -114,6 +118,10 @@ export function AgentContextMenu({ menu, onClose, replySession }: {
             </div>
           </div>
         )}
+        <button className="ctxmenu-item" onClick={() => onRename(menu.id)} title="Give this session a name so you can pick it out of a list">
+          <Tag className="ctxmenu-ic" strokeWidth={2} />
+          {menu.name ? 'Rename session' : 'Name this session'}
+        </button>
         <button
           className="ctxmenu-item"
           onClick={focusTerminal}

@@ -10,15 +10,15 @@ export function shortDuration(sinceMs: number, now = Date.now()): string {
 }
 
 /** "resets in 2h 39m", "resets in 5d". */
-export function resetsIn(resetsAt: number | null, now = Date.now()): string {
+export function resetsIn(resetsAt: number | null, now = Date.now(), prefix = 'resets in'): string {
   if (resetsAt == null) return ''
   let s = Math.max(0, Math.floor((resetsAt - now) / 1000))
   const d = Math.floor(s / 86400); s -= d * 86400
   const h = Math.floor(s / 3600); s -= h * 3600
   const m = Math.floor(s / 60)
-  if (d > 0) return `resets in ${d}d`
-  if (h > 0) return `resets in ${h}h ${m}m`
-  if (m > 0) return `resets in ${m}m`
+  if (d > 0) return `${prefix} ${d}d`
+  if (h > 0) return `${prefix} ${h}h ${m}m`
+  if (m > 0) return `${prefix} ${m}m`
   return 'resets soon'
 }
 

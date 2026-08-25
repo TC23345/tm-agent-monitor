@@ -18,6 +18,7 @@ const TerminalPane = lazy(() => import('./TerminalPane').then((m) => ({ default:
 import { MenuItem, MenuPop } from './Menu'
 import { SNIPPETS } from './snippets'
 import { NameDialog } from './NameDialog'
+import { SESSION_NAME_MAX, setSessionName, useSessionNames } from './sessionNames'
 import { useProjectCommands } from './useProject'
 import { ActivityPane } from './ActivityPane'
 import { isWorkspaceCommand } from '@shared/workspaceCommand.mjs'
@@ -45,7 +46,7 @@ import { WindowsPane, WindowsRefreshButton, useDesktopWindows } from './Workspac
 import { LaunchNav, type LaunchTarget } from './LaunchNav'
 import {
   AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Code2 as CursorIcon, Coins, Columns3, Copy,
-  Eraser, ExternalLink, Filter, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
+  Eraser, ExternalLink, EyeOff, Filter, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
   PanelLeft, PanelRight, Play, Power, RotateCcw, Rss, Ruler, Save, Shrink, SquareSlash, SquareSplitHorizontal,
   SquareTerminal, Sunrise, Terminal, Trash2, X
 } from 'lucide-react'
@@ -75,6 +76,9 @@ export function App() {
   // Named layouts and the save-as prompt; a project group dragged over the grid.
   const [layouts, setLayouts] = useState<LayoutMap>(loadLayouts)
   const [layoutDialog, setLayoutDialog] = useState(false)
+  // The session being named, if any (the rows read the same store).
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const sessionNames = useSessionNames()
   const [gridDropHot, setGridDropHot] = useState(false)
   // "While you were away": the snapshot at hide, diffed against the one at summon.
   const away = useRef<{ at: number; snap: StatusSnapshot | null } | null>(null)
@@ -275,6 +279,7 @@ export function App() {
       else if (snippetsFor) setSnippetsFor(null)
       else if (openMenu) setOpenMenu(null)
       else if (palette) setPalette(false)
+      else if (renaming) setRenaming(null)
       else if (layoutDialog) setLayoutDialog(false)
       else if (newProjectOpen) setNewProjectOpen(false)
       else if (zoom) setZoom(null)
@@ -729,8 +734,13 @@ export function App() {
           </button>
           <span className="gpane-actions">
             {v.id === 'windows' && !rolled && <WindowsRefreshButton refreshing={desktop.refreshing} refresh={desktop.refresh} />}
-            <button className="iconbtn iconbtn--sm" onClick={() => toggleSidebarView(v.id)} title="Hide this view" aria-label={`Hide ${v.label}`}>
-              <X className="gear gear--sm" strokeWidth={2} />
+            <button
+              className="iconbtn iconbtn--sm sideview-hide"
+              onClick={() => toggleSidebarView(v.id)}
+              title={`Hide ${v.label} — bring it back from View → Sidebar`}
+              aria-label={`Hide ${v.label}`}
+            >
+              <EyeOff className="gear gear--sm" strokeWidth={2} />
             </button>
           </span>
         </div>
@@ -874,7 +884,7 @@ export function App() {
       items.push({
         id: `agent:${a.id}`,
         section: 'agent',
-        label: a.project,
+        label: sessionNames[a.id] ?? a.project,
         detail: a.state === 'waiting'
           ? `waiting · ${a.question ?? a.activity ?? 'needs input'}`
           : [a.state, a.activity].filter(Boolean).join(' · '),
@@ -1132,6 +1142,19 @@ export function App() {
             const agent = agents.find((a) => a.id === menu.id)
             return agent ? paneForAgent(panes, agent)?.term?.sessionId : undefined
           })()}
+          onRename={(id) => { setMenu(null); setRenaming(id) }}
+        />
+      )}
+      {renaming && (
+        <NameDialog
+          title="Name this session"
+          placeholder="auth refactor"
+          hint="Shown on the row and in the palette, so you can tell your sessions apart. Clearing it removes the name."
+          action="Save name"
+          initial={sessionNames[renaming] ?? ''}
+          validate={(v) => (v.length > SESSION_NAME_MAX ? `Keep it under ${SESSION_NAME_MAX} characters` : null)}
+          onSubmit={(value) => { setSessionName(renaming, value); setRenaming(null) }}
+          onClose={() => setRenaming(null)}
         />
       )}
     </div>

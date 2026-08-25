@@ -77,5 +77,13 @@ export function overallStatus(providers, now, mock = false, options = {}) {
     const short = first[1].reason.startsWith('silent') ? `${providerLabel(first[0])} ${first[1].reason}` : `${providerLabel(first[0])} · attention`
     return { state: 'warn', label: short, title }
   }
-  return { state: 'on', label: `${reporting}/${entries.length} providers`, title }
+  // Healthy names the state, never a ratio: "1/3 providers" beside a green dot
+  // reads as a failure and sends the user hunting for two broken things, when
+  // the other two are simply not installed. A number appears only when it is
+  // actionable — and then the state is `warn`, above.
+  const live = statuses.filter(([, s]) => s.tone === 'on').map(([id]) => providerLabel(id))
+  const label = live.length === 0 ? 'hooks live'
+    : live.length <= 2 ? `${live.join(' + ')} live`
+      : `${live.length} providers live`
+  return { state: 'on', label, title }
 }
