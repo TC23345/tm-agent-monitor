@@ -29,7 +29,7 @@ interface Props {
 
 /** One cell of the main frame: a titled, closable, draggable, zoomable pane
  * whose header carries its kind's tools. The kind itself is fixed for the
- * pane's life — swapping a terminal into a launcher would kill its shell, so
+ * pane's life — swapping one kind for another would kill a running shell, so
  * a different kind is a new pane (View → Add pane, or the palette). */
 export function Pane({ kind, onClose, context, tools, attention, zoomed, onZoom, dragHandle, children }: Props) {
   const meta = PANE_KINDS.find((p) => p.id === kind)!

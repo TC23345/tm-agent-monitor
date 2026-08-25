@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useState, type MouseEvent } from 'react'
-import type { DesktopWindow, DesktopWindowKind, ProjectCommand, TerminalLaunch } from '@shared/types'
-import { tid } from './testid'
+import { useCallback, useEffect, useState } from 'react'
+import type { DesktopWindow, DesktopWindowKind } from '@shared/types'
 import { groupWindows } from '@shared/windows.mjs'
-import { Bot, Code2, Folder, FolderPlus, Globe, RefreshCw, SquareTerminal, Play } from 'lucide-react'
+import { Bot, Code2, Folder, Globe, RefreshCw, SquareTerminal } from 'lucide-react'
 import { ProviderBadge } from './ProviderBadge'
 
 /** How often the open-window list re-reads Win32 while the workspace is on screen. */
@@ -16,106 +15,6 @@ const KIND_ICON: Record<DesktopWindowKind, typeof SquareTerminal> = {
   explorer: Folder
 }
 
-export interface LaunchContext {
-  /** Folder new terminals and editors open in — the active project, or home. */
-  cwd?: string
-  label?: string
-  /** Undefined when no session has reported a folder yet. */
-  onToggle?: () => void
-}
-
-/** Chip for the pane header showing — and switching — where launches land. */
-export function LaunchContextChip({ context }: { context: LaunchContext }) {
-  if (!context.onToggle) return null
-  return (
-    <button
-      className={`pane-context ${context.cwd ? 'is-project' : ''}`}
-      onClick={context.onToggle}
-      title={context.cwd
-        ? `Launches open in ${context.cwd} — click to use your home folder instead`
-        : 'Launches open in your home folder — click to use the active project instead'}
-    >
-      {context.cwd ? context.label : 'home'}
-    </button>
-  )
-}
-
-/** Start a terminal, editor, or browser — in the active project or at home.
- * Terminal launches open embedded panes; Shift-click opens an external window. */
-export function LauncherPane({ context, onNewProject, onEmbedTerminal, commands = [], onRunCommand }: {
-  context: LaunchContext
-  onNewProject: () => void
-  onEmbedTerminal: (launch: TerminalLaunch) => void
-  /** This folder's `.tm.json` commands and npm scripts, run in a new pane. */
-  commands?: ProjectCommand[]
-  onRunCommand?: (command: ProjectCommand) => void
-}) {
-  const where = context.cwd ? `${context.label ?? context.cwd}` : 'your home folder'
-  const inProject = ` in ${where}`
-  const launchTerminal = (launch: TerminalLaunch) => (event: MouseEvent<HTMLButtonElement>) => {
-    if (event.shiftKey) window.watch.openTerminal(context.cwd, launch)
-    else onEmbedTerminal(launch)
-  }
-  return (
-    <div className="launchwrap">
-      <div className="launchpad">
-        <button className="launch" onClick={launchTerminal('claude')} title={`Start Claude Code in a terminal pane${inProject} — Shift-click for an external window`}>
-          <ProviderBadge provider="claude" />
-          Claude Code
-        </button>
-        <button className="launch" onClick={launchTerminal('codex')} title={`Start Codex in a terminal pane${inProject} — Shift-click for an external window`}>
-          <ProviderBadge provider="codex" />
-          Codex
-        </button>
-        <button className="launch" onClick={launchTerminal('shell')} title={`Open a PowerShell terminal pane${inProject} — Shift-click for an external window`}>
-          <SquareTerminal className="launch-ic" strokeWidth={2} />
-          Terminal
-        </button>
-        <button className="launch" onClick={() => window.watch.openCursor(context.cwd)} title={context.cwd ? `Open ${context.label} in Cursor` : 'Open a new Cursor window'} aria-label="Open Cursor">
-          <Code2 className="launch-ic" strokeWidth={2} />
-          Cursor
-        </button>
-        <button className="launch" onClick={() => window.watch.openChrome()} title="Open a new Chrome window">
-          <Globe className="launch-ic" strokeWidth={2} />
-          Chrome
-        </button>
-        <button className="launch" onClick={onNewProject} title="Create a project folder and open it in Cursor">
-          <FolderPlus className="launch-ic" strokeWidth={2} />
-          New project
-        </button>
-      </div>
-      {commands.length > 0 && onRunCommand && (
-        <div className="launch-cmds" data-testid="launch-commands">
-          <div className="launch-cmds-label">{context.label ?? 'Project'} commands</div>
-          <div className="launch-cmds-row">
-            {commands.map((c) => (
-              <button
-                key={c.command}
-                className={`launch-cmd ${c.source === 'tm' ? 'is-tm' : ''}`}
-                onClick={() => onRunCommand(c)}
-                title={`${c.command}\nRuns in a new terminal pane${inProject}${c.source === 'tm' ? ' · from .tm.json' : ' · npm script'}`}
-                data-testid={tid('launch-cmd', c.label)}
-              >
-                <Play className="launch-cmd-ic" strokeWidth={2} />
-                {c.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      <button className="linkbtn" onClick={() => window.watch.openProjectsDir()} title="Open the Projects folder in File Explorer">
-        <Folder className="launch-ic" strokeWidth={2} />
-        Projects folder
-      </button>
-    </div>
-  )
-}
-
-/**
- * Live list of the windows you drive agents from. Electron cannot host a foreign
- * native window (electron/electron#10547 is still open), so this switches to them
- * with Win32 focus rather than embedding them.
- */
 /** Equal enough that nothing rendered from the list would change. */
 function sameWindows(a: DesktopWindow[] | null, b: DesktopWindow[]): boolean {
   if (!a || a.length !== b.length) return false

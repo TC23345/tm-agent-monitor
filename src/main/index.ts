@@ -1,6 +1,6 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, clipboard, screen } from 'electron'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
@@ -1336,6 +1336,17 @@ function registerIpc(): void {
       return null
     }
   }
+  ipcMain.handle('path:describe', (_e, raw: unknown): { dir: string; label: string } | null => {
+    // A dropped folder retargets launches; a dropped file means its folder.
+    if (typeof raw !== 'string' || raw.length === 0 || raw.length > 4096) return null
+    try {
+      const dir = statSync(raw).isDirectory() ? raw : dirname(raw)
+      if (!statSync(dir).isDirectory()) return null
+      return { dir, label: basename(dir) || dir }
+    } catch {
+      return null
+    }
+  })
   ipcMain.handle('project:commands', (_e, cwd: unknown) => {
     if (!isDir(cwd)) return []
     return parseProjectCommands({ tmJson: readSmall(join(cwd, '.tm.json')), packageJson: readSmall(join(cwd, 'package.json')) })
@@ -1427,6 +1438,20 @@ if (!gotLock) {
     app.setName('TaylorMade Agents')
     if (process.platform === 'win32') app.setAppUserModelId('com.taylormade.agent-monitor')
 
+    // Windows Jump List: right-click the taskbar icon to start a session
+    // without the workspace. Each task relaunches the exe with argv the
+    // running instance parses in `second-instance` (workspaceCommand.mjs).
+    // Packaged only — the docs require the program path to survive until
+    // uninstall, which a dev electron.exe does not.
+    if (process.platform === 'win32' && app.isPackaged) {
+      app.setUserTasks([
+        { program: process.execPath, arguments: 'open --launch claude', iconPath: process.execPath, iconIndex: 0, title: 'New Claude Code', description: 'Start Claude Code in the workspace' },
+        { program: process.execPath, arguments: 'open --launch codex', iconPath: process.execPath, iconIndex: 0, title: 'New Codex', description: 'Start Codex in the workspace' },
+        { program: process.execPath, arguments: 'open --launch shell', iconPath: process.execPath, iconIndex: 0, title: 'New terminal', description: 'Open a terminal in the workspace' },
+        { program: process.execPath, arguments: 'show', iconPath: process.execPath, iconIndex: 0, title: 'Show workspace', description: 'Bring the workspace to the front' }
+      ])
+    }
+
     settings = loadSettings()
     if (typeof settings.pushUrl === 'string' && /^https?:\/\/\S+$/.test(settings.pushUrl)) pushUrl = settings.pushUrl
     if (Number.isInteger(settings.pushAfterMin) && settings.pushAfterMin! >= 1 && settings.pushAfterMin! <= 240) pushAfterMin = settings.pushAfterMin!
@@ -1515,7 +1540,7 @@ if (!gotLock) {
               .map((k) => (k === 'spend' || k === 'insights' ? 'usage' : k))
             const sidebar = parts.filter((k) => ['limits', 'windows'].includes(k))
             const panes = parts
-              .filter((k) => k === 'launcher' || k === 'terminal' || k === 'usage')
+              .filter((k) => k === 'terminal' || k === 'usage' || k === 'activity')
               .map((kind, i) => ({ id: `capture-${i}`, kind, ...(kind === 'terminal' ? { term: { launch: 'shell' } } : {}) }))
             await win!.webContents.executeJavaScript(
               // The current key, and by default no rolled-up sections: a capture

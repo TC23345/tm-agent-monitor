@@ -41,10 +41,8 @@ import {
   PANE_MIN, PANE_MIN_ROW, clampSidebarWidth, columnTemplate, normalizeFractions, resizeFractions,
   trackWidths, viewportBucket, type SizeBucket
 } from '@shared/layout.mjs'
-import {
-  LaunchContextChip, LauncherPane, WindowsPane, WindowsRefreshButton, useDesktopWindows,
-  type LaunchContext
-} from './WorkspacePanes'
+import { WindowsPane, WindowsRefreshButton, useDesktopWindows } from './WorkspacePanes'
+import { LaunchNav, type LaunchTarget } from './LaunchNav'
 import {
   AppWindow, ChevronDown, ChevronsDownUp, Sunrise, ChevronsUpDown, Code2, Coins, Columns3, Eraser, ExternalLink, Filter,
   BellRing, Code2 as CursorIcon, Copy, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
@@ -91,9 +89,10 @@ export function App() {
   const { order, save: saveOrder, clear: clearOrder } = useGroupOrder()
   const [dragKey, setDragKey] = useState<string | null>(null)
   const [drop, setDrop] = useState<{ key: string; after: boolean } | null>(null)
-  // Main-frame layout: the launcher plus embedded terminal panes, drag-
+  // Main-frame layout: work panes (terminals, Usage, Activity), drag-
   // reorderable, up to six. Persisted locally so a summoned workspace comes
-  // back as you left it.
+  // back as you left it. Starting something lives in the sidebar nav, so an
+  // empty grid is a normal state.
   const [panes, setPanes] = useState<PaneInstance[]>(loadPanes)
   const [paneDrag, setPaneDrag] = useState<string | null>(null)
   const [paneDrop, setPaneDrop] = useState<{ id: string; after: boolean } | null>(null)
@@ -128,9 +127,10 @@ export function App() {
   // section can also roll up to just its header.
   const [sidebarViews, setSidebarViews] = useState<SidebarView[]>(loadSidebarViews)
   const [sidebarCollapsed, setSidebarCollapsed] = useState<SidebarView[]>(loadSidebarCollapsed)
-  // Launch actions start in the active project by default; the header chip toggles
-  // back to the home folder so a launch target is never a surprise.
-  const [useProjectContext, setUseProjectContext] = useState(true)
+  // Where launches land. null follows whichever session was most recently
+  // active; a target pins a folder (picked in the switcher, or dropped from
+  // Explorer onto the nav).
+  const [launchChoice, setLaunchChoice] = useState<LaunchTarget | null>(null)
   // Drives the slide-up / slide-down transition. Starts closed so the very first
   // painted frame is already off-screen and the card rises into place.
   const [open, setOpen] = useState(false)
@@ -339,10 +339,19 @@ export function App() {
   const recent = [...agents]
     .filter((a) => a.cwd && !a.parentId)
     .sort((a, b) => b.updatedAt - a.updatedAt)[0]
-  const context: LaunchContext = {
-    cwd: useProjectContext ? recent?.cwd : undefined,
-    label: useProjectContext ? recent?.project : undefined,
-    onToggle: recent?.cwd ? () => setUseProjectContext((v) => !v) : undefined
+  const context: LaunchTarget = launchChoice ?? { cwd: recent?.cwd, label: recent?.project }
+
+  /** Folders the switcher can point at: one per live project, newest first. */
+  const launchProjects: LaunchTarget[] = []
+  for (const a of [...agents].sort((x, y) => y.updatedAt - x.updatedAt)) {
+    if (a.cwd && !launchProjects.some((p) => p.cwd === a.cwd)) launchProjects.push({ cwd: a.cwd, label: a.project })
+  }
+
+  /** A folder dropped on the nav: main resolves it (a file means its parent). */
+  const dropLaunchFolder = (path: string) => {
+    window.watch.describePath(path).then((found) => {
+      if (found) setLaunchChoice({ cwd: found.dir, label: found.label })
+    }).catch(() => {})
   }
 
   // When the last waiting session resolves, drop the filter so the list never
@@ -570,8 +579,6 @@ export function App() {
 
   const paneBody = (pane: PaneInstance) => {
     switch (pane.kind) {
-      case 'launcher':
-        return <LauncherPane context={context} onNewProject={() => setNewProjectOpen(true)} onEmbedTerminal={newTerminal} commands={projectCommands} onRunCommand={runProjectCommand} />
       case 'usage':
         return <UsagePane usage={snap?.usage} />
       case 'activity':
@@ -592,10 +599,8 @@ export function App() {
     }
   }
 
-  /** What sits after the title: the launcher's folder chip, a terminal's
-   * launch + folder label. */
+  /** What sits after the title: a terminal's launch + folder label. */
   const paneContext = (pane: PaneInstance) => {
-    if (pane.kind === 'launcher') return <LaunchContextChip context={context} />
     if (pane.kind === 'terminal' && pane.term) {
       const label = pane.term.launch === 'shell' ? null : pane.term.launch === 'codex' ? 'Codex' : 'Claude Code'
       const where = pane.term.label ?? (pane.term.cwd ? pane.term.cwd.split(/[\\/]/).pop() : null)
@@ -614,14 +619,6 @@ export function App() {
 
   /** The header tool strip, per kind — an editor title bar's actions. */
   const paneTools = (pane: PaneInstance) => {
-    if (pane.kind === 'launcher') {
-      return (
-        <>
-          {tool('New project', ic(FolderPlus), () => setNewProjectOpen(true))}
-          {tool('Open the Projects folder', ic(Folder), () => window.watch.openProjectsDir())}
-        </>
-      )
-    }
     if (pane.kind === 'terminal' && pane.term) {
       const term = pane.term
       const handle = () => termRefs.current.get(pane.id)
@@ -729,7 +726,8 @@ export function App() {
   const sizes = allSizes[bucket]
   const sidebarWidth = clampSidebarWidth(sizes.sidebar, frameW)
   const cols = Math.max(1, Math.min(paneCols === 'auto' ? 3 : paneCols, panes.length, viewportCap))
-  const rows = Math.ceil(panes.length / cols)
+  // At least one row even with an empty grid, so the templates stay valid CSS.
+  const rows = Math.max(1, Math.ceil(panes.length / cols))
   const colFracs = normalizeFractions(sizes.cols[String(cols)], cols)
   const rowFracs = normalizeFractions(sizes.rows[String(rows)], rows)
   // A pane closed while zoomed leaves a stale id; the grid falls back to the
@@ -946,6 +944,17 @@ export function App() {
 
       <div className="frame" ref={frameRef}>
         <aside className="sidebar" style={{ flexBasis: sidebarWidth }}>
+          <LaunchNav
+            context={context}
+            projects={launchProjects}
+            following={launchChoice === null}
+            onChoose={setLaunchChoice}
+            onLaunch={(kind, external) => (external ? window.watch.openTerminal(context.cwd, kind) : newTerminal(kind))}
+            onNewProject={() => setNewProjectOpen(true)}
+            commands={projectCommands}
+            onRunCommand={runProjectCommand}
+            onDropFolder={dropLaunchFolder}
+          />
           {topViews.map((v) => sideSection(v, true))}
           <div className="pane-head sidebar-head">
             <button
@@ -1020,6 +1029,15 @@ export function App() {
             rowGap: 0
           }}
         >
+          {panes.length === 0 && (
+            <div className="gridempty" data-testid="grid-empty">
+              <SquareTerminal strokeWidth={1.5} style={{ width: 28, height: 28 }} />
+              <div className="gridempty-hint">
+                Nothing open. Start a session from the sidebar, press <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>`</kbd> for a terminal,
+                or <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd> for everything else.
+              </div>
+            </div>
+          )}
           {panes.map((pane, index) => (
             <div
               key={pane.id}

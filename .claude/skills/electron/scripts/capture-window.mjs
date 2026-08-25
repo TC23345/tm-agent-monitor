@@ -25,7 +25,7 @@ Options:
   --app <path>        Explicit app entry: built main .js, or packaged .exe
   --view <name>       CLAUDE_WATCH_CAPTURE_VIEW (settings | projects | usage |
                       insights-week | comma-separated pane kinds and sidebar
-                      views: launcher, terminal, usage, windows, limits)
+                      views: terminal, usage, activity, windows, limits)
   --delay <ms>        CLAUDE_WATCH_CAPTURE_DELAY_MS; lower it to catch an
                       animation mid-flight instead of at rest (default: 1600)
   --port <n>          CLAUDE_WATCH_PORT (default: 7460, avoiding the installed

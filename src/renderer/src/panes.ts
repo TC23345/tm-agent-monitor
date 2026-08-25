@@ -1,4 +1,4 @@
-import { Activity, AppWindow, Coins, Rss, SquareTerminal, Terminal } from 'lucide-react'
+import { Activity, AppWindow, Coins, Rss, Terminal } from 'lucide-react'
 import type { TerminalLaunch } from '@shared/types'
 import type { SizeBucket } from '@shared/layout.mjs'
 import {
@@ -16,12 +16,13 @@ function readJson(key: string): unknown {
 }
 
 /**
- * The main frame belongs to work: the launcher, embedded terminal sessions,
- * and the Usage report (spend + insights). At-a-glance status — open windows
- * and limit bars — lives in the Coding Agents sidebar as toggleable stacked
- * sections; see `SidebarView`.
+ * The main frame belongs to work: embedded terminal sessions and the reports
+ * (Usage, Activity). Starting something is not work — the launch nav lives at
+ * the head of the sidebar (`LaunchNav.tsx`), so opening a terminal never costs
+ * a pane. At-a-glance status — open windows and limit bars — stacks in the
+ * sidebar as toggleable sections; see `SidebarView`.
  */
-export type PaneKind = 'launcher' | 'terminal' | 'usage' | 'activity'
+export type PaneKind = 'terminal' | 'usage' | 'activity'
 
 /** What an embedded terminal pane runs. `sessionId` reattaches after a remount;
  * a stale id (fresh app run) just starts a new shell with the same launch. */
@@ -42,7 +43,6 @@ export interface PaneInstance {
 }
 
 export const PANE_KINDS: { id: PaneKind; label: string; icon: typeof Activity; hint: string }[] = [
-  { id: 'launcher', label: 'Launch', icon: SquareTerminal, hint: 'Start a terminal, editor, or browser' },
   { id: 'terminal', label: 'Terminal', icon: Terminal, hint: 'An embedded PowerShell terminal' },
   { id: 'usage', label: 'Usage', icon: Coins, hint: 'Today’s spend and local usage insights' },
   { id: 'activity', label: 'Activity', icon: Rss, hint: 'What sessions asked, finished, started, and ended' }
@@ -54,8 +54,10 @@ export function newPane(kind: PaneKind, term?: TerminalPaneConfig): PaneInstance
   return { id: crypto.randomUUID(), kind, term: kind === 'terminal' ? (term ?? { launch: 'shell' }) : undefined }
 }
 
+/** No panes: the grid shows its empty state and the sidebar's launch nav is
+ * how work starts. Nothing is spawned before the user asks. */
 export function defaultPanes(): PaneInstance[] {
-  return [newPane('launcher')]
+  return []
 }
 
 /** Kinds that may appear only once. Terminals repeat — one shell per pane. */

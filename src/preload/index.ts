@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, DailyUsageDay, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights, WorkspaceCommand } from '../shared/types.js'
 
 const api = {
@@ -62,6 +62,18 @@ const api = {
   /** Per-folder facts: `.tm.json` + package.json scripts, and git branch/dirty state. */
   getProjectCommands: (cwd: string): Promise<ProjectCommand[]> => ipcRenderer.invoke('project:commands', cwd),
   getGitStatus: (cwd: string): Promise<GitStatus | null> => ipcRenderer.invoke('git:status', cwd),
+  /** The path behind a dropped File. `File.path` was removed in Electron 32;
+   * `webUtils.getPathForFile` is the supported replacement, and it must run
+   * here in the preload — the sandboxed renderer never sees the raw object. */
+  pathForFile: (file: File): string => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return ''
+    }
+  },
+  /** A dropped path as a folder: the directory itself, or a file's parent. */
+  describePath: (path: string): Promise<{ dir: string; label: string } | null> => ipcRenderer.invoke('path:describe', path),
   /** The activity feed: attention-worthy moments across sessions, newest first. */
   getEvents: (): Promise<ActivityEvent[]> => ipcRenderer.invoke('agent:events'),
   /** A command a second instance sent (`tm open …`); the renderer re-validates it. */

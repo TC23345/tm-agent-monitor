@@ -21,7 +21,7 @@ interface Props {
 
 /**
  * A draggable divider. Pointer capture keeps the drag alive over panes that
- * would otherwise swallow the move (xterm's canvas, the launcher buttons), and
+ * would otherwise swallow the move (xterm's canvas, a pane's own buttons), and
  * the handle stays a real `separator` so the split is keyboard-reachable.
  *
  * The splitter owns no geometry: it reports a delta and the caller decides what
