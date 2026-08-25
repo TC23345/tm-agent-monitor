@@ -120,3 +120,12 @@ export function readAllSizes(raw) {
   const legacy = { sidebar: readWidth(layout.sidebar), cols: readFractions(layout.fracs), rows: {} }
   return { full: legacy, half: { ...legacy, cols: { ...legacy.cols } } }
 }
+
+/**
+ * The launch the split row in the nav starts on a plain click, remembered from
+ * the last pick. Unknown values (a retired launch, hand-edited storage) fall
+ * back to the first entry rather than starting the wrong thing.
+ */
+export function readLaunch(raw, launches) {
+  return launches.includes(raw) ? raw : launches[0]
+}

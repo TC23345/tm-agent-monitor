@@ -71,16 +71,21 @@ export function MenuItem({ icon, label, hint, disabled, onClick }: {
 }
 
 /** Toggleable row: a right-aligned check that stays in layout (invisible, not
- * removed) when unchecked, so rows never reflow as selection changes. */
-export function MenuCheckItem({ icon, label, hint, checked, onClick }: {
+ * removed) when unchecked, so rows never reflow as selection changes.
+ *
+ * `onClick` gets the event because some rows are launches, where Shift means
+ * "in an external window"; `testId` overrides the label-derived default for a
+ * row automation already knows by another name. */
+export function MenuCheckItem({ icon, label, hint, checked, onClick, testId }: {
   icon?: ReactNode
   label: string
   hint?: string
   checked: boolean
-  onClick: () => void
+  onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void
+  testId?: string
 }) {
   return (
-    <button className="menu-item" onClick={onClick} title={hint} aria-pressed={checked} data-testid={tid('menu', label)}>
+    <button className="menu-item" onClick={onClick} title={hint} aria-pressed={checked} data-testid={testId ?? tid('menu', label)}>
       <span className="menu-item-ic">{icon}</span>
       {label}
       <span className={`menu-check ${checked ? '' : 'menu-check--off'}`}>

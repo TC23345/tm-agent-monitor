@@ -616,6 +616,42 @@ kbd {
   letter-spacing: 0.4px;
   text-transform: uppercase;
 }
+/* Start-a-session is one row with two targets: the button runs the remembered
+   launch, the chevron opens the picker. They share a hover so it reads as one
+   control, and a hairline keeps the smaller target findable. */
+.navsplit-wrap { position: relative; }
+.navsplit-wrap .menu-pop { top: calc(100% + 4px); left: 0; min-width: 250px; }
+.navsplit {
+  display: flex;
+  align-items: stretch;
+  border-radius: 7px;
+}
+.navsplit:hover { background: var(--elev); }
+/* The row paints the hover; its two halves stay transparent on top of it so
+   they read as one control. Colour still lifts, including on the chevron. */
+.navsplit:hover .navrow { background: transparent; color: var(--text); }
+.navsplit:hover .navsplit-pick { color: var(--muted); }
+/* Scoped past `.navrow`, which sets a full radius later in this file at the
+   same specificity and would otherwise round the split's inner edge. */
+.navsplit .navsplit-go { flex: 1 1 auto; min-width: 0; border-radius: 7px 0 0 7px; }
+.navsplit-pick {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid transparent;
+  border-radius: 0 7px 7px 0;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+.navsplit:hover .navsplit-pick { border-left-color: var(--hairline); }
+.navsplit .navsplit-pick:hover, .navsplit .navsplit-pick[aria-expanded='true'] { background: rgba(255, 255, 255, 0.06); color: var(--text); }
+.navsplit-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .navrow {
   display: flex;
   align-items: center;

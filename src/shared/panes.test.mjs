@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { emptySizes, migratePanesV3, readAllSizes, readPaneCols, sanitizeCollapsed, sanitizePanes, sanitizeSidebarViews } from './panes.mjs'
+import { emptySizes, migratePanesV3, readAllSizes, readLaunch, readPaneCols, sanitizeCollapsed, sanitizePanes, sanitizeSidebarViews } from './panes.mjs'
 
 const KINDS = ['agents', 'terminal', 'usage', 'activity']
 const opts = { kinds: KINDS, isUnique: (k) => k !== 'terminal', maxPanes: 6 }
@@ -77,4 +77,13 @@ test('column choice and sizes read defensively, with the pre-bucket layout seedi
   assert.deepEqual(legacy.half, { sidebar: 500, cols: { 2: [1.3, 0.7] }, rows: {} })
   assert.notEqual(legacy.full.cols, legacy.half.cols)
   assert.deepEqual(readAllSizes(undefined).full, emptySizes())
+})
+
+test('the remembered launch falls back to the first entry rather than starting the wrong thing', () => {
+  const launches = ['claude', 'codex', 'shell']
+  assert.equal(readLaunch('codex', launches), 'codex')
+  assert.equal(readLaunch('shell', launches), 'shell')
+  assert.equal(readLaunch('bash', launches), 'claude')   // retired / hand-edited
+  assert.equal(readLaunch(null, launches), 'claude')     // never picked
+  assert.equal(readLaunch(3, launches), 'claude')
 })

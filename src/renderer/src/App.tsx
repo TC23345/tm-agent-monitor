@@ -32,8 +32,8 @@ import { ProviderBadge } from './ProviderBadge'
 import { Settings as SettingsIcon } from './Icons'
 import {
   MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, defaultPanes, emptySizes, isUniqueKind, loadPaneCols,
-  loadPanes, loadSidebarCollapsed, loadSidebarViews, loadSizes, newPane, savePaneCols, savePanes,
-  saveSidebarCollapsed, saveSidebarViews, saveSizes,
+  loadLaunch, loadPanes, loadSidebarCollapsed, loadSidebarViews, loadSizes, newPane, saveLaunch, savePaneCols,
+  savePanes, saveSidebarCollapsed, saveSidebarViews, saveSizes,
   type AllSizes, type PaneCols, type PaneInstance, type PaneKind, type PaneSizes, type SidebarView,
   type TerminalPaneConfig
 } from './panes'
@@ -43,7 +43,7 @@ import {
   trackWidths, viewportBucket, type SizeBucket
 } from '@shared/layout.mjs'
 import { WindowsPane, WindowsRefreshButton, useDesktopWindows } from './WorkspacePanes'
-import { LaunchNav, type LaunchTarget } from './LaunchNav'
+import { LaunchNav, type LaunchTarget, type NavMenu } from './LaunchNav'
 import {
   AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Code2 as CursorIcon, Coins, Columns3, Copy,
   Eraser, ExternalLink, EyeOff, Filter, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
@@ -76,6 +76,10 @@ export function App() {
   // Named layouts and the save-as prompt; a project group dragged over the grid.
   const [layouts, setLayouts] = useState<LayoutMap>(loadLayouts)
   const [layoutDialog, setLayoutDialog] = useState(false)
+  // What the nav's split launch row starts on a plain click. Deliberately only
+  // the popover changes it: the palette and the Terminal menu are for a one-off
+  // you already named, and should not silently move the nav's default.
+  const [launchKind, setLaunchKind] = useState<TerminalLaunch>(loadLaunch)
   // The session being named, if any (the rows read the same store).
   const [renaming, setRenaming] = useState<string | null>(null)
   const sessionNames = useSessionNames()
@@ -87,7 +91,10 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [menu, setMenu] = useState<MenuState | null>(null)
-  const [openMenu, setOpenMenu] = useState<MenuName | 'sidebar' | null>(null)
+  // One menu open at a time across the whole window — the title-bar menus and
+  // the launch nav's two popovers share this, so opening one closes the other
+  // and the Escape chain below sees every one of them.
+  const [openMenu, setOpenMenu] = useState<MenuName | 'sidebar' | NavMenu | null>(null)
   const [waitingOnly, setWaitingOnly] = useState(false)
   const [allCollapsed, setAllCollapsed] = useState(false)
   const { order, save: saveOrder, clear: clearOrder } = useGroupOrder()
@@ -150,6 +157,7 @@ export function App() {
   snapRef.current = snap
 
   useEffect(() => savePanes(panes), [panes])
+  useEffect(() => saveLaunch(launchKind), [launchKind])
   useEffect(() => saveSidebarViews(sidebarViews), [sidebarViews])
   useEffect(() => saveSidebarCollapsed(sidebarCollapsed), [sidebarCollapsed])
   useEffect(() => savePaneCols(paneCols), [paneCols])
@@ -948,7 +956,7 @@ export function App() {
         onPaneCols={setPaneCols}
         canResetSizes={sized}
         onResetSizes={resetSizes}
-        openMenu={openMenu === 'sidebar' ? null : openMenu}
+        openMenu={openMenu === 'file' || openMenu === 'terminal' || openMenu === 'view' || openMenu === 'user' ? openMenu : null}
         onOpenMenu={setOpenMenu}
         onPalette={() => setPalette((v) => !v)}
         onUsage={openUsage}
@@ -983,7 +991,11 @@ export function App() {
             projects={launchProjects}
             following={launchChoice === null}
             onChoose={setLaunchChoice}
+            openMenu={openMenu === 'launch-target' || openMenu === 'launch-pick' ? openMenu : null}
+            onOpenMenu={setOpenMenu}
             onLaunch={(kind, external) => (external ? window.watch.openTerminal(context.cwd, kind) : newTerminal(kind))}
+            launchKind={launchKind}
+            onLaunchKind={setLaunchKind}
             onNewProject={() => setNewProjectOpen(true)}
             commands={projectCommands}
             onRunCommand={runProjectCommand}

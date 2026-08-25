@@ -2,8 +2,8 @@ import { Activity, AppWindow, Bot, Coins, Rss, Terminal } from 'lucide-react'
 import type { TerminalLaunch } from '@shared/types'
 import type { SizeBucket } from '@shared/layout.mjs'
 import {
-  emptySizes as emptySizesShared, migratePanesV3, readAllSizes, readPaneCols, sanitizeCollapsed, sanitizePanes,
-  sanitizeSidebarViews, type Sizes
+  emptySizes as emptySizesShared, migratePanesV3, readAllSizes, readLaunch, readPaneCols, sanitizeCollapsed,
+  sanitizePanes, sanitizeSidebarViews, type Sizes
 } from '@shared/panes.mjs'
 
 /** localStorage JSON, or null — every reader here tolerates null. */
@@ -207,4 +207,27 @@ export function loadSizes(): AllSizes {
 
 export function saveSizes(sizes: AllSizes): void {
   writeLayout({ sizes })
+}
+
+/**
+ * What the nav's split launch row starts on a plain click. Three verbs that
+ * differ only in which agent they run don't each deserve a row, but a picker
+ * that always costs a click is worse than the rows were — so the row starts
+ * what you started last and the popover is only for changing your mind.
+ * Ctrl+Shift+` is unaffected: it always opens a plain shell.
+ */
+export const LAUNCH_KINDS: TerminalLaunch[] = ['claude', 'codex', 'shell']
+
+const LAUNCH_KEY = 'tm.launch.v1'
+
+export function loadLaunch(): TerminalLaunch {
+  return readLaunch(readJson(LAUNCH_KEY), LAUNCH_KINDS)
+}
+
+export function saveLaunch(launch: TerminalLaunch): void {
+  try {
+    localStorage.setItem(LAUNCH_KEY, JSON.stringify(launch))
+  } catch {
+    /* private mode / quota — the default just resets next launch */
+  }
 }
