@@ -9,17 +9,27 @@ export function shortDuration(sinceMs: number, now = Date.now()): string {
   return `${Math.floor(h / 24)}d`
 }
 
-/** "resets in 2h 39m", "resets in 5d". */
+/**
+ * "resets in 2h 39m", "resets in 31h 5m", "resets in 5d".
+ * Whole days only once the window is two or more days out: a flat "1d" hides
+ * whether that is 24 or 47 hours, and under two days the hour is what you plan
+ * around, so anything shorter is spelled out in hours and minutes.
+ */
 export function resetsIn(resetsAt: number | null, now = Date.now(), prefix = 'resets in'): string {
   if (resetsAt == null) return ''
   let s = Math.max(0, Math.floor((resetsAt - now) / 1000))
-  const d = Math.floor(s / 86400); s -= d * 86400
   const h = Math.floor(s / 3600); s -= h * 3600
   const m = Math.floor(s / 60)
-  if (d > 0) return `${prefix} ${d}d`
+  if (h >= 48) return `${prefix} ${Math.floor(h / 24)}d`
   if (h > 0) return `${prefix} ${h}h ${m}m`
   if (m > 0) return `${prefix} ${m}m`
   return 'resets soon'
+}
+
+/** ms epoch -> "Tue 3:40 PM" (user locale), for the hover on a countdown. */
+export function resetClock(resetsAt: number | null): string | undefined {
+  if (resetsAt == null) return undefined
+  return new Date(resetsAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })
 }
 
 /** ms epoch -> "3:40 PM" (user locale). */
