@@ -1,6 +1,6 @@
 import { useNow } from './useNow'
 import type { ProviderId, Quota, UsageAccount } from '@shared/types'
-import { resetsIn } from './format'
+import { resetsIn, resetClock } from './format'
 
 // Providers render in a fixed order, and their accounts always read plan → local
 // → API spend, so Claude and Codex line up row-for-row instead of appearing in
@@ -54,7 +54,7 @@ export function QuotaBar({ q, hint }: { q: Quota; hint?: string }) {
     <div className={`quota ${spent ? 'is-spent' : ''}`} title={hint}>
       <div className="quota-head">
         <span className="quota-label">{q.label}</span>
-        <span className={`quota-reset ${spent ? 'quota-reset--back' : ''}`}>
+        <span className={`quota-reset ${spent ? 'quota-reset--back' : ''}`} title={resetClock(q.resetsAt)}>
           {spent ? resetsIn(q.resetsAt, now, 'back in') : resetsIn(q.resetsAt, now)}
         </span>
         <span className={`quota-pct sev-${sev}`}>{spent ? 'spent' : `${Math.round(q.usedPct)}%`}</span>
