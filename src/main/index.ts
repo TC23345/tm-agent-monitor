@@ -1026,7 +1026,13 @@ function settingsView() {
       { id: 'org-label', label: 'Organization label', value: ORG_LABEL, detail: 'CLAUDE_WATCH_ORG_NAME · display name for organization spend', configured: !!config.orgLabel },
       { id: 'daily-budget', label: 'Daily API budget', value: config.dailyBudgetUsd ? `$${config.dailyBudgetUsd.toFixed(2)}` : 'not configured', detail: 'CLAUDE_WATCH_DAILY_BUDGET_USD · adds a spend budget meter', configured: !!config.dailyBudgetUsd },
       { id: 'mongodb', label: 'MongoDB history', value: config.mongoUri ? history.status().state : 'not configured', detail: 'MONGODB_URI · optional durable daily usage history', configured: !!config.mongoUri },
-      { id: 'claude-oauth', label: 'Claude subscription', value: readPersonalToken() ? 'connected' : 'not connected', detail: 'OAuth usage windows, including model-scoped weekly limits', configured: !!readPersonalToken() },
+      {
+        id: 'claude-oauth',
+        label: 'Claude subscription',
+        value: readPersonalToken() ? (personal.windows?.length ? `connected · ${personal.windows.join(', ')}` : 'connected') : 'not connected',
+        detail: 'OAuth usage windows, including model-scoped weekly limits — the list is what the last response carried',
+        configured: !!readPersonalToken()
+      },
       { id: 'codex-auth', label: 'Codex subscription', value: existsSync(join(home, '.codex', 'auth.json')) ? 'connected' : 'not connected', detail: 'Local Codex rate limits and usage', configured: existsSync(join(home, '.codex', 'auth.json')) }
     ],
     systemPaths: [

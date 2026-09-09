@@ -20,3 +20,17 @@ test('deduplicates a named weekly quota already present in scoped limits', () =>
   })
   assert.equal(parsed.quotas?.length, 1)
 })
+
+test('reports which windows and limits the response carried, including nulls and inactive limits', () => {
+  const parsed = parseClaudeUsage('You · Max', {
+    five_hour: { utilization: 14, resets_at: '2026-07-22T10:00:00Z' },
+    seven_day: { utilization: 42, resets_at: '2026-07-27T10:00:00Z' },
+    seven_day_fable: null,
+    limits: [
+      { kind: 'weekly_all', severity: 'normal' },
+      { kind: 'weekly_scoped', is_active: false, percent: 0, scope: { model: { display_name: 'Fable' } } }
+    ]
+  })
+  assert.deepEqual(parsed.windows, ['five_hour', 'seven_day', 'seven_day_fable:null', 'limit:weekly_all', 'limit:weekly_scoped:Fable:inactive'])
+  assert.equal(parsed.quotas, undefined)
+})

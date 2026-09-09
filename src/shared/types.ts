@@ -106,6 +106,10 @@ export interface UsageAccount {
   todayByProject?: ProjectUsage[]
   projectedLimitAt?: number
   note?: string
+  /** Diagnostic: which usage windows and limit kinds the provider's response
+   * carried (`five_hour`, `seven_day`, `seven_day_fable`, `limit:weekly_scoped:Fable`…),
+   * so a bar that vanishes can be traced to the response, not the parser. */
+  windows?: string[]
   provenance?: UsageProvenance
   /** Estimated API-equivalent value, not subscription billing. */
   valueComplete?: boolean

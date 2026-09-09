@@ -47,5 +47,14 @@ export function parseClaudeUsage(label, input) {
     seen.add(key)
     return true
   })
-  return { available: true, label, ...(session ? { session } : {}), ...(week ? { week } : {}), ...(quotas.length ? { quotas } : {}) }
+  // What the response actually carried, for Settings → diagnostics and
+  // `tm status --json`: a model-scoped bar that disappears is then traceable
+  // to the endpoint dropping the window rather than to this parser.
+  const windows = [
+    ...Object.entries(value)
+      .filter(([key, window]) => key === 'five_hour' || key.startsWith('seven_day'))
+      .map(([key, window]) => (window && typeof window === 'object' ? key : `${key}:null`)),
+    ...limits.map((limit) => `limit:${limit?.kind ?? '?'}${limit?.scope?.model?.display_name ? `:${limit.scope.model.display_name}` : ''}${limit?.is_active === false ? ':inactive' : ''}`)
+  ]
+  return { available: true, label, windows, ...(session ? { session } : {}), ...(week ? { week } : {}), ...(quotas.length ? { quotas } : {}) }
 }
