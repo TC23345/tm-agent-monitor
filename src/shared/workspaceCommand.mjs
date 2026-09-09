@@ -8,6 +8,7 @@
 const LAUNCHES = new Set(['shell', 'claude', 'codex'])
 const MAX_PATH = 4096
 const MAX_NAME = 40
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** Strip Electron/Chromium flags and the executable; keep the user's words. */
 function userArgs(argv) {
@@ -65,16 +66,30 @@ export function isWorkspaceCommand(value) {
     case 'layout': return typeof c.name === 'string' && c.name.length > 0 && c.name.length <= MAX_NAME
     case 'open':
       return LAUNCHES.has(c.launch)
-        && (c.cwd === undefined || (typeof c.cwd === 'string' && c.cwd.length > 0 && c.cwd.length <= MAX_PATH))
-        && (c.command === undefined || (typeof c.command === 'string' && c.command.length > 0 && c.command.length <= 400))
+        && (c.cwd === undefined || (typeof c.cwd === 'string' && c.cwd.length > 0 && c.cwd.length <= MAX_PATH && !/[\r\n\0]/.test(c.cwd)))
+        && (c.command === undefined || (typeof c.command === 'string' && c.command.length > 0 && c.command.length <= 400 && !/[\r\n\0]/.test(c.command)))
+        // Only main sets this: a session the daemon already spawned for an
+        // agent (`POST /v1/terminals`), which the pane attaches to instead of
+        // creating its own. The CLI parser never produces it.
+        && (c.sessionId === undefined || (typeof c.sessionId === 'string' && UUID.test(c.sessionId)))
     default: return false
   }
 }
 
 export const USAGE = `tm — drive the TaylorMade Agent Monitor workspace
 
-  tm status [--json]     what is running / waiting, from the live app (no window)
-  tm show | hide | palette | usage | activity
-  tm open [--cwd <folder>] [--launch shell|claude|codex] [--run "<command>"]
-  tm layout <name>
+  Workspace (opens the window):
+    tm show | hide | palette | usage | activity
+    tm open [--cwd <folder>] [--launch shell|claude|codex] [--run "<command>"]
+    tm layout <name>
+
+  Daemon (no window; the routes an agent can call — see \`tm skill\`):
+    tm status [--json]                    sessions, what is waiting, usage
+    tm terminals                          embedded terminals and their sessions
+    tm new [--cwd <folder>] [--launch shell|claude|codex] [--run "<command>"]
+                                          spawn a terminal; prints its id
+    tm send <terminal-id> <text…> [--no-enter]
+    tm read <terminal-id> [--lines <n>]   last lines of its output, plain text
+    tm wait <agent-id> [--until waiting|complete|idle|running|ended] [--timeout <s>]
+    tm skill [--install]                  the agent skill (install to ~/.claude/skills)
 `

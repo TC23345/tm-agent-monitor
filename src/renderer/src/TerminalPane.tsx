@@ -80,14 +80,23 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function Termi
       if (disposed || id !== sessionId) return
       setExited(exitCode)
     })
+    // The shell moved (cd, or a CLI started elsewhere): persist it so this
+    // pane comes back to the same folder after an app restart, not to home.
+    const offCwd = window.watch.onTermCwd((id, cwd) => {
+      if (disposed || id !== sessionId) return
+      if (cwd !== configRef.current.cwd) onConfigRef.current({ cwd })
+    })
 
-    const createNew = async () => {
+    /** `resume` is for a pane whose session died with the last app run: the
+     * CLI comes back continuing its last conversation in this folder. */
+    const createNew = async (resume = false) => {
       fit.fit()
       const created = await window.watch.createTerminal({
         cwd: configRef.current.cwd,
         launch: configRef.current.launch,
         cols: Math.max(term.cols, 2),
-        rows: Math.max(term.rows, 2)
+        rows: Math.max(term.rows, 2),
+        resume
       })
       if (disposed) {
         if (created) window.watch.disposeTerminal(created.id)
@@ -122,7 +131,11 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function Termi
           window.watch.termResize(existing, Math.max(term.cols, 2), Math.max(term.rows, 2))
           return
         }
+        // A stale id: the session died with the previous app run (an update,
+        // a crash). Come back in the same folder, continuing the conversation.
         sessionId = null
+        await createNew(true)
+        return
       }
       await createNew()
     }
@@ -130,6 +143,28 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function Termi
 
     const offInput = term.onData((data) => {
       if (sessionId && ready) window.watch.termInput(sessionId, data)
+    })
+
+    // Ctrl+V. xterm turns Ctrl+<letter> into the raw control byte and cancels
+    // the event, so the browser never pastes and the shell receives ^V. Codex
+    // binds ^V to "attach an image from the clipboard" and Claude Code ignores
+    // it on Windows (Alt+V is its image key), which is why pasted text vanished
+    // while a copied screenshot worked. Paste text ourselves through xterm — a
+    // CLI with bracketed paste on receives one paste, not keystrokes — and hand
+    // an image-only clipboard to the CLI as the key it expects.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown' || !e.ctrlKey || e.altKey || e.metaKey || (e.key !== 'v' && e.key !== 'V')) return true
+      e.preventDefault() // no native paste on top of ours
+      void window.watch.readClipboard().then(({ text, hasImage }) => {
+        if (disposed || !sessionId || !ready) return
+        if (text) {
+          term.paste(text)
+          return
+        }
+        if (!hasImage) return
+        window.watch.termInput(sessionId, configRef.current.launch === 'claude' ? '\x1bv' : '\x16')
+      })
+      return false
     })
 
     // Refit when the pane resizes (grid changes, window bounds). rAF coalesces
@@ -152,6 +187,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function Termi
       offInput.dispose()
       offData()
       offExit()
+      offCwd()
       termRef.current = null
       term.dispose()
     }

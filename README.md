@@ -12,7 +12,7 @@ An IDE-style title bar, an agent sidebar, and a pane grid:
 
 **Layouts and launching.** View → Layouts saves the current panes, sizes, and sidebar views under a name and restores them later. Drag a project from the sidebar onto the grid to open a shell there (Shift for Claude Code). A session near its context limit shows an amber chip in the title bar and a *Compact now* tool on its pane.
 
-**Activity and automation.** User → *Activity feed* opens a pane of what every session asked, finished, started, and ended, newest first. `npm run tm -- open --cwd <folder> --launch claude` (or `tm layout <name>`, `tm palette`, `tm usage`, `tm activity`, `tm show`, `tm hide`) drives the running app from a terminal or a keybind, and `npm run tm -- status [--json]` prints what is running and waiting straight from the daemon (`GET /v1/status`, bearer token from the endpoint file) — the call an agent makes before starting a second session in a project. Settings → *Phone push* forwards a long-waiting session's question to an ntfy / Pushover URL.
+**Activity and automation.** User → *Activity feed* opens a pane of what every session asked, finished, started, and ended, newest first. `npm run tm -- open --cwd <folder> --launch claude` (or `tm layout <name>`, `tm palette`, `tm usage`, `tm activity`, `tm show`, `tm hide`) drives the running app from a terminal or a keybind, and `npm run tm -- status [--json]` prints what is running and waiting straight from the daemon (`GET /v1/status`, bearer token from the endpoint file) — the call an agent makes before starting a second session in a project. The same daemon lets an agent *drive* the workspace: `tm new --cwd <folder> [--launch claude|codex] [--run "<command>"]` spawns an embedded terminal and prints its id (a pane attaches when the grid has room), `tm send <id> <text>` types into it, `tm read <id> [--lines N]` returns its output as plain text, `tm wait <agent-id> --until waiting` long-polls until a session needs you, and `tm terminals` lists them with the session each one runs (`POST /v1/terminals`, `POST /v1/terminals/:id/input`, `GET /v1/terminals/:id/output`, `GET /v1/agents/:id/wait`). Every embedded shell carries `TM_AGENT_MONITOR_ENDPOINT_FILE` and `TM_TERMINAL_ID`, and `tm skill --install` puts a skill in `~/.claude/skills` that teaches a session the routes. Settings → *Phone push* forwards a long-waiting session's question to an ntfy / Pushover URL.
 
 **Project awareness.** Project headers show the git branch and dirty count; the Launch pane lists the active folder's `.tm.json` commands and npm scripts and runs them in a new pane. Right-click a waiting session that runs in a pane to reply to it from the sidebar. Coming back after a while shows a one-line "while you were away" digest.
 
@@ -41,7 +41,8 @@ See [CHANGELOG.md](./CHANGELOG.md) for what each version added.
 - Optional MongoDB schema-v2 history with aggregate compatibility fields and `byProvider` breakdowns.
 - Native Windows focus, resolving the stored agent ID in main and validating HWND/PID ownership before raising a window.
 - Sandbox-enabled renderer, runtime-validated IPC, authenticated loopback ingestion, and a per-install discovery token.
-- Auto-update from GitHub Releases, and Settings → **Rebuild & relaunch** to reinstall from the local checkout without cutting a release.
+- An IDE-style status bar: **Panes** and **Layout** popovers hold the workspace state (which panes show, size, columns, saved layouts); the title-bar menus hold verbs. The palette rests on the three launches and your agents, and `>` browses every command by group.
+- Auto-update from GitHub Releases, and an **Update** chip in the status bar (also File → *Rebuild & relaunch*, the palette, and Settings) that rebuilds from the local checkout, quits, silently reinstalls, and relaunches — no release needed. Terminal panes come back in the folder their shell was in, with Claude Code / Codex continuing the last conversation there.
 
 Windows can raise the Codex/ChatGPT desktop window, but public Win32 APIs cannot select a specific task tab.
 
@@ -134,7 +135,7 @@ Every distribution/publish command regenerates `build/icon.ico` offline from tra
 Quit the running app (tray → Quit, or File → Quit), then hand the installer the same arguments `electron-updater` uses for `quitAndInstall({ isSilent: true, isForceRunAfter: true })`:
 
 ```powershell
-Start-Process .\dist\tm-agent-monitor-0.3.1-x64.exe -ArgumentList '--updated', '/S', '--force-run'
+Start-Process .\dist\tm-agent-monitor-0.4.0-x64.exe -ArgumentList '--updated', '/S', '--force-run'
 ```
 
 `--updated` marks an in-place update (the assisted installer skips its pages and passes `--updated` to the relaunched app), `/S` is NSIS silent mode, and `--force-run` makes the silent install start the app afterwards, as your user, so nothing needs to know the install directory. `scripts\reinstall-local.ps1` wraps this (add `-SkipBuild` to install what `dist\` already holds), and Settings → **Rebuild & relaunch** does the whole thing from inside the app.

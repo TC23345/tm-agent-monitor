@@ -10,15 +10,18 @@ function isRecord(v) {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
-/** `raw` is the parsed `tm.panes.v2` value; `kinds` the catalog ids. */
-export function sanitizePanes(raw, { kinds, isUnique, maxPanes, launches = ['shell', 'claude', 'codex'] }) {
+/** `raw` is the parsed `tm.panes.v2` value; `kinds` the catalog ids.
+ * `aliases` maps a retired kind to its successor (`usage` → `spend`), so a
+ * layout saved before a split still opens something rather than nothing. */
+export function sanitizePanes(raw, { kinds, isUnique, maxPanes, launches = ['shell', 'claude', 'codex'], aliases = {} }) {
   if (!Array.isArray(raw)) return []
   const known = new Set(kinds)
   const out = []
   const seen = new Set()
   for (const item of raw) {
     if (!isRecord(item)) continue
-    const { id, kind, term } = item
+    const { id, term } = item
+    const kind = typeof item.kind === 'string' && Object.hasOwn(aliases, item.kind) ? aliases[item.kind] : item.kind
     if (typeof id !== 'string' || !known.has(kind)) continue
     if (isUnique(kind)) {
       if (seen.has(kind)) continue

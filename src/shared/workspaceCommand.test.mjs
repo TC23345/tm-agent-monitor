@@ -33,4 +33,9 @@ test('the renderer-side check accepts only the parsed shapes', () => {
   assert.equal(isWorkspaceCommand({ kind: 'palette' }), true)
   assert.equal(isWorkspaceCommand(null), false)
   assert.equal(isWorkspaceCommand({ kind: 'eval' }), false)
+  // A daemon-spawned session rides along as a UUID; anything else is dropped.
+  assert.equal(isWorkspaceCommand({ kind: 'open', launch: 'claude', cwd: 'C:\\x', sessionId: '0f3b1c2d-1111-4222-8333-444455556666' }), true)
+  assert.equal(isWorkspaceCommand({ kind: 'open', launch: 'claude', sessionId: 'not-a-uuid' }), false)
+  assert.equal(isWorkspaceCommand({ kind: 'open', launch: 'shell', cwd: 'a\nb' }), false)
+  assert.equal(isWorkspaceCommand({ kind: 'open', launch: 'shell', command: 'x\r' }), false)
 })

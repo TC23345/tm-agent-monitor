@@ -183,6 +183,26 @@ export interface TerminalCreateRequest {
   launch: TerminalLaunch
   cols: number
   rows: number
+  /** Typed into the shell once it is up — set only by the daemon
+   * (`POST /v1/terminals`); a pane types its own `initialCommand`. */
+  command?: string
+  /** A pane coming back after an app restart: start the CLI in its
+   * "continue the last conversation in this folder" form. */
+  resume?: boolean
+}
+
+/** An embedded terminal session as the daemon lists it (`GET /v1/terminals`). */
+export interface TerminalInfo {
+  id: string
+  launch: TerminalLaunch
+  cwd: string
+  createdAt: number
+  /** A pane has attached to it at least once; false for a session an agent
+   * created while the grid was full, which still works through the API. */
+  attached: boolean
+  exitCode?: number
+  /** The root session most plausibly running in it (same folder and provider). */
+  agentId?: string
 }
 
 /** Result of reattaching a renderer to a main-side PTY session. */

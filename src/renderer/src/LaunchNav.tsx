@@ -1,9 +1,8 @@
 import { useState, type DragEvent, type MouseEvent, type ReactNode } from 'react'
-import { ChevronDown, ChevronRight, Code2, Folder, FolderPlus, Globe, Play, SquareTerminal } from 'lucide-react'
-import type { ProjectCommand, TerminalLaunch } from '@shared/types'
+import { ChevronDown, Code2, Folder, FolderPlus, SquareTerminal } from 'lucide-react'
+import type { TerminalLaunch } from '@shared/types'
 import { ProviderBadge } from './ProviderBadge'
 import { MenuCheckItem, MenuPop } from './Menu'
-import { tid } from './testid'
 
 /** Where launches land. `cwd` undefined means the home folder. */
 export interface LaunchTarget {
@@ -35,8 +34,6 @@ interface Props {
   /** Picking from the popover starts it *and* makes it the row's default. */
   onLaunchKind: (launch: TerminalLaunch) => void
   onNewProject: () => void
-  commands: ProjectCommand[]
-  onRunCommand: (command: ProjectCommand) => void
   /** A folder dropped from Explorer becomes the launch target. */
   onDropFolder: (path: string) => void
 }
@@ -85,8 +82,7 @@ function NavRow({ icon, label, meta, title, onClick, testId }: {
  * comes from `webUtils.getPathForFile` in the preload — `File.path` was
  * removed in Electron 32).
  */
-export function LaunchNav({ context, projects, following, onChoose, openMenu, onOpenMenu, onLaunch, launchKind, onLaunchKind, onNewProject, commands, onRunCommand, onDropFolder }: Props) {
-  const [commandsOpen, setCommandsOpen] = useState(false)
+export function LaunchNav({ context, projects, following, onChoose, openMenu, onOpenMenu, onLaunch, launchKind, onLaunchKind, onNewProject, onDropFolder }: Props) {
   const [dropHot, setDropHot] = useState(false)
   const switcherOpen = openMenu === 'launch-target'
   const launchOpen = openMenu === 'launch-pick'
@@ -208,46 +204,16 @@ export function LaunchNav({ context, projects, following, onChoose, openMenu, on
           </MenuPop>
         )}
       </div>
+      {/* The one secondary row on the launch path: the code you are about to
+          point an agent at. Chrome is a different workflow and lives in File
+          and the palette; the folder's scripts are Terminal → Run. */}
       <NavRow
         icon={<Code2 strokeWidth={2} />}
-        label="Open Cursor"
+        label="Open in Cursor"
         title={context.cwd ? `Open ${context.label ?? context.cwd} in Cursor` : 'Open a new Cursor window'}
         onClick={() => window.watch.openCursor(context.cwd)}
         testId="launch-cursor"
       />
-      <NavRow
-        icon={<Globe strokeWidth={2} />}
-        label="Open Chrome"
-        title="Open a new Chrome window"
-        onClick={() => window.watch.openChrome()}
-        testId="launch-chrome"
-      />
-
-      {commands.length > 0 && (
-        <>
-          <button
-            className="navgroup"
-            onClick={() => setCommandsOpen((v) => !v)}
-            aria-expanded={commandsOpen}
-            title={`Commands from this folder's .tm.json and package.json scripts`}
-            data-testid="launch-commands"
-          >
-            {commandsOpen ? <ChevronDown className="navgroup-caret" strokeWidth={2} /> : <ChevronRight className="navgroup-caret" strokeWidth={2} />}
-            Commands
-            <span className="navrow-meta">{commands.length}</span>
-          </button>
-          {commandsOpen && commands.map((c) => (
-            <NavRow
-              key={c.command}
-              icon={<Play strokeWidth={2} />}
-              label={c.label}
-              title={`${c.command}\nRuns in a new terminal pane${inWhere}${c.source === 'tm' ? ' · from .tm.json' : ' · npm script'}`}
-              onClick={() => onRunCommand(c)}
-              testId={tid('launch-cmd', c.label)}
-            />
-          ))}
-        </>
-      )}
 
       <div className="navrule" />
       <NavRow

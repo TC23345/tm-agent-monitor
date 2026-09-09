@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Search } from 'lucide-react'
-import { parseQuery, rankItems, type PaletteSection } from '@shared/palette.mjs'
+import { browseItems, commandGroup, homeItems, parseQuery, rankItems, type PaletteSection } from '@shared/palette.mjs'
 
 export interface PaletteItem {
   id: string
@@ -13,6 +13,9 @@ export interface PaletteItem {
   icon?: ReactNode
   /** Shortcut chips shown at the right, e.g. ['Ctrl', 'Shift', '`']. */
   keys?: string[]
+  /** Shown before anything is typed. Reserve it for the ways to start a
+   * session and the jump to a waiting one — the resting list must stay short. */
+  pinned?: boolean
   run: () => void
 }
 
@@ -30,7 +33,12 @@ interface Props {
 /**
  * VS Code-style quick open: one input, one ranked list, keyboard-first. Every
  * app action, live agent, and open window is an item; `>` `@` `#` narrow the
- * list. Ranking is `@shared/palette.mjs` so what Enter runs is testable.
+ * list. Three states, so the whole catalogue never lands on you at once:
+ *   - nothing typed → the pinned starts and the live agents (`homeItems`), with
+ *     a footer counting what a keystroke reaches;
+ *   - `>` alone → every command, under group headings (`browseItems`);
+ *   - anything typed → the flat ranked list (`rankItems`).
+ * Ranking is `@shared/palette.mjs` so what Enter runs is testable.
  */
 export function CommandPalette({ items, onClose }: Props) {
   const [query, setQuery] = useState('')
@@ -38,8 +46,15 @@ export function CommandPalette({ items, onClose }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  const results = useMemo(() => rankItems(items, query, 60), [items, query])
-  const { mode } = parseQuery(query)
+  const { mode, text } = parseQuery(query)
+  const home = query.trim() === ''
+  const browse = !home && mode === 'command' && text === ''
+  const results = useMemo(
+    () => (home ? homeItems(items) : browse ? browseItems(items) : rankItems(items, query, 60)),
+    [items, query, home, browse]
+  )
+  const commandCount = useMemo(() => items.filter((i) => i.section === 'command').length, [items])
+  const shownCommands = results.filter((i) => i.section === 'command').length
 
   useEffect(() => { inputRef.current?.focus() }, [])
   // A new query restarts at the top; an unchanged list keeps its selection.
@@ -75,8 +90,10 @@ export function CommandPalette({ items, onClose }: Props) {
     event.stopPropagation()
   }
 
-  // Group headers appear where the section changes, in ranked order.
+  // Headers appear where the section changes, in ranked order — and, when
+  // browsing the whole catalogue, where the command group changes too.
   let lastSection: PaletteSection | null = null
+  let lastGroup: string | null = null
 
   return (
     <div className="palette-backdrop" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -102,8 +119,15 @@ export function CommandPalette({ items, onClose }: Props) {
         <div className="palette-list" id="palette-list" role="listbox" ref={listRef}>
           {results.length === 0 && <div className="palette-empty">No matches</div>}
           {results.map((item, index) => {
-            const header = item.section !== lastSection ? SECTION_LABEL[item.section] : null
+            const sectionHeader = item.section !== lastSection ? SECTION_LABEL[item.section] : null
             lastSection = item.section
+            const group = browse && item.section === 'command' ? commandGroup(item.id) : null
+            const groupHeader = group && group !== lastGroup ? group : null
+            if (group) lastGroup = group
+            // Resting: the commands are "Start"; browsing: each group; else sections.
+            const header = home
+              ? (sectionHeader ? (item.section === 'command' ? 'Start' : sectionHeader) : null)
+              : browse && item.section === 'command' ? groupHeader : sectionHeader
             return (
               <div key={item.id}>
                 {header && <div className="palette-section">{header}</div>}
@@ -135,6 +159,11 @@ export function CommandPalette({ items, onClose }: Props) {
             )
           })}
         </div>
+        {home && commandCount > shownCommands && (
+          <button className="palette-foot" onClick={() => setQuery('>')} data-testid="palette-foot">
+            {commandCount - shownCommands} more commands — type to search, or <kbd>&gt;</kbd> to browse them all
+          </button>
+        )}
       </div>
     </div>
   )

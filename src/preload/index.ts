@@ -13,6 +13,9 @@ const api = {
   focusAgent: (id: string) => ipcRenderer.send('agent:focus', id),
   openPath: (p: string) => ipcRenderer.send('path:open', p),
   copyText: (t: string) => ipcRenderer.send('text:copy', t),
+  /** What Ctrl+V in a terminal pane should do: the clipboard's text, or whether
+   * it holds an image the CLI should be asked to fetch itself. */
+  readClipboard: (): Promise<{ text: string; hasImage: boolean }> => ipcRenderer.invoke('clipboard:read'),
   openTerminal: (cwd?: string, provider?: ProviderId | 'shell') => ipcRenderer.send('terminal:open', cwd, provider),
   /** Embedded terminals: main-owned PTY sessions rendered by xterm panes. */
   createTerminal: (req: TerminalCreateRequest): Promise<{ id: string } | null> => ipcRenderer.invoke('term:create', req),
@@ -32,6 +35,14 @@ const api = {
     ipcRenderer.on('term:exit', listener)
     return () => {
       ipcRenderer.removeListener('term:exit', listener)
+    }
+  },
+  /** The shell reported a new working directory (its prompt hook). */
+  onTermCwd: (cb: (id: string, cwd: string) => void) => {
+    const listener = (_e: unknown, id: string, cwd: string) => cb(id, cwd)
+    ipcRenderer.on('term:cwd', listener)
+    return () => {
+      ipcRenderer.removeListener('term:cwd', listener)
     }
   },
   openCursor: (cwd?: string) => ipcRenderer.send('cursor:open', cwd),

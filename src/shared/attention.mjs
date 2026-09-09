@@ -34,6 +34,23 @@ export function paneForAgent(panes, agent) {
   return shell
 }
 
+/**
+ * The root session most plausibly running in a terminal the app spawned: same
+ * folder, and the provider the pane was launched as. A plain shell matches
+ * nothing — the user may have typed anything into it. The inverse of
+ * `paneForAgent`, for the daemon's terminal listing.
+ */
+export function agentForTerminal(agents, term) {
+  if (!term || !term.cwd || !Array.isArray(agents)) return null
+  const provider = term.launch === 'claude' ? 'claude' : term.launch === 'codex' ? 'codex' : null
+  if (!provider) return null
+  const cwd = canonical(term.cwd)
+  for (const agent of agents) {
+    if (agent && !agent.parentId && agent.provider === provider && canonical(agent.cwd) === cwd) return agent
+  }
+  return null
+}
+
 /** Root sessions waiting on the user, oldest wait first — the order to serve them in. */
 export function waitingAgents(agents) {
   return (Array.isArray(agents) ? agents : [])

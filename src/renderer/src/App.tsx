@@ -8,8 +8,9 @@ import { groupByProject } from './group'
 import { applyOrder, useGroupOrder } from './useGroupOrder'
 import { SettingsPanel } from './SettingsPanel'
 import { COLLAPSE_ALL_EVENT } from './useCollapse'
-import { UsagePane } from './UsagePane'
+import { HistoryPane, InsightsPane, SpendPane } from './UsagePane'
 import { TopBar, type MenuName } from './TopBar'
+import { StatusBar, type StatusMenu } from './StatusBar'
 import { Pane } from './Pane'
 import type { TerminalPaneHandle } from './TerminalPane'
 // xterm and its addon are ~40% of the renderer bundle; a workspace with no
@@ -45,9 +46,9 @@ import {
 import { WindowsPane, WindowsRefreshButton, useDesktopWindows } from './WorkspacePanes'
 import { LaunchNav, type LaunchTarget, type NavMenu } from './LaunchNav'
 import {
-  AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Code2 as CursorIcon, Coins, Columns3, Copy,
+  AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Code2 as CursorIcon, Columns3, Copy,
   Eraser, ExternalLink, EyeOff, Filter, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
-  PanelLeft, PanelRight, Play, Power, RotateCcw, Rss, Ruler, Save, Shrink, SquareSlash, SquareSplitHorizontal,
+  PanelLeft, PanelRight, Play, Power, RefreshCw, RotateCcw, Rss, Ruler, Save, Shrink, SquareSlash, SquareSplitHorizontal,
   SquareTerminal, Sunrise, Terminal, Trash2, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
@@ -89,12 +90,29 @@ export function App() {
   const snapRef = useRef<StatusSnapshot | null>(null)
   const [digest, setDigest] = useState<Digest | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Rebuild & relaunch: one state shared by the title-bar chip, File menu, and
+  // palette so every entry point shows the same busy label and the same result.
+  // Main guards against a second concurrent build; this only stops the UI
+  // from asking twice. A success message stays until the app quits under us.
+  const [rebuild, setRebuild] = useState<{ busy: boolean; msg: string | null }>({ busy: false, msg: null })
+  const rebuildMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const rebuildApp = () => {
+    if (rebuild.busy) return
+    if (rebuildMsgTimer.current) clearTimeout(rebuildMsgTimer.current)
+    setRebuild({ busy: true, msg: 'building installer from source…' })
+    window.watch.reinstallApp()
+      .then((msg) => msg, (error) => `reinstall failed: ${String(error)}`)
+      .then((msg) => {
+        setRebuild({ busy: false, msg })
+        if (!/reinstalling/.test(msg)) rebuildMsgTimer.current = setTimeout(() => setRebuild({ busy: false, msg: null }), 12_000)
+      })
+  }
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [menu, setMenu] = useState<MenuState | null>(null)
   // One menu open at a time across the whole window — the title-bar menus and
   // the launch nav's two popovers share this, so opening one closes the other
   // and the Escape chain below sees every one of them.
-  const [openMenu, setOpenMenu] = useState<MenuName | 'sidebar' | NavMenu | null>(null)
+  const [openMenu, setOpenMenu] = useState<MenuName | 'sidebar' | NavMenu | StatusMenu | null>(null)
   const [waitingOnly, setWaitingOnly] = useState(false)
   const [allCollapsed, setAllCollapsed] = useState(false)
   const { order, save: saveOrder, clear: clearOrder } = useGroupOrder()
@@ -312,10 +330,19 @@ export function App() {
       case 'usage': openUsage(); break
       case 'activity': openActivity(); break
       case 'layout': applyLayout(raw.name); break
-      case 'open':
+      case 'open': {
+        const label = raw.cwd ? raw.cwd.split(/[\\/]/).pop() : undefined
+        if (raw.sessionId) {
+          // A session the daemon already spawned for an agent: attach a pane
+          // if there is room. With a full grid it stays headless — still
+          // driveable through the API, listed with `attached: false`.
+          if (panes.length < MAX_PANES) addPane('terminal', { launch: raw.launch, cwd: raw.cwd, label, sessionId: raw.sessionId, initialCommand: raw.command })
+          break
+        }
         if (panes.length >= MAX_PANES) { window.watch.openTerminal(raw.cwd, raw.launch); break }
-        addPane('terminal', { launch: raw.launch, cwd: raw.cwd, label: raw.cwd ? raw.cwd.split(/[\\/]/).pop() : undefined, initialCommand: raw.command })
+        addPane('terminal', { launch: raw.launch, cwd: raw.cwd, label, initialCommand: raw.command })
         break
+      }
       case 'show': case 'hide': break // handled in main
     }
   }
@@ -491,7 +518,9 @@ export function App() {
     }
     if (panes.length > 1) setZoom(existing.id)
   }
-  const openUsage = () => openUnique('usage')
+  // `tm usage` and the old Usage entry point land on Spend; Insights and
+  // History are their own panes now (status bar → Panes).
+  const openUsage = () => openUnique('spend')
   const openActivity = () => openUnique('activity')
 
   /** The agent a feed row or chip points at: its pane when it has one, else its window. */
@@ -594,8 +623,12 @@ export function App() {
     switch (pane.kind) {
       case 'agents':
         return <div className="agents-inner">{agentList}</div>
-      case 'usage':
-        return <UsagePane usage={snap?.usage} />
+      case 'spend':
+        return <SpendPane usage={snap?.usage} />
+      case 'insights':
+        return <InsightsPane />
+      case 'history':
+        return <HistoryPane />
       case 'activity':
         return <ActivityPane onFocusAgent={focusAgentAnywhere} />
       case 'terminal':
@@ -821,9 +854,11 @@ export function App() {
     const cmd = (id: string, label: string, run: () => void, extra: Partial<PaletteItem> = {}) =>
       items.push({ id: `cmd:${id}`, section: 'command', label, run, ...extra })
     const full = panes.length >= MAX_PANES
-    cmd('new-terminal', 'New terminal', () => newTerminal('shell'), { icon: <Terminal strokeWidth={2} />, keywords: ['shell', 'powershell'], keys: ['Ctrl', 'Shift', '`'], detail: full ? 'opens a window — all six panes are open' : undefined })
-    cmd('new-claude', 'New Claude Code', () => newTerminal('claude'), { icon: <ProviderBadge provider="claude" />, keywords: ['agent'] })
-    cmd('new-codex', 'New Codex', () => newTerminal('codex'), { icon: <ProviderBadge provider="codex" />, keywords: ['agent'] })
+    // Pinned items are the palette's resting list (before anything is typed):
+    // the ways to start a session, and the jump to a waiting one.
+    cmd('new-claude', 'New Claude Code', () => newTerminal('claude'), { icon: <ProviderBadge provider="claude" />, keywords: ['agent'], pinned: true, detail: context.label })
+    cmd('new-codex', 'New Codex', () => newTerminal('codex'), { icon: <ProviderBadge provider="codex" />, keywords: ['agent'], pinned: true, detail: context.label })
+    cmd('new-terminal', 'New terminal', () => newTerminal('shell'), { icon: <Terminal strokeWidth={2} />, keywords: ['shell', 'powershell'], keys: ['Ctrl', 'Shift', '`'], pinned: true, detail: full ? 'opens a window — all six panes are open' : context.label })
     cmd('ext-terminal', 'Open external terminal', () => window.watch.openTerminal(context.cwd, 'shell'), { icon: <SquareTerminal strokeWidth={2} />, detail: context.label ?? 'home folder' })
     cmd('cursor', 'Open Cursor', () => window.watch.openCursor(context.cwd), { icon: <Code2 strokeWidth={2} />, detail: context.label, keywords: ['editor'] })
     cmd('chrome', 'Open Chrome', () => window.watch.openChrome(), { icon: <Globe strokeWidth={2} />, keywords: ['browser'] })
@@ -835,12 +870,15 @@ export function App() {
       keywords: ['events', 'timeline', 'questions', 'history', 'log'],
       detail: hasActivity ? 'zoom the open pane' : full ? 'all six panes are open' : undefined
     })
-    const hasUsage = panes.some((p) => p.kind === 'usage')
-    cmd('usage', 'Usage: spend & insights', openUsage, {
-      icon: <Coins strokeWidth={2} />,
-      keywords: ['spend', 'insights', 'tokens', 'cost', 'value', 'report'],
-      detail: hasUsage ? 'zoom the open pane' : full ? 'all six panes are open' : undefined
-    })
+    for (const k of PANE_KINDS) {
+      if (k.id !== 'spend' && k.id !== 'insights' && k.id !== 'history') continue
+      const open = panes.some((p) => p.kind === k.id)
+      cmd(k.id, k.label, () => openUnique(k.id), {
+        icon: <k.icon strokeWidth={2} />,
+        keywords: ['usage', 'tokens', 'cost', 'value', 'report', 'pane', ...k.hint.toLowerCase().split(/\W+/)],
+        detail: open ? 'zoom the open pane' : full ? 'all six panes are open' : k.hint
+      })
+    }
     if (!full) {
       for (const k of PANE_KINDS) {
         if (isUniqueKind(k.id) && !panes.some((p) => p.kind === k.id)) {
@@ -883,8 +921,13 @@ export function App() {
       cmd(`layout-delete:${name}`, `Delete layout: ${name}`, () => deleteLayout(name), { icon: <Trash2 strokeWidth={2} />, keywords: ['workspace', 'preset'] })
     }
     if (order.length > 0) cmd('reset-order', 'Reset project order', clearOrder, { icon: <ChevronsUpDown strokeWidth={2} /> })
-    if (waitingAgents(agents).length > 0) cmd('route-waiting', 'Go to next waiting session', routeToWaiting, { icon: <BellRing strokeWidth={2} />, keys: ['Ctrl', 'Shift', 'W'], keywords: ['attention', 'question', 'input'] })
+    if (waitingAgents(agents).length > 0) cmd('route-waiting', 'Go to next waiting session', routeToWaiting, { icon: <BellRing strokeWidth={2} />, keys: ['Ctrl', 'Shift', 'W'], keywords: ['attention', 'question', 'input'], pinned: true })
     cmd('settings', 'Settings…', () => setSettingsOpen(true), { icon: <SettingsIcon strokeWidth={2} />, keys: ['Ctrl', ','], keywords: ['hotkey', 'hooks', 'updates', 'preferences'] })
+    cmd('rebuild', 'Rebuild & relaunch', rebuildApp, {
+      icon: <RefreshCw strokeWidth={2} />,
+      detail: rebuild.busy ? 'building…' : 'npm run dist in the local checkout, then quit, reinstall, relaunch',
+      keywords: ['update', 'upgrade', 'reinstall', 'install', 'build', 'latest', 'version', 'restart']
+    })
     cmd('hide', 'Hide to tray', () => window.watch.hide(), { icon: <Minus strokeWidth={2} />, keys: ['Esc'] })
     cmd('quit', 'Quit', () => window.watch.quit(), { icon: <Power strokeWidth={2} />, keywords: ['exit'] })
 
@@ -898,6 +941,7 @@ export function App() {
           : [a.state, a.activity].filter(Boolean).join(' · '),
         keywords: [a.provider, a.cwd ?? '', a.model ?? ''],
         icon: <ProviderBadge provider={a.provider} />,
+        pinned: true, // the resting list shows the session, not its sub-actions
         run: () => window.watch.focusAgent(a.id)
       })
     }
@@ -938,35 +982,22 @@ export function App() {
         waiting={waiting}
         waitingOnly={waitingOnly}
         onWaitingOnly={() => setWaitingOnly((v) => !v)}
-        canCollapse={groups.length > 1}
-        allCollapsed={allCollapsed}
-        onCollapseAll={collapseAll}
         health={health}
-        debugPort={appInfo.debugPort}
         panes={panes}
-        onAddPane={addPane}
+        context={context}
         onNewTerminal={newTerminal}
         onNewProject={() => setNewProjectOpen(true)}
+        commands={projectCommands}
+        onRunCommand={runProjectCommand}
         canResetOrder={order.length > 0}
         onResetOrder={clearOrder}
         onSettings={() => setSettingsOpen(true)}
-        sizeMode={sizeMode}
-        onSizeMode={applySizeMode}
-        paneCols={paneCols}
-        onPaneCols={setPaneCols}
-        canResetSizes={sized}
-        onResetSizes={resetSizes}
-        openMenu={openMenu === 'file' || openMenu === 'terminal' || openMenu === 'view' || openMenu === 'user' ? openMenu : null}
+        rebuild={rebuild}
+        onRebuild={rebuildApp}
+        openMenu={openMenu === 'file' || openMenu === 'terminal' || openMenu === 'user' ? openMenu : null}
         onOpenMenu={setOpenMenu}
-        onPalette={() => setPalette((v) => !v)}
-        onUsage={openUsage}
-        onActivity={openActivity}
-        layouts={layoutNames}
-        onSaveLayout={() => setLayoutDialog(true)}
-        onApplyLayout={applyLayout}
-        onDeleteLayout={deleteLayout}
-        sidebarViews={sidebarViews}
-        onToggleSidebarView={toggleSidebarView}
+        onPalette={() => { setOpenMenu(null); setPalette((v) => !v) }}
+        onOpenPane={openUnique}
         hot={hot}
         onFocusAgent={focusAgentAnywhere}
       />
@@ -997,8 +1028,6 @@ export function App() {
             launchKind={launchKind}
             onLaunchKind={setLaunchKind}
             onNewProject={() => setNewProjectOpen(true)}
-            commands={projectCommands}
-            onRunCommand={runProjectCommand}
             onDropFolder={dropLaunchFolder}
           />
           {activeViews.map((v, i) => sideSection(v, i === 0))}
@@ -1048,8 +1077,8 @@ export function App() {
             <div className="gridempty" data-testid="grid-empty">
               <SquareTerminal strokeWidth={1.5} style={{ width: 28, height: 28 }} />
               <div className="gridempty-hint">
-                Nothing open. Start a session from the sidebar, press <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>`</kbd> for a terminal,
-                or <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd> for everything else.
+                Nothing open. Pick a project at the top of the sidebar, then start Claude Code or Codex there.
+                <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>`</kbd> opens a plain terminal; <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd> finds everything else.
               </div>
             </div>
           )}
@@ -1131,6 +1160,30 @@ export function App() {
           ))}
         </main>
       </div>
+
+      <StatusBar
+        rebuild={rebuild}
+        onRebuild={rebuildApp}
+        panes={panes}
+        onAddPane={addPane}
+        onClosePane={closePane}
+        sidebarViews={sidebarViews}
+        onToggleSidebarView={toggleSidebarView}
+        sizeMode={sizeMode}
+        onSizeMode={applySizeMode}
+        paneCols={paneCols}
+        onPaneCols={setPaneCols}
+        canResetSizes={sized}
+        onResetSizes={resetSizes}
+        layouts={layoutNames}
+        onSaveLayout={() => setLayoutDialog(true)}
+        onApplyLayout={applyLayout}
+        onDeleteLayout={deleteLayout}
+        openMenu={openMenu === 'panes' || openMenu === 'layout' ? openMenu : null}
+        onOpenMenu={setOpenMenu}
+        version={appInfo.version}
+        debugPort={appInfo.debugPort}
+      />
 
       {palette && <CommandPalette items={paletteItems()} onClose={() => setPalette(false)} />}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}

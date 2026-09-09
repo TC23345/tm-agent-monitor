@@ -118,9 +118,14 @@ let installingUpdate = false
 
 let daemon: Daemon
 // Embedded terminal sessions (ConPTY), pushed at whatever window exists when data arrives.
-const terminals = new TerminalManager((channel, ...args) => {
-  if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
-})
+const terminals = new TerminalManager(
+  (channel, ...args) => {
+    if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
+  },
+  // A CLI inside a pane finds the daemon the way the hook bridge does, and
+  // knows which terminal it is (its row in GET /v1/terminals).
+  (id) => ({ TM_AGENT_MONITOR_ENDPOINT_FILE: config.endpointFile, TM_TERMINAL_ID: id })
+)
 const localUsage = new LocalUsage({ projectsDir: config.transcriptDir })
 // Daily-totals sync to MongoDB (token_board.daily_usage). Inert without a URI.
 const history = new UsageHistorySync(
@@ -1235,11 +1240,33 @@ function registerIpc(): void {
       // Waiting on our own pid keeps the ordering deterministic with the final
       // history flush in before-quit; the installer would otherwise wait for
       // the running app itself.
-      const ps = (value: string) => `'${value.replace(/'/g, "''")}'`
-      spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
-        `Wait-Process -Id ${process.pid} -ErrorAction SilentlyContinue; ` +
-        `Start-Process -FilePath ${ps(installer)} -ArgumentList '--updated','/S','--force-run'`
-      ], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+      //
+      // The waiter must NOT be our child. Electron's main process lives inside
+      // a Windows job object, and a `detached` spawn still inherits it, so the
+      // helper is killed the moment we exit and the installer never runs
+      // (verified 2026-09-08 with a minimal probe: the detached helper died,
+      // one created through WMI survived). Win32_Process.Create makes the
+      // waiter a child of the WMI provider host, outside any job of ours. The
+      // first hop is awaited, so we only quit once the waiter exists.
+      const waiter = [
+        `Wait-Process -Id ${process.pid} -ErrorAction SilentlyContinue`,
+        `Start-Process -FilePath '${installer.replace(/'/g, "''")}' -ArgumentList '--updated','/S','--force-run'`
+      ].join('; ')
+      const encoded = Buffer.from(waiter, 'utf16le').toString('base64')
+      const commandLine = `powershell.exe -NoProfile -WindowStyle Hidden -EncodedCommand ${encoded}`
+      const handoff = await new Promise<{ code: number | null; out: string }>((resolve, reject) => {
+        const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+          `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${commandLine}' }; ` +
+          'Write-Output $r.ReturnValue; exit $r.ReturnValue'
+        ], { windowsHide: true })
+        let out = ''
+        child.stdout?.on('data', (chunk: Buffer) => { out += chunk.toString() })
+        child.stderr?.on('data', (chunk: Buffer) => { out += chunk.toString() })
+        const cutoff = setTimeout(() => child.kill(), 30_000)
+        child.on('error', (error) => { clearTimeout(cutoff); reject(error) })
+        child.on('close', (code) => { clearTimeout(cutoff); resolve({ code, out }) })
+      })
+      if (handoff.code !== 0) return `built, but could not start the installer helper (WMI ${handoff.code}): ${handoff.out.trim().slice(-200)}`
       // Give the reply a beat to land before the ordinary quit flush runs.
       setTimeout(() => app.quit(), 800)
       return `v${version} built — reinstalling, back in a moment`
@@ -1250,6 +1277,15 @@ function registerIpc(): void {
     }
   })
   ipcMain.on('text:copy', (_e, t: string) => { if (typeof t === 'string' && t.length <= 100_000) clipboard.writeText(t) })
+  // Ctrl+V in a terminal pane (TerminalPane.tsx). The 1 MB cap matches
+  // term:input; a larger clipboard pastes nothing rather than half a script.
+  ipcMain.handle('clipboard:read', () => {
+    const text = clipboard.readText()
+    return {
+      text: text.length <= 1_048_576 ? text : '',
+      hasImage: clipboard.availableFormats().some((format) => format.startsWith('image/'))
+    }
+  })
   ipcMain.on('terminal:open', (_e, cwd?: string, provider?: TerminalTarget) => {
     if (cwd !== undefined && (typeof cwd !== 'string' || cwd.length > 32_767)) return
     if (provider !== undefined && provider !== 'claude' && provider !== 'codex' && provider !== 'cursor' && provider !== 'shell') return
@@ -1265,8 +1301,9 @@ function registerIpc(): void {
     if (req.cwd !== undefined && (typeof req.cwd !== 'string' || req.cwd.length > 32_767)) return null
     if (req.launch !== 'shell' && req.launch !== 'claude' && req.launch !== 'codex') return null
     if (!validTermSize(req.cols) || !validTermSize(req.rows)) return null
+    if (req.resume !== undefined && typeof req.resume !== 'boolean') return null
     return terminals.create(
-      { cwd: req.cwd, launch: req.launch, cols: req.cols, rows: req.rows },
+      { cwd: req.cwd, launch: req.launch, cols: req.cols, rows: req.rows, resume: req.resume },
       resolveShell(),
       app.getPath('home')
     )
@@ -1473,7 +1510,35 @@ if (!gotLock) {
 
     if (process.env.CLAUDE_WATCH_SELFTEST) console.log(`[selftest] win32 native focus available: ${winAvailable()}`)
 
-    daemon = new Daemon(PORT, { token: bridgeToken(), snapshot: () => buildSnapshot() })
+    daemon = new Daemon(PORT, {
+      token: bridgeToken(),
+      snapshot: () => buildSnapshot(),
+      // Terminal routes for agents: spawn through the same manager the panes
+      // use, then ask the renderer to attach a pane (it stays headless when
+      // the grid is full). Nothing here shows the window — an agent working in
+      // the background must not summon the workspace.
+      terminals: {
+        create: ({ launch, cwd, command }) => {
+          if (cwd !== undefined) {
+            let directory = false
+            try {
+              directory = existsSync(cwd) && statSync(cwd).isDirectory()
+            } catch {
+              /* unreadable path: treated as missing */
+            }
+            if (!directory) return { error: 'cwd is not an existing directory' }
+          }
+          const created = terminals.create({ launch, cwd, command, cols: 120, rows: 30 }, resolveShell(), app.getPath('home'))
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('workspace:command', { kind: 'open', launch, cwd: created.cwd, sessionId: created.id, ...(command ? { command } : {}) })
+          }
+          return created
+        },
+        input: (id, data) => terminals.input(id, data),
+        read: (id, lines) => terminals.read(id, lines),
+        list: () => terminals.list()
+      }
+    })
     const daemonStarted = await daemon.start()
     if (daemonStarted) {
       publishEndpoint()

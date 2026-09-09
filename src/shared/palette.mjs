@@ -72,3 +72,48 @@ export function rankItems(items, raw, limit = 40) {
   scored.sort((a, b) => (b.score - a.score) || (a.index - b.index))
   return scored.slice(0, Math.max(0, limit | 0)).map((s) => s.item)
 }
+
+/** Browse order for command groups (`commandGroup`). */
+export const GROUP_ORDER = ['Start', 'Run', 'Project', 'Panes', 'Layout', 'App', 'Other']
+
+/**
+ * Which heading a command sits under when the palette is browsed (`>` with
+ * nothing typed). Derived from the command id so the catalogue in App stays a
+ * flat list and this stays testable: `cmd:new-claude` is a Start, `cmd:cols-2`
+ * is Layout, `cmd:zoom:<pane>` is Panes.
+ */
+export function commandGroup(id) {
+  const key = typeof id === 'string' ? id.replace(/^cmd:/, '') : ''
+  if (/^(new-terminal|new-claude|new-codex|ext-terminal|route-waiting)/.test(key)) return 'Start'
+  if (/^run:/.test(key)) return 'Run'
+  if (/^(cursor|chrome|new-project|projects-dir|collapse|waiting|reset-order)$/.test(key)) return 'Project'
+  if (/^(activity|usage|spend|insights|history|add-|zoom:|close:|view:)/.test(key)) return 'Panes'
+  if (/^(size-|cols-|reset-sizes|save-layout|layout:|layout-delete:)/.test(key)) return 'Layout'
+  if (/^(settings|rebuild|hide|quit)$/.test(key)) return 'App'
+  return 'Other'
+}
+
+/**
+ * The palette's resting list, before anything is typed: the pinned commands
+ * (the ways to start a session, the jump to a waiting session) and the pinned
+ * agent items (one per session — the focus, not its terminal/folder/copy
+ * sub-actions) — not the whole catalogue. Everything else is one keystroke
+ * away and the footer says so. Without any pinned command the first six
+ * commands stand in.
+ */
+export function homeItems(items) {
+  const list = Array.isArray(items) ? items.filter((i) => i && typeof i.label === 'string') : []
+  const commands = list.filter((i) => i.section === 'command')
+  const pinned = commands.filter((i) => i.pinned === true)
+  const starts = pinned.length > 0 ? pinned : commands.slice(0, 6)
+  return [...starts, ...list.filter((i) => i.section === 'agent' && i.pinned === true)]
+}
+
+/** Every command, grouped for browsing: `GROUP_ORDER` first, then the caller's order. */
+export function browseItems(items) {
+  const list = Array.isArray(items) ? items.filter((i) => i && typeof i.label === 'string' && i.section === 'command') : []
+  return list
+    .map((item, index) => ({ item, index, rank: GROUP_ORDER.indexOf(commandGroup(item.id)) }))
+    .sort((a, b) => (a.rank - b.rank) || (a.index - b.index))
+    .map((s) => s.item)
+}

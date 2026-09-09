@@ -22,7 +22,7 @@ export interface Sizes {
 
 export function sanitizePanes<K extends string>(
   raw: unknown,
-  options: { kinds: readonly K[]; isUnique: (kind: K) => boolean; maxPanes: number; launches?: readonly string[] }
+  options: { kinds: readonly K[]; isUnique: (kind: K) => boolean; maxPanes: number; launches?: readonly string[]; aliases?: Readonly<Record<string, K>> }
 ): SanitizedPane<K>[]
 export function migratePanesV3<K extends string>(
   rawV2: unknown,

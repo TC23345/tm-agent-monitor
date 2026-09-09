@@ -1,15 +1,14 @@
 import {
-  ChevronsDownUp, ChevronsUpDown, Code2, Coins, Columns3, Filter, Folder, FolderPlus, Globe,
-  LayoutTemplate, ListRestart, Minus, Monitor, PanelLeft, PanelRight, Power, Rss, Ruler, Save, Search, SquarePlus,
-  SquareTerminal, Terminal, Trash2
+  Code2, Folder, FolderPlus, Globe, ListRestart, Minus, Play, Power, RefreshCw, Search, SquareTerminal, Terminal
 } from 'lucide-react'
 import { Settings } from './Icons'
 import mark from './assets/icon.png'
-import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
-import { MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, isUniqueKind, type PaneCols, type PaneInstance, type PaneKind, type SidebarView } from './panes'
-import type { ProviderHealth, ProviderId, SizeMode, TerminalLaunch } from '@shared/types'
+import { MenuItem, MenuPop } from './Menu'
+import { MAX_PANES, PANE_KINDS, type PaneInstance, type PaneKind } from './panes'
+import type { ProjectCommand, ProviderHealth, ProviderId, TerminalLaunch } from '@shared/types'
 import { overallStatus } from '@shared/health.mjs'
 import { ProviderBadge } from './ProviderBadge'
+import { REBUILD_HINT } from './StatusBar'
 import { useNow } from './useNow'
 import { tid } from './testid'
 
@@ -31,75 +30,57 @@ export function ConnChip({ health }: { health: HealthInput }) {
   )
 }
 
-export type MenuName = 'file' | 'terminal' | 'view' | 'user'
+/** The title-bar menus. There is no View menu: what panes and sidebar sections
+ * show, the workspace size, columns, and saved layouts are *state*, and state
+ * lives in the status bar's popovers (StatusBar.tsx). Menus hold verbs. */
+export type MenuName = 'file' | 'terminal' | 'user'
 
 interface Props {
   waiting: number
   waitingOnly: boolean
   onWaitingOnly: () => void
-  canCollapse: boolean
-  allCollapsed: boolean
-  onCollapseAll: () => void
   health: HealthInput
-  /** CDP port when the app was launched for automation; shown so an agent can find it. */
-  debugPort?: number
   panes: PaneInstance[]
-  onAddPane: (kind: PaneKind) => void
+  /** The folder launches and project commands use right now (the launch nav's target). */
+  context: { cwd?: string; label?: string }
   onNewTerminal: (launch: TerminalLaunch) => void
   onNewProject: () => void
+  /** This folder's `.tm.json` commands and npm scripts — Terminal → Run. */
+  commands: ProjectCommand[]
+  onRunCommand: (command: ProjectCommand) => void
   canResetOrder: boolean
   onResetOrder: () => void
   onSettings: () => void
-  /** Persisted workspace size — the default view and the half-view side. */
-  sizeMode: SizeMode
-  onSizeMode: (mode: SizeMode) => void
-  paneCols: PaneCols
-  onPaneCols: (cols: PaneCols) => void
-  /** Drag-resized sidebar / column widths, and the way back to the defaults. */
-  canResetSizes: boolean
-  onResetSizes: () => void
   /** Which dropdown is open. Owned by App so Escape can close it before hiding. */
   openMenu: MenuName | null
   onOpenMenu: (menu: MenuName | null) => void
   /** The command center: opens the palette. */
   onPalette: () => void
-  /** User → Usage / Activity: open the pane, or bring the open one forward. */
-  onUsage: () => void
-  onActivity: () => void
-  /** Named layouts (View → Layouts). */
-  layouts: string[]
-  onSaveLayout: () => void
-  onApplyLayout: (name: string) => void
-  onDeleteLayout: (name: string) => void
-  /** Sidebar sections (Limits, Open windows) and their toggles. */
-  sidebarViews: SidebarView[]
-  onToggleSidebarView: (view: SidebarView) => void
+  /** User → Spend / Insights / History / Activity: open the pane, or bring the open one forward. */
+  onOpenPane: (kind: PaneKind) => void
   /** Root sessions near their context limit and still climbing. */
   hot: { id: string; project: string; pct: number }[]
   onFocusAgent: (id: string) => void
+  /** Rebuild & relaunch (File menu): shared busy state with the status bar's Update chip. */
+  rebuild: { busy: boolean; msg: string | null }
+  onRebuild: () => void
 }
 
 /**
- * The app chrome as one title bar, IDE-style: the brand mark and the File /
- * Terminal / View / User menus at the left, the command center in the middle,
- * and passive status (waiting count, connection health) at the right. Every
- * app action lives in the menus and the palette; the sidebar and panes below
- * stay pure content.
+ * The app chrome as one IDE-style title bar: brand mark and the File / Terminal
+ * / User menus at the left, the command center in the middle, and passive
+ * status (waiting count, connection health) at the right. Every action here is
+ * also in the palette; the sidebar and panes stay pure content.
  */
 export function TopBar(props: Props) {
   const {
-    waiting, waitingOnly, onWaitingOnly, canCollapse, allCollapsed, onCollapseAll, health, debugPort,
-    panes, onAddPane, onNewTerminal, onNewProject, canResetOrder, onResetOrder, onSettings,
-    sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, openMenu, onOpenMenu, onPalette, onUsage,
-    layouts, onSaveLayout, onApplyLayout, onDeleteLayout, hot, onFocusAgent, onActivity,
-    sidebarViews, onToggleSidebarView
+    waiting, waitingOnly, onWaitingOnly, health, panes, context, onNewTerminal, onNewProject, commands, onRunCommand,
+    canResetOrder, onResetOrder, onSettings, openMenu, onOpenMenu, onPalette, onOpenPane, hot, onFocusAgent,
+    rebuild, onRebuild
   } = props
 
   const paneFull = panes.length >= MAX_PANES
-  const hasUsage = panes.some((p) => p.kind === 'usage')
-  const hasActivity = panes.some((p) => p.kind === 'activity')
-  const canAdd = (kind: PaneKind) =>
-    !paneFull && (!isUniqueKind(kind) || !panes.some((p) => p.kind === kind))
+  const where = context.cwd ? (context.label ?? context.cwd) : 'your home folder'
 
   const run = (action: () => void) => () => {
     onOpenMenu(null)
@@ -129,9 +110,20 @@ export function TopBar(props: Props) {
             <MenuPop {...away}>
               <MenuItem icon={<FolderPlus strokeWidth={2} />} label="New project…" hint="Create a project folder and open it in Cursor" onClick={run(onNewProject)} />
               <MenuItem icon={<Folder strokeWidth={2} />} label="Open Projects folder" hint="Open the Projects folder in File Explorer" onClick={run(() => window.watch.openProjectsDir())} />
+              <div className="menu-sep" />
+              <MenuItem icon={<Code2 strokeWidth={2} />} label="Open in Cursor" hint={context.cwd ? `Open ${where} in Cursor` : 'Open a new Cursor window'} onClick={run(() => window.watch.openCursor(context.cwd))} />
+              <MenuItem icon={<Globe strokeWidth={2} />} label="Open Chrome" hint="Open a new Chrome window" onClick={run(() => window.watch.openChrome())} />
               {canResetOrder && (
                 <MenuItem icon={<ListRestart strokeWidth={2} />} label="Reset project order" hint="Forget the dragged order and sort projects by attention again" onClick={run(onResetOrder)} />
               )}
+              <div className="menu-sep" />
+              <MenuItem
+                icon={<RefreshCw strokeWidth={2} />}
+                label={rebuild.busy ? 'Rebuilding…' : 'Rebuild & relaunch'}
+                hint={REBUILD_HINT}
+                disabled={rebuild.busy}
+                onClick={run(onRebuild)}
+              />
               <div className="menu-sep" />
               <MenuItem icon={<Minus strokeWidth={2} />} label="Hide to tray" hint="Esc" onClick={run(() => window.watch.hide())} />
               <MenuItem icon={<Power strokeWidth={2} />} label="Quit" hint="Quit TaylorMade Agent Monitor (closes the tray app)" onClick={run(() => window.watch.quit())} />
@@ -143,102 +135,30 @@ export function TopBar(props: Props) {
           {menuButton('terminal', 'Terminal')}
           {openMenu === 'terminal' && (
             <MenuPop {...away}>
-              <MenuItem icon={<Terminal strokeWidth={2} />} label="New terminal" hint={paneFull ? 'All six panes are open — opens a window instead' : 'Open a PowerShell terminal in a pane (Ctrl+Shift+`)'} onClick={run(() => onNewTerminal('shell'))} />
-              <MenuItem icon={<ProviderBadge provider="claude" />} label="New Claude Code" hint="Start Claude Code in a terminal pane" onClick={run(() => onNewTerminal('claude'))} />
-              <MenuItem icon={<ProviderBadge provider="codex" />} label="New Codex" hint="Start Codex in a terminal pane" onClick={run(() => onNewTerminal('codex'))} />
+              {/* Agents first: starting one is the reason the workspace exists. */}
+              <MenuItem icon={<ProviderBadge provider="claude" />} label="New Claude Code" hint={`Start Claude Code in a terminal pane in ${where}`} onClick={run(() => onNewTerminal('claude'))} />
+              <MenuItem icon={<ProviderBadge provider="codex" />} label="New Codex" hint={`Start Codex in a terminal pane in ${where}`} onClick={run(() => onNewTerminal('codex'))} />
+              <MenuItem icon={<Terminal strokeWidth={2} />} label="New terminal" hint={paneFull ? 'All six panes are open — opens a window instead' : `Open a PowerShell terminal in a pane in ${where} (Ctrl+Shift+\`)`} onClick={run(() => onNewTerminal('shell'))} />
               <div className="menu-sep" />
-              <MenuItem icon={<SquareTerminal strokeWidth={2} />} label="Open external terminal" hint="Open Windows Terminal outside the app" onClick={run(() => window.watch.openTerminal(undefined, 'shell'))} />
-              <MenuItem icon={<Code2 strokeWidth={2} />} label="Open Cursor" onClick={run(() => window.watch.openCursor())} />
-              <MenuItem icon={<Globe strokeWidth={2} />} label="Open Chrome" onClick={run(() => window.watch.openChrome())} />
-            </MenuPop>
-          )}
-        </div>
-
-        <div className="menu-wrap">
-          {menuButton('view', 'View')}
-          {openMenu === 'view' && (
-            <MenuPop {...away}>
-              <MenuItem icon={<Search strokeWidth={2} />} label="Command palette…" hint="Ctrl+Shift+P" onClick={run(onPalette)} />
-              <div className="menu-sep" />
-              <div className="menu-label"><SquarePlus className="menu-label-ic" strokeWidth={2} />Add pane</div>
-              {PANE_KINDS.map((p) => (
-                <MenuItem
-                  key={p.id}
-                  icon={<p.icon strokeWidth={2} />}
-                  label={p.label}
-                  hint={p.hint}
-                  disabled={!canAdd(p.id)}
-                  onClick={run(() => onAddPane(p.id))}
-                />
-              ))}
-              <div className="menu-sep" />
-              <div className="menu-label"><PanelLeft className="menu-label-ic" strokeWidth={2} />Sidebar</div>
-              {SIDEBAR_VIEWS.map((v) => (
-                <MenuCheckItem
-                  key={v.id}
-                  icon={<v.icon strokeWidth={2} />}
-                  label={v.label}
-                  hint={v.hint}
-                  checked={sidebarViews.includes(v.id)}
-                  onClick={() => onToggleSidebarView(v.id)}
-                />
-              ))}
-              <div className="menu-sep" />
-              <div className="menu-label"><PanelLeft className="menu-label-ic" strokeWidth={2} />Sidebar</div>
-              {SIDEBAR_VIEWS.map((v) => (
-                <MenuCheckItem
-                  key={v.id}
-                  icon={<v.icon strokeWidth={2} />}
-                  label={v.label}
-                  hint={v.hint}
-                  checked={sidebarViews.includes(v.id)}
-                  onClick={() => onToggleSidebarView(v.id)}
-                />
-              ))}
-              <div className="menu-sep" />
-              <MenuItem
-                icon={allCollapsed ? <ChevronsUpDown strokeWidth={2} /> : <ChevronsDownUp strokeWidth={2} />}
-                label={allCollapsed ? 'Expand all projects' : 'Collapse all projects'}
-                disabled={!canCollapse}
-                onClick={run(onCollapseAll)}
-              />
-              <MenuItem
-                icon={<Filter strokeWidth={2} />}
-                label={waitingOnly ? 'Show all sessions' : 'Show waiting only'}
-                disabled={waiting === 0 && !waitingOnly}
-                onClick={run(onWaitingOnly)}
-              />
-              <div className="menu-sep" />
-              {/* Radio groups stay open like the sidebar's check toggles, so a
-                  choice can be compared and re-picked without reopening. */}
-              <div className="menu-label"><Monitor className="menu-label-ic" strokeWidth={2} />Workspace size</div>
-              <MenuCheckItem icon={<Monitor strokeWidth={2} />} label="Full screen" hint="Fill the work area (default)" checked={sizeMode === 'full'} onClick={() => onSizeMode('full')} />
-              <MenuCheckItem icon={<PanelLeft strokeWidth={2} />} label="Left half" hint="Take the left half, leaving the right visible" checked={sizeMode === 'left'} onClick={() => onSizeMode('left')} />
-              <MenuCheckItem icon={<PanelRight strokeWidth={2} />} label="Right half" hint="Take the right half, leaving the left visible" checked={sizeMode === 'right'} onClick={() => onSizeMode('right')} />
-              <div className="menu-sep" />
-              <div className="menu-label"><Columns3 className="menu-label-ic" strokeWidth={2} />Columns</div>
-              <MenuCheckItem label="Auto" hint="Up to three columns, as panes fit" checked={paneCols === 'auto'} onClick={() => onPaneCols('auto')} />
-              <MenuCheckItem label="1 column" checked={paneCols === 1} onClick={() => onPaneCols(1)} />
-              <MenuCheckItem label="2 columns" checked={paneCols === 2} onClick={() => onPaneCols(2)} />
-              <MenuCheckItem label="3 columns" checked={paneCols === 3} onClick={() => onPaneCols(3)} />
-              <div className="menu-sep" />
-              <div className="menu-label"><LayoutTemplate className="menu-label-ic" strokeWidth={2} />Layouts</div>
-              <MenuItem icon={<Save strokeWidth={2} />} label="Save current layout…" hint="Panes, sizes, and sidebar views under a name" onClick={run(onSaveLayout)} />
-              {layouts.map((name) => (
-                <MenuItem key={`apply:${name}`} icon={<LayoutTemplate strokeWidth={2} />} label={name} hint={`Apply layout “${name}”`} onClick={run(() => onApplyLayout(name))} />
-              ))}
-              {layouts.length > 0 && <div className="menu-label"><Trash2 className="menu-label-ic" strokeWidth={2} />Delete layout</div>}
-              {layouts.map((name) => (
-                <MenuItem key={`delete:${name}`} icon={<Trash2 strokeWidth={2} />} label={name} hint={`Forget layout “${name}”`} onClick={run(() => onDeleteLayout(name))} />
-              ))}
-              <div className="menu-sep" />
-              <MenuItem
-                icon={<Ruler strokeWidth={2} />}
-                label="Reset pane sizes"
-                hint="Sidebar width and dragged column widths back to their defaults"
-                disabled={!canResetSizes}
-                onClick={run(onResetSizes)}
-              />
+              <MenuItem icon={<SquareTerminal strokeWidth={2} />} label="Open external terminal" hint={`Open Windows Terminal in ${where}, outside the app`} onClick={run(() => window.watch.openTerminal(context.cwd, 'shell'))} />
+              {commands.length > 0 && (
+                <>
+                  <div className="menu-sep" />
+                  {/* This folder's scripts. They run in a new terminal pane here;
+                      `.tm.json` entries come first, npm scripts after. */}
+                  <div className="menu-label"><Play className="menu-label-ic" strokeWidth={2} />Run in {context.label ?? 'this folder'}</div>
+                  {commands.map((c) => (
+                    <MenuItem
+                      key={c.command}
+                      icon={<Play strokeWidth={2} />}
+                      label={c.label}
+                      hint={`${c.command} — in a new terminal pane${c.source === 'tm' ? ' · from .tm.json' : ' · npm script'}`}
+                      disabled={paneFull}
+                      onClick={run(() => onRunCommand(c))}
+                    />
+                  ))}
+                </>
+              )}
             </MenuPop>
           )}
         </div>
@@ -247,20 +167,20 @@ export function TopBar(props: Props) {
           {menuButton('user', 'User')}
           {openMenu === 'user' && (
             <MenuPop {...away}>
-              <MenuItem
-                icon={<Coins strokeWidth={2} />}
-                label="Usage: spend & insights"
-                hint={hasUsage ? 'Zoom the open Usage pane' : paneFull ? 'All six panes are open' : 'Open today’s spend and local usage insights in a pane'}
-                disabled={!hasUsage && paneFull}
-                onClick={run(onUsage)}
-              />
-              <MenuItem
-                icon={<Rss strokeWidth={2} />}
-                label="Activity feed"
-                hint={hasActivity ? 'Zoom the open Activity pane' : paneFull ? 'All six panes are open' : 'What sessions asked, finished, started, and ended — in a pane'}
-                disabled={!hasActivity && paneFull}
-                onClick={run(onActivity)}
-              />
+              {/* The data panes, one row each: open it, or bring the open one forward. */}
+              {PANE_KINDS.filter((k) => k.id === 'spend' || k.id === 'insights' || k.id === 'history' || k.id === 'activity').map((k) => {
+                const open = panes.some((p) => p.kind === k.id)
+                return (
+                  <MenuItem
+                    key={k.id}
+                    icon={<k.icon strokeWidth={2} />}
+                    label={k.label}
+                    hint={open ? `Zoom the open ${k.label} pane` : paneFull ? 'All six panes are open' : `${k.hint} — in a pane`}
+                    disabled={!open && paneFull}
+                    onClick={run(() => onOpenPane(k.id))}
+                  />
+                )
+              })}
               <div className="menu-sep" />
               <MenuItem icon={<Settings strokeWidth={2} />} label="Settings…" hint="Hotkey, notifications, startup, updates, hooks (Ctrl+,)" onClick={run(onSettings)} />
               <div className="menu-sep" />
@@ -300,11 +220,6 @@ export function TopBar(props: Props) {
           >
             {waiting} waiting
           </button>
-        )}
-        {debugPort && (
-          <span className="conn conn--cdp" title={`Chrome DevTools Protocol on 127.0.0.1:${debugPort} — an agent can attach here (electron-debug MCP)`} data-testid="cdp-chip">
-            CDP :{debugPort}
-          </span>
         )}
         <ConnChip health={health} />
       </div>

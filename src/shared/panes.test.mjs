@@ -87,3 +87,10 @@ test('the remembered launch falls back to the first entry rather than starting t
   assert.equal(readLaunch(null, launches), 'claude')     // never picked
   assert.equal(readLaunch(3, launches), 'claude')
 })
+
+test('a retired pane kind comes back as its alias, deduped against the real thing', () => {
+  const opts = { kinds: ['agents', 'spend', 'insights'], isUnique: () => true, maxPanes: 6, aliases: { usage: 'spend' } }
+  assert.deepEqual(sanitizePanes([{ id: 'a', kind: 'usage' }, { id: 'b', kind: 'insights' }], opts), [{ id: 'a', kind: 'spend' }, { id: 'b', kind: 'insights' }])
+  assert.deepEqual(sanitizePanes([{ id: 'a', kind: 'usage' }, { id: 'b', kind: 'spend' }], opts), [{ id: 'a', kind: 'spend' }])
+  assert.deepEqual(sanitizePanes([{ id: 'a', kind: 'usage' }], { ...opts, aliases: {} }), [])
+})

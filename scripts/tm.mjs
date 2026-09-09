@@ -1,20 +1,30 @@
 #!/usr/bin/env node
-// `tm` — drive the running TaylorMade Agent Monitor from a terminal or a
-// keybind. It launches a second instance of the installed app with the
-// command in argv; the running instance receives it through Electron's
-// `second-instance` event and hands it to the workspace (src/shared/
-// workspaceCommand.mjs parses it on both sides). Nothing here talks IPC.
+// `tm` — drive the running TaylorMade Agent Monitor from a terminal, a keybind,
+// or an agent.
+//
+// Workspace verbs (open, layout, palette, usage, activity, show, hide) launch a
+// second instance of the installed app with the command in argv; the running
+// instance receives it through Electron's `second-instance` event and hands it
+// to the workspace (src/shared/workspaceCommand.mjs parses it on both sides).
+//
+// Daemon verbs (status, terminals, new, send, read, wait) call the app's
+// authenticated loopback daemon directly — the same routes an agent calls
+// (hooks/SKILL.md) — and never open a window.
 //
 //   node scripts/tm.mjs open --cwd C:\proj --launch claude
-//   node scripts/tm.mjs layout Build
-//   node scripts/tm.mjs palette | usage | activity | show | hide
-//   node scripts/tm.mjs status [--json]      — no window: reads the daemon
+//   node scripts/tm.mjs status [--json]
+//   node scripts/tm.mjs new --cwd C:\proj --run "npm test"
+//   node scripts/tm.mjs send <terminal-id> git status
+//   node scripts/tm.mjs read <terminal-id> --lines 40
+//   node scripts/tm.mjs wait claude:<session> --until waiting --timeout 90
+//   node scripts/tm.mjs skill --install
 //
 // With no installed app, `--dev` runs the built main bundle through electron
 // (the same second-instance path, against a dev instance started separately).
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { USAGE, parseWorkspaceArgs } from '../src/shared/workspaceCommand.mjs'
@@ -23,30 +33,52 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
 const dev = args.includes('--dev')
 const userArgs = args.filter((a) => a !== '--dev')
+const verb = userArgs[0]
+const json = userArgs.includes('--json')
 
-// `tm status` talks to the running app's loopback daemon directly — the same
-// authenticated route an agent can call — and never opens a window. The
-// endpoint file carries the port and per-install token (CLAUDE.md →
+function option(name) {
+  const eq = userArgs.find((a) => a.startsWith(`--${name}=`))
+  if (eq) return eq.slice(name.length + 3)
+  const at = userArgs.indexOf(`--${name}`)
+  return at >= 0 && at + 1 < userArgs.length ? userArgs[at + 1] : undefined
+}
+
+function fail(message, code = 2) {
+  console.error(`[tm] ${message}`)
+  process.exit(code)
+}
+
+const print = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
+
+// The endpoint file carries the port and per-install token (CLAUDE.md →
 // Configuration); TM_AGENT_MONITOR_ENDPOINT_FILE overrides its location.
-if (userArgs[0] === 'status') {
-  const json = userArgs.includes('--json')
+function endpoint() {
   const file = process.env.TM_AGENT_MONITOR_ENDPOINT_FILE
     ?? join(process.env.APPDATA ?? '', 'taylormade-agent-monitor', 'hook-endpoint.json')
-  let endpoint
   try {
-    endpoint = JSON.parse(readFileSync(file, 'utf8'))
+    return JSON.parse(readFileSync(file, 'utf8'))
   } catch {
-    console.error(`[tm] no endpoint file at ${file} — is the app running?`)
-    process.exit(2)
+    return fail(`no endpoint file at ${file} — is the app running?`)
   }
-  const res = await fetch(`http://127.0.0.1:${endpoint.port}/v1/status`, { headers: { authorization: `Bearer ${endpoint.token}` } }).catch(() => null)
-  if (!res || !res.ok) {
-    console.error(`[tm] daemon on 127.0.0.1:${endpoint.port} did not answer (${res ? res.status : 'no connection'})`)
-    process.exit(2)
-  }
-  const snap = await res.json()
+}
+
+async function call(method, path, body) {
+  const ep = endpoint()
+  const res = await fetch(`http://127.0.0.1:${ep.port}${path}`, {
+    method,
+    headers: { authorization: `Bearer ${ep.token}`, ...(body ? { 'content-type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined
+  }).catch(() => null)
+  if (!res) return fail(`daemon on 127.0.0.1:${ep.port} did not answer`)
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) return fail(`${method} ${path} → ${res.status}${data.error ? `: ${data.error}` : ''}`, 1)
+  return data
+}
+
+if (verb === 'status') {
+  const snap = await call('GET', '/v1/status')
   if (json) {
-    process.stdout.write(JSON.stringify(snap, null, 2) + '\n')
+    print(snap)
   } else {
     const agents = Array.isArray(snap.agents) ? snap.agents : []
     const roots = agents.filter((a) => !a.parentId)
@@ -59,9 +91,87 @@ if (userArgs[0] === 'status') {
   process.exit(0)
 }
 
-if (userArgs.length === 0 || userArgs[0] === '-h' || userArgs[0] === '--help' || !parseWorkspaceArgs(['tm', ...userArgs])) {
+if (verb === 'terminals') {
+  const { terminals } = await call('GET', '/v1/terminals')
+  if (json) {
+    print(terminals)
+  } else if (terminals.length === 0) {
+    process.stdout.write('no embedded terminals\n')
+  } else {
+    for (const t of terminals) {
+      const where = t.attached ? 'pane' : 'headless'
+      const state = t.exitCode !== undefined ? `exited ${t.exitCode}` : where
+      process.stdout.write(`  ${t.id}  ${t.launch.padEnd(6)} ${state.padEnd(9)} ${t.cwd}${t.agentId ? `  → ${t.agentId}` : ''}\n`)
+    }
+  }
+  process.exit(0)
+}
+
+if (verb === 'new') {
+  const launch = option('launch') ?? 'shell'
+  const cwd = option('cwd')
+  const command = option('run')
+  const created = await call('POST', '/v1/terminals', { launch, ...(cwd ? { cwd } : {}), ...(command ? { command } : {}) })
+  if (json) print(created)
+  else process.stdout.write(`${created.id}\n`)
+  process.exit(0)
+}
+
+if (verb === 'send') {
+  const id = userArgs[1]
+  const enter = !userArgs.includes('--no-enter')
+  const text = userArgs.slice(2).filter((a) => a !== '--no-enter' && a !== '--json').join(' ')
+  if (!id || !text) fail('usage: tm send <terminal-id> <text…> [--no-enter]', 1)
+  await call('POST', `/v1/terminals/${encodeURIComponent(id)}/input`, { text, enter })
+  process.exit(0)
+}
+
+if (verb === 'read') {
+  const id = userArgs[1]
+  if (!id) fail('usage: tm read <terminal-id> [--lines <n>]', 1)
+  const lines = option('lines')
+  const out = await call('GET', `/v1/terminals/${encodeURIComponent(id)}/output${lines ? `?lines=${encodeURIComponent(lines)}` : ''}`)
+  if (json) {
+    print(out)
+  } else {
+    process.stdout.write(`${out.lines.join('\n')}\n`)
+    if (out.exitCode !== undefined) process.stdout.write(`[shell exited ${out.exitCode}]\n`)
+  }
+  process.exit(0)
+}
+
+if (verb === 'wait') {
+  const id = userArgs[1]
+  if (!id) fail('usage: tm wait <agent-id> [--until <state>] [--timeout <seconds>]', 1)
+  const query = new URLSearchParams({ until: option('until') ?? 'waiting' })
+  const timeout = option('timeout')
+  if (timeout !== undefined) {
+    const seconds = Number(timeout)
+    if (!Number.isFinite(seconds) || seconds < 0) fail('--timeout is in seconds', 1)
+    query.set('timeout', String(Math.round(seconds * 1000)))
+  }
+  const out = await call('GET', `/v1/agents/${encodeURIComponent(id)}/wait?${query}`)
+  if (json) print(out)
+  else process.stdout.write(`${out.id} ${out.state ?? 'ended'}${out.satisfied ? '' : ' (timed out)'}\n`)
+  process.exit(out.satisfied ? 0 : 3)
+}
+
+if (verb === 'skill') {
+  const text = readFileSync(join(repo, 'hooks', 'SKILL.md'), 'utf8')
+  if (userArgs.includes('--install')) {
+    const dir = join(homedir(), '.claude', 'skills', 'tm-agent-monitor')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'SKILL.md'), text)
+    process.stdout.write(`installed ${join(dir, 'SKILL.md')}\n`)
+  } else {
+    process.stdout.write(text)
+  }
+  process.exit(0)
+}
+
+if (userArgs.length === 0 || verb === '-h' || verb === '--help' || !parseWorkspaceArgs(['tm', ...userArgs])) {
   process.stdout.write(USAGE)
-  process.exit(userArgs.length === 0 || userArgs[0] === '-h' || userArgs[0] === '--help' ? 0 : 1)
+  process.exit(userArgs.length === 0 || verb === '-h' || verb === '--help' ? 0 : 1)
 }
 
 const installed = [

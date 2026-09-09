@@ -30,6 +30,13 @@ const port = portArg ? Number(portArg.slice('--port='.length)) : 9222
 
 const env = { ...process.env }
 delete env.ELECTRON_RUN_AS_NODE
+// Run from inside one of the installed app's terminal panes, the shell carries
+// the installed daemon's endpoint file; inherited, the debug app would publish
+// its own port and token *there* and hijack every hook on the machine until
+// the installed app republished. The debug app gets its own file in its
+// throwaway userData (configCore: hook-endpoint.dev.json).
+delete env.TM_AGENT_MONITOR_ENDPOINT_FILE
+delete env.TM_TERMINAL_ID
 if (!real) env.CLAUDE_WATCH_MOCK = '1'
 env.CLAUDE_WATCH_PORT ??= '7460'
 

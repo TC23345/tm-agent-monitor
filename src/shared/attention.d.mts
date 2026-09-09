@@ -7,6 +7,7 @@ export interface PaneLike {
 }
 
 export function paneForAgent<T extends PaneLike>(panes: T[], agent: Agent | undefined | null): T | null
+export function agentForTerminal(agents: Agent[] | undefined, term: { launch: TerminalLaunch; cwd?: string } | undefined | null): Agent | null
 export function waitingAgents(agents: Agent[] | undefined): Agent[]
 export function nextWaiting(agents: Agent[] | undefined, currentId?: string | null): Agent | null
 export function waitingFirst(agents: Agent[] | undefined): Agent[]

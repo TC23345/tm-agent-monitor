@@ -1,4 +1,4 @@
-import { Activity, AppWindow, Bot, Coins, Rss, Terminal } from 'lucide-react'
+import { Activity, AppWindow, Bot, Coins, Rss, Terminal, ChartColumn, History } from 'lucide-react'
 import type { TerminalLaunch } from '@shared/types'
 import type { SizeBucket } from '@shared/layout.mjs'
 import {
@@ -22,7 +22,11 @@ function readJson(key: string): unknown {
  * a pane. At-a-glance status — open windows and limit bars — stacks in the
  * sidebar as toggleable sections; see `SidebarView`.
  */
-export type PaneKind = 'agents' | 'terminal' | 'usage' | 'activity'
+export type PaneKind = 'agents' | 'terminal' | 'spend' | 'insights' | 'history' | 'activity'
+
+/** Retired kinds and what a persisted layout holding one becomes. The old
+ * `usage` pane stacked Spend, Insights, and History; it comes back as Spend. */
+export const PANE_ALIASES: Record<string, PaneKind> = { usage: 'spend' }
 
 /** What an embedded terminal pane runs. `sessionId` reattaches after a remount;
  * a stale id (fresh app run) just starts a new shell with the same launch. */
@@ -45,7 +49,9 @@ export interface PaneInstance {
 export const PANE_KINDS: { id: PaneKind; label: string; icon: typeof Activity; hint: string }[] = [
   { id: 'agents', label: 'Agents', icon: Bot, hint: 'Live Claude Code, Codex, and Cursor sessions by project' },
   { id: 'terminal', label: 'Terminal', icon: Terminal, hint: 'An embedded PowerShell terminal' },
-  { id: 'usage', label: 'Usage', icon: Coins, hint: 'Today’s spend and local usage insights' },
+  { id: 'spend', label: 'Spend', icon: Coins, hint: 'Today’s tokens, estimated value, and budget by provider and project' },
+  { id: 'insights', label: 'Insights', icon: ChartColumn, hint: 'What is driving local usage: context size, subagents, skills, MCP servers' },
+  { id: 'history', label: 'History', icon: History, hint: 'The last 30 days of usage, by day and model' },
   { id: 'activity', label: 'Activity', icon: Rss, hint: 'What sessions asked, finished, started, and ended' }
 ]
 
@@ -75,7 +81,7 @@ export function loadPanes(): PaneInstance[] {
   // Parsing lives in @shared/panes.mjs (tested): retired kinds drop, unique
   // kinds dedupe, and an emptied layout falls back to the default.
   const stored = readJson(STORAGE_KEY)
-  const opts = { kinds: PANE_KIND_IDS, isUnique: isUniqueKind, maxPanes: MAX_PANES }
+  const opts = { kinds: PANE_KIND_IDS, isUnique: isUniqueKind, maxPanes: MAX_PANES, aliases: PANE_ALIASES }
   if (stored === null) {
     // One-time v2 migration: the agent list moved out of the sidebar, so a
     // layout saved before that gets an Agents pane in front of its panes.

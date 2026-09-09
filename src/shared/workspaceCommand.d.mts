@@ -7,7 +7,7 @@ export type WorkspaceCommand =
   | { kind: 'show' }
   | { kind: 'hide' }
   | { kind: 'layout'; name: string }
-  | { kind: 'open'; launch: TerminalLaunch; cwd?: string; command?: string }
+  | { kind: 'open'; launch: TerminalLaunch; cwd?: string; command?: string; sessionId?: string }
 
 export function parseWorkspaceArgs(argv: unknown): WorkspaceCommand | null
 export function isWorkspaceCommand(value: unknown): value is WorkspaceCommand
