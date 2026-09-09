@@ -734,22 +734,6 @@ kbd {
 .sinput:focus { outline: none; border-color: var(--accent); }
 .sinput.is-invalid { border-color: var(--st-question); }
 
-/* ---- away digest: one dismissable line under the title bar ---- */
-.digest {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 5px 14px;
-  border-bottom: 1px solid var(--hairline);
-  background: rgba(217, 119, 87, 0.08);
-  font-size: 12.5px;
-  color: var(--text);
-}
-.digest-ic { width: 14px; height: 14px; color: var(--accent-bright); flex: 0 0 auto; }
-.digest-text { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.digest-link { border: 0; background: transparent; color: var(--accent-bright); font: inherit; cursor: pointer; padding: 0 4px; }
-.digest-link:hover { text-decoration: underline; }
 /* Git state on a project header; dirty paths turn it amber. */
 .group-git { font-size: 11px; font-weight: 600; color: var(--faint); letter-spacing: 0.2px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .group-git.is-dirty { color: var(--st-permission); }
@@ -1636,3 +1620,32 @@ kbd {
 }
 .palette-foot:hover { color: var(--text); }
 .palette-foot kbd { font-size: 11px; }
+
+/* The pane's full folder, after the chip. Ellipsised from the *left* so the
+   tail — the part that changes — stays readable; one click copies it. */
+.gpane-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 60%;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--faint);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 1px 6px;
+  cursor: copy;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: left;
+}
+.gpane-path:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
+.gpane-path:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gpane-path.is-copied { color: var(--st-complete); cursor: default; }
+.gpane-path-ic { width: 12px; height: 12px; }
+.gpane-path-text { direction: rtl; unicode-bidi: plaintext; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gpane-ctxwrap { display: contents; }
+.gpane-ctxwrap .pane-context { cursor: copy; }

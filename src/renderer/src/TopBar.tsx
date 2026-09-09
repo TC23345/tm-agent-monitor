@@ -39,6 +39,8 @@ interface Props {
   waiting: number
   waitingOnly: boolean
   onWaitingOnly: () => void
+  /** Focus the next waiting session (the chip's click). */
+  onRouteWaiting: () => void
   health: HealthInput
   panes: PaneInstance[]
   /** The folder launches and project commands use right now (the launch nav's target). */
@@ -74,7 +76,7 @@ interface Props {
  */
 export function TopBar(props: Props) {
   const {
-    waiting, waitingOnly, onWaitingOnly, health, panes, context, onNewTerminal, onNewProject, commands, onRunCommand,
+    waiting, waitingOnly, onWaitingOnly, onRouteWaiting, health, panes, context, onNewTerminal, onNewProject, commands, onRunCommand,
     canResetOrder, onResetOrder, onSettings, openMenu, onOpenMenu, onPalette, onOpenPane, hot, onFocusAgent,
     rebuild, onRebuild
   } = props
@@ -212,11 +214,14 @@ export function TopBar(props: Props) {
             {hot.length === 1 ? `${hot[0].project} · ${hot[0].pct}% ctx ↑` : `${hot.length} sessions near context limit`}
           </button>
         )}
-        {waiting > 0 && (
+        {/* The chip *goes there*: a click lands you in the next waiting session
+            (Ctrl+Shift+W); Shift-click is the list filter for the rare case. */}
+        {(waiting > 0 || waitingOnly) && (
           <button
             className={`needs ${waitingOnly ? 'needs--active' : ''}`}
-            onClick={onWaitingOnly}
-            title={waitingOnly ? 'Showing waiting sessions only — click to show all' : 'Agents waiting for your input — click to show only them'}
+            onClick={(event) => { if (event.shiftKey || waitingOnly) onWaitingOnly(); else onRouteWaiting() }}
+            title={waitingOnly ? 'Showing waiting sessions only — click to show all' : `${waiting} waiting for your input — click to go to the next one (Ctrl+Shift+W), Shift-click to show only them`}
+            data-testid="waiting-chip"
           >
             {waiting} waiting
           </button>

@@ -19,6 +19,12 @@ Layout customization, on top of the 0.3.0 workspace.
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
 ## 0.4.3 — 2026-09-08
 
+First batch of `4.3-plan.md`.
+
+- **The waiting chip goes there.** Clicking `N waiting` in the title bar focuses the next waiting session (what Ctrl+Shift+W does) instead of filtering the list; Shift-click filters.
+- **Terminal pane header diet.** The strip is now just `/compact` (when context is hot), zoom, and close. Snippets moved to the palette as a **Snippets** group acting on the focused terminal; split is Terminal → New terminal; clear is Ctrl+L; restart is close-and-reopen; external terminal and open folder are the per-agent palette items.
+- **The pane shows its folder.** A terminal pane's header prints its full *live* folder after the chip (no hover needed), ellipsised from the left so the tail stays readable. Clicking the chip or the path copies the path and flashes *Copied*.
+- **Away digest removed.** The "While you were away" strip is gone; the waiting chip covers a cold return in one click.
 - **Limits diagnostics.** The parsed Claude plan now records which usage windows and limit kinds the OAuth response actually carried (`windows` on the account, shown in Settings → *Claude subscription* and in `tm status --json`), so a model-scoped bar such as *Weekly Fable* that stops appearing can be traced to the response rather than the parser.
 
 ## 0.4.2 — 2026-09-08

@@ -1,5 +1,5 @@
-import type { DragEvent, ReactNode } from 'react'
-import { BellRing, Maximize2, Minimize2, X } from 'lucide-react'
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { BellRing, Check, Maximize2, Minimize2, X } from 'lucide-react'
 import { PANE_KINDS, type PaneKind } from './panes'
 
 interface Props {
@@ -7,6 +7,13 @@ interface Props {
   onClose: () => void
   /** Rendered right after the title — the launch-context chip, a cwd label. */
   context?: ReactNode
+  /** The pane's full folder, printed after the chip so it never needs a hover;
+   * the tail (the part that changes) stays visible, the head ellipsises. A
+   * terminal pane passes its *live* cwd. */
+  path?: string
+  /** Clicking the path (or the chip, which App wraps with the same handler)
+   * copies it; the header flashes "Copied" for a second. */
+  onCopyPath?: () => void
   /** Icon buttons in the header's action strip, before zoom and close. Each
    * pane kind brings its own tools (restart, clear, split…) — the header is
    * the editor-title bar, not a content picker. */
@@ -31,9 +38,18 @@ interface Props {
  * whose header carries its kind's tools. The kind itself is fixed for the
  * pane's life — swapping one kind for another would kill a running shell, so
  * a different kind is a new pane (View → Add pane, or the palette). */
-export function Pane({ kind, onClose, context, tools, attention, zoomed, onZoom, dragHandle, children }: Props) {
+export function Pane({ kind, onClose, context, path, onCopyPath, tools, attention, zoomed, onZoom, dragHandle, children }: Props) {
   const meta = PANE_KINDS.find((p) => p.id === kind)!
   const Icon = meta.icon
+  const [copied, setCopied] = useState(false)
+  const copiedTimer = useRef<number | null>(null)
+  useEffect(() => () => { if (copiedTimer.current) window.clearTimeout(copiedTimer.current) }, [])
+  const copy = () => {
+    onCopyPath?.()
+    setCopied(true)
+    if (copiedTimer.current) window.clearTimeout(copiedTimer.current)
+    copiedTimer.current = window.setTimeout(() => setCopied(false), 1200)
+  }
   return (
     <section className="gpane">
       <div
@@ -56,7 +72,18 @@ export function Pane({ kind, onClose, context, tools, attention, zoomed, onZoom,
       >
         <Icon className="gpane-ic" strokeWidth={2} />
         <span className="gpane-title" title={meta.hint}>{meta.label}</span>
-        {context}
+        {/* The chip shares the path's click: both copy, both flash. */}
+        {context && onCopyPath ? <span className="gpane-ctxwrap" onClick={copy}>{context}</span> : context}
+        {path && (
+          <button
+            className={`gpane-path ${copied ? 'is-copied' : ''}`}
+            onClick={copy}
+            title={copied ? 'Copied' : `${path}\nClick to copy`}
+            data-testid="pane-path"
+          >
+            {copied ? <><Check className="gpane-path-ic" strokeWidth={2.5} />Copied</> : <span className="gpane-path-text">{path}</span>}
+          </button>
+        )}
         {attention && (
           <span className="gpane-attn" title={`Waiting for your input: ${attention}`} data-testid="pane-attention">
             <BellRing strokeWidth={2} />

@@ -62,6 +62,7 @@ test('junk items and non-array input are tolerated', () => {
 test('commandGroup files ids under the browse headings', () => {
   assert.equal(commandGroup('cmd:new-claude'), 'Start')
   assert.equal(commandGroup('cmd:run:npm run dev'), 'Run')
+  assert.equal(commandGroup('cmd:snippet:/compact'), 'Snippets')
   assert.equal(commandGroup('cmd:cursor'), 'Project')
   assert.equal(commandGroup('cmd:zoom:pane-1'), 'Panes')
   assert.equal(commandGroup('cmd:view:limits'), 'Panes')

@@ -74,7 +74,7 @@ export function rankItems(items, raw, limit = 40) {
 }
 
 /** Browse order for command groups (`commandGroup`). */
-export const GROUP_ORDER = ['Start', 'Run', 'Project', 'Panes', 'Layout', 'App', 'Other']
+export const GROUP_ORDER = ['Start', 'Snippets', 'Run', 'Project', 'Panes', 'Layout', 'App', 'Other']
 
 /**
  * Which heading a command sits under when the palette is browsed (`>` with
@@ -85,6 +85,7 @@ export const GROUP_ORDER = ['Start', 'Run', 'Project', 'Panes', 'Layout', 'App',
 export function commandGroup(id) {
   const key = typeof id === 'string' ? id.replace(/^cmd:/, '') : ''
   if (/^(new-terminal|new-claude|new-codex|ext-terminal|route-waiting)/.test(key)) return 'Start'
+  if (/^snippet:/.test(key)) return 'Snippets'
   if (/^run:/.test(key)) return 'Run'
   if (/^(cursor|chrome|new-project|projects-dir|collapse|waiting|reset-order)$/.test(key)) return 'Project'
   if (/^(activity|usage|spend|insights|history|add-|zoom:|close:|view:)/.test(key)) return 'Panes'

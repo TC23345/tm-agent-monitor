@@ -16,14 +16,12 @@ import type { TerminalPaneHandle } from './TerminalPane'
 // xterm and its addon are ~40% of the renderer bundle; a workspace with no
 // terminal pane never parses them. The ref still reaches the real component.
 const TerminalPane = lazy(() => import('./TerminalPane').then((m) => ({ default: m.TerminalPane })))
-import { MenuItem, MenuPop } from './Menu'
 import { SNIPPETS } from './snippets'
 import { NameDialog } from './NameDialog'
 import { SESSION_NAME_MAX, setSessionName, useSessionNames } from './sessionNames'
 import { useProjectCommands } from './useProject'
 import { ActivityPane } from './ActivityPane'
 import { isWorkspaceCommand } from '@shared/workspaceCommand.mjs'
-import { describeDigest, digestSnapshots, type Digest } from '@shared/digest.mjs'
 import type { ProjectCommand } from '@shared/types'
 import { LAYOUT_NAME_MAX, loadLayouts, panesFromLayout, saveLayouts, snapshotLayout, type LayoutMap } from './layouts'
 import { tid } from './testid'
@@ -47,9 +45,9 @@ import { WindowsPane, WindowsRefreshButton, useDesktopWindows } from './Workspac
 import { LaunchNav, type LaunchTarget, type NavMenu } from './LaunchNav'
 import {
   AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Code2 as CursorIcon, Columns3, Copy,
-  Eraser, ExternalLink, EyeOff, Filter, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
-  PanelLeft, PanelRight, Play, Power, RefreshCw, RotateCcw, Rss, Ruler, Save, Shrink, SquareSlash, SquareSplitHorizontal,
-  SquareTerminal, Sunrise, Terminal, Trash2, X
+  EyeOff, Filter, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
+  PanelLeft, PanelRight, Play, Power, RefreshCw, Rss, Ruler, Save, Shrink, SquareSlash,
+  SquareTerminal, Terminal, Trash2, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
 
@@ -71,7 +69,6 @@ export function App() {
   // The pane the keyboard owns (Ctrl+1…6, Ctrl+Shift+←/→, or a click), and
   // the terminal pane whose snippet menu is open.
   const [focusedPane, setFocusedPane] = useState<string | null>(null)
-  const [snippetsFor, setSnippetsFor] = useState<string | null>(null)
   // Ctrl+Shift+W cycles waiting sessions; remember where the cycle is.
   const lastRouted = useRef<string | null>(null)
   // Named layouts and the save-as prompt; a project group dragged over the grid.
@@ -85,10 +82,7 @@ export function App() {
   const [renaming, setRenaming] = useState<string | null>(null)
   const sessionNames = useSessionNames()
   const [gridDropHot, setGridDropHot] = useState(false)
-  // "While you were away": the snapshot at hide, diffed against the one at summon.
-  const away = useRef<{ at: number; snap: StatusSnapshot | null } | null>(null)
   const snapRef = useRef<StatusSnapshot | null>(null)
-  const [digest, setDigest] = useState<Digest | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Rebuild & relaunch: one state shared by the title-bar chip, File menu, and
   // palette so every entry point shows the same busy label and the same result.
@@ -230,19 +224,8 @@ export function App() {
   useEffect(() => {
     const raf = requestAnimationFrame(() => setOpen(true))
     const off = window.watch.onWindowPhase((phase) => {
-      if (phase === 'exit') {
-        setOpen(false)
-        away.current = { at: Date.now(), snap: snapRef.current }
-      } else {
-        requestAnimationFrame(() => setOpen(true))
-        const gone = away.current
-        away.current = null
-        // Only a real absence earns a strip; a quick flip is not "away".
-        if (gone && Date.now() - gone.at > 60_000) {
-          const d = digestSnapshots(gone.snap, snapRef.current, Date.now() - gone.at)
-          setDigest(d.empty ? null : d)
-        }
-      }
+      if (phase === 'exit') setOpen(false)
+      else requestAnimationFrame(() => setOpen(true))
     })
     return () => {
       cancelAnimationFrame(raf)
@@ -302,7 +285,6 @@ export function App() {
       }
       if (e.key !== 'Escape') return
       if (menu) setMenu(null)
-      else if (snippetsFor) setSnippetsFor(null)
       else if (openMenu) setOpenMenu(null)
       else if (palette) setPalette(false)
       else if (renaming) setRenaming(null)
@@ -347,13 +329,6 @@ export function App() {
     }
   }
   useEffect(() => window.watch.onCommand((c) => commandRef.current(c)), [])
-
-  // The digest strip clears itself; nothing should nag.
-  useEffect(() => {
-    if (!digest) return
-    const t = window.setTimeout(() => setDigest(null), 30_000)
-    return () => window.clearTimeout(t)
-  }, [digest])
 
   // The palette lists open windows: refresh once per open rather than polling.
   useEffect(() => {
@@ -602,7 +577,6 @@ export function App() {
     const next = panes.filter((p) => p.id !== paneId)
     setPanes(next.length ? next : defaultPanes())
     if (focusedPane === paneId) setFocusedPane(null)
-    if (snippetsFor === paneId) setSnippetsFor(null)
   }
 
   const commitPaneDrop = () => {
@@ -700,36 +674,9 @@ export function App() {
             ic(Shrink),
             () => { if (term.sessionId) window.watch.termInput(term.sessionId, '/compact\r'); handle()?.focus() }
           )}
-          {tool(
-            panes.length >= MAX_PANES ? 'All six panes are open' : 'Split: another terminal in this folder',
-            ic(SquareSplitHorizontal),
-            () => addPane('terminal', { launch: 'shell', cwd: term.cwd, label: term.label }),
-            panes.length >= MAX_PANES
-          )}
-          <span className="menu-wrap">
-            {tool('Snippets: type a command into this terminal', ic(SquareSlash), () => setSnippetsFor((cur) => (cur === pane.id ? null : pane.id)))}
-            {snippetsFor === pane.id && (
-              <MenuPop onAway={() => setSnippetsFor(null)} ignoreSelector=".gpane-tools .menu-wrap">
-                {SNIPPETS[term.launch].map((snip) => (
-                  <MenuItem
-                    key={snip.text}
-                    label={snip.label}
-                    hint={snip.hint}
-                    onClick={() => {
-                      setSnippetsFor(null)
-                      const sid = term.sessionId
-                      if (sid) window.watch.termInput(sid, `${snip.text}\r`)
-                      handle()?.focus()
-                    }}
-                  />
-                ))}
-              </MenuPop>
-            )}
-          </span>
-          {tool('Clear the terminal', ic(Eraser), () => handle()?.clear())}
-          {tool('Restart the shell', ic(RotateCcw), () => handle()?.restart())}
-          {tool('Open an external terminal here', ic(ExternalLink), () => window.watch.openTerminal(term.cwd, term.launch === 'shell' ? 'shell' : term.launch))}
-          {term.cwd && tool('Open this folder in Explorer', ic(Folder), () => window.watch.openPath(term.cwd!))}
+          {/* That is the whole strip (4.3-plan.md item 5): split is Terminal →
+              New terminal, snippets are a palette group, clear is Ctrl+L,
+              restart is close-and-reopen, external/folder are palette items. */}
         </>
       )
     }
@@ -860,6 +807,19 @@ export function App() {
     cmd('new-codex', 'New Codex', () => newTerminal('codex'), { icon: <ProviderBadge provider="codex" />, keywords: ['agent'], pinned: true, detail: context.label })
     cmd('new-terminal', 'New terminal', () => newTerminal('shell'), { icon: <Terminal strokeWidth={2} />, keywords: ['shell', 'powershell'], keys: ['Ctrl', 'Shift', '`'], pinned: true, detail: full ? 'opens a window — all six panes are open' : context.label })
     cmd('ext-terminal', 'Open external terminal', () => window.watch.openTerminal(context.cwd, 'shell'), { icon: <SquareTerminal strokeWidth={2} />, detail: context.label ?? 'home folder' })
+    // Snippets act on the focused terminal pane (they used to be a header
+    // menu; 4.3-plan.md item 5). No focused terminal, no snippets.
+    const focusedTerm = panes.find((p) => p.id === focusedPane && p.kind === 'terminal' && p.term?.sessionId)
+    if (focusedTerm?.term?.sessionId) {
+      const sid = focusedTerm.term.sessionId
+      for (const snip of SNIPPETS[focusedTerm.term.launch]) {
+        cmd(`snippet:${snip.text}`, `Snippet: ${snip.label}`, () => { window.watch.termInput(sid, `${snip.text}\r`); termRefs.current.get(focusedTerm.id)?.focus() }, {
+          icon: <SquareSlash strokeWidth={2} />,
+          detail: snip.hint ?? snip.text,
+          keywords: ['snippet', 'terminal', 'type', snip.text]
+        })
+      }
+    }
     cmd('cursor', 'Open Cursor', () => window.watch.openCursor(context.cwd), { icon: <Code2 strokeWidth={2} />, detail: context.label, keywords: ['editor'] })
     cmd('chrome', 'Open Chrome', () => window.watch.openChrome(), { icon: <Globe strokeWidth={2} />, keywords: ['browser'] })
     cmd('new-project', 'New project…', () => setNewProjectOpen(true), { icon: <FolderPlus strokeWidth={2} /> })
@@ -982,6 +942,7 @@ export function App() {
         waiting={waiting}
         waitingOnly={waitingOnly}
         onWaitingOnly={() => setWaitingOnly((v) => !v)}
+        onRouteWaiting={routeToWaiting}
         health={health}
         panes={panes}
         context={context}
@@ -1002,18 +963,6 @@ export function App() {
         onFocusAgent={focusAgentAnywhere}
       />
 
-      {digest && (
-        <div className="digest" role="status" data-testid="digest">
-          <Sunrise className="digest-ic" strokeWidth={2} />
-          <span className="digest-text">While you were away — {describeDigest(digest)}</span>
-          {digest.waiting[0] && (
-            <button className="digest-link" onClick={() => { setDigest(null); routeToWaiting() }}>Go to {digest.waiting[0].project}</button>
-          )}
-          <button className="iconbtn iconbtn--sm" onClick={() => setDigest(null)} title="Dismiss" aria-label="Dismiss digest">
-            <X className="gear gear--sm" strokeWidth={2} />
-          </button>
-        </div>
-      )}
 
       <div className="frame" ref={frameRef}>
         <aside className="sidebar" style={{ flexBasis: sidebarWidth }}>
@@ -1112,6 +1061,8 @@ export function App() {
                 kind={pane.kind}
                 onClose={() => closePane(pane.id)}
                 context={paneContext(pane)}
+                path={pane.kind === 'terminal' ? pane.term?.cwd : undefined}
+                onCopyPath={pane.kind === 'terminal' && pane.term?.cwd ? () => window.watch.copyText(pane.term!.cwd!) : undefined}
                 tools={paneTools(pane)}
                 attention={paneAttention.get(pane.id)}
                 zoomed={zoomed === pane.id}
