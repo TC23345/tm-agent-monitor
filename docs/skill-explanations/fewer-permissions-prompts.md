@@ -2,13 +2,11 @@
 
 ---
 
-The `/fewer-permission-prompts` skill can be used to evaluate how frequently you
-run each read-only command, and to turn that history into a permissions allowlist
-so those commands stop interrupting you for approval. Note the command itself is
-singular, `permission`, even though this file is named with the plural.
+The `/fewer-permission-prompts` skill can be used to evaluate how frequently you run each read-only command, and to turn that history into a permissions allowlist so those commands stop interrupting you for approval.
 
-It is a built-in skill, so there is nothing to install. Its menu description is
-"Pre-approve safe read-only commands based on your usage."
+Note the command itself is singular, `permission`, even though this file is named with the plural. It is a built-in skill, so there is nothing to install.
+
+Its menu description is "Pre-approve safe read-only commands based on your usage."
 
 **When you invoke it, the agent runs the following steps:**
 
@@ -71,24 +69,10 @@ no other settings field.
 
 ## Key Insights & Analysis
 
-- **It ranks by usage, not by interruption.** Transcripts record tool calls, never
-  the approval dialogs you clicked through, so the ranking is a proxy rather than a
-  direct measure. A frequently-run read-only command that is not already
-  auto-approved is almost certainly one you keep approving, but the skill cannot
-  tell you which prompts actually cost you the most time.
+- **It ranks by usage, not by interruption.** Transcripts record tool calls, never the approval dialogs you clicked through, so the ranking is a proxy rather than a direct measure. A frequently-run read-only command that is not already auto-approved is almost certainly one you keep approving, but the skill cannot tell you which prompts actually cost you the most time.
 
-- **The allowlist it writes is scoped to a single repository.** Output goes to
-  `.claude/settings.json` in the project you ran it from, so the benefit stops at
-  that repo's boundary. Work spanning many client repos needs those entries copied
-  into `~/.claude/settings.json` by hand before they apply everywhere.
+- **The allowlist it writes is scoped to a single repository.** Output goes to `.claude/settings.json` in the project you ran it from, so the benefit stops at that repo's boundary. Work spanning many client repos needs those entries copied into `~/.claude/settings.json` by hand before they apply everywhere.
 
-- **Launching it from your home folder quietly makes the rules global.** When the
-  working directory is `C:\Users\TC933`, "the project settings file" resolves to
-  `~/.claude/settings.json`, which is the user settings file. That is likely the
-  outcome you want for machine-wide rules, but it is the opposite of the skill's
-  stated intent, so choose the launch directory deliberately.
+- **Launching it from your home folder quietly makes the rules global.** When the working directory is `C:\Users\TC933`, "the project settings file" resolves to `~/.claude/settings.json`, which is the user settings file. That is likely the outcome you want for machine-wide rules, but it is the opposite of the skill's stated intent, so choose the launch directory deliberately.
 
-- **It only examines Bash commands and MCP tools.** File edit and write approvals
-  fall outside its scope entirely, and for long unattended background jobs those
-  are often the larger source of stalls. Expect it to reduce interruptions, not
-  eliminate them.
+- **It only examines Bash commands and MCP tools.** File edit and write approvals fall outside its scope entirely, and for long unattended background jobs those are often the larger source of stalls. Expect it to reduce interruptions, not eliminate them.
