@@ -69,24 +69,26 @@ no other settings field.
 
 ---
 
-## Caveats worth knowing
+## Key Insights & Analysis
 
-**It ranks by usage, not by prompts.** The transcripts record tool calls, not the
-approval dialogs you clicked through. So the ranking is a proxy. A frequently-run
-read-only command that is not already auto-approved is almost certainly one you
-keep approving, but the skill cannot literally show you which prompts cost you
-the most time.
+- **It ranks by usage, not by interruption.** Transcripts record tool calls, never
+  the approval dialogs you clicked through, so the ranking is a proxy rather than a
+  direct measure. A frequently-run read-only command that is not already
+  auto-approved is almost certainly one you keep approving, but the skill cannot
+  tell you which prompts actually cost you the most time.
 
-**It writes to project settings, which limits the payoff.** The allowlist helps
-the one repository you ran it in. Work spanning many client repos needs the
-entries copied into `~/.claude/settings.json` by hand to take effect everywhere.
+- **The allowlist it writes is scoped to a single repository.** Output goes to
+  `.claude/settings.json` in the project you ran it from, so the benefit stops at
+  that repo's boundary. Work spanning many client repos needs those entries copied
+  into `~/.claude/settings.json` by hand before they apply everywhere.
 
-**Running it from your home folder is a special case.** If the working directory
-is `C:\Users\TC933`, then "the project settings file" resolves to
-`~/.claude/settings.json`, which is the user settings file. That is probably the
-outcome you want for machine-wide rules, but it is the opposite of the skill's
-stated intent, so it is worth being deliberate about where you launch it.
+- **Launching it from your home folder quietly makes the rules global.** When the
+  working directory is `C:\Users\TC933`, "the project settings file" resolves to
+  `~/.claude/settings.json`, which is the user settings file. That is likely the
+  outcome you want for machine-wide rules, but it is the opposite of the skill's
+  stated intent, so choose the launch directory deliberately.
 
-**Scope is Bash and MCP only.** File edit and write approvals are outside what it
-looks at, and for long unattended background jobs those may be the larger source
-of stalls.
+- **It only examines Bash commands and MCP tools.** File edit and write approvals
+  fall outside its scope entirely, and for long unattended background jobs those
+  are often the larger source of stalls. Expect it to reduce interruptions, not
+  eliminate them.
