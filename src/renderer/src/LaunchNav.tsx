@@ -3,6 +3,7 @@ import { ChevronDown, Code2, Folder, FolderPlus, SquareTerminal } from 'lucide-r
 import type { TerminalLaunch } from '@shared/types'
 import { ProviderBadge } from './ProviderBadge'
 import { MenuCheckItem, MenuPop } from './Menu'
+import { tid } from './testid'
 
 /** Where launches land. `cwd` undefined means the home folder. */
 export interface LaunchTarget {
@@ -25,6 +26,8 @@ interface Props {
   following: boolean
   /** null re-follows the active session; a target pins that folder. */
   onChoose: (target: LaunchTarget | null) => void
+  /** Up to three other live projects, newest first — one-click retargets. */
+  recent: LaunchTarget[]
   /** Which of this nav's popovers is open. App owns it — see NavMenu. */
   openMenu: NavMenu | null
   onOpenMenu: (menu: NavMenu | null) => void
@@ -82,7 +85,7 @@ function NavRow({ icon, label, meta, title, onClick, testId }: {
  * comes from `webUtils.getPathForFile` in the preload — `File.path` was
  * removed in Electron 32).
  */
-export function LaunchNav({ context, projects, following, onChoose, openMenu, onOpenMenu, onLaunch, launchKind, onLaunchKind, onNewProject, onDropFolder }: Props) {
+export function LaunchNav({ context, projects, following, onChoose, recent, openMenu, onOpenMenu, onLaunch, launchKind, onLaunchKind, onNewProject, onDropFolder }: Props) {
   const [dropHot, setDropHot] = useState(false)
   const switcherOpen = openMenu === 'launch-target'
   const launchOpen = openMenu === 'launch-pick'
@@ -165,6 +168,17 @@ export function LaunchNav({ context, projects, following, onChoose, openMenu, on
         )}
       </div>
 
+      {/* The other live projects, one click each; the dropdown keeps the
+          full list, home, and dropped folders. Nothing to show costs no space. */}
+      {recent.length > 0 && (
+        <div className="navrecent" data-testid="nav-recent">
+          {recent.map((p) => (
+            <button key={p.cwd} className="navchip" onClick={() => onChoose(p)} title={`Point launches at ${p.cwd}`} data-testid={tid('recent', p.label ?? p.cwd)}>
+              {p.label ?? p.cwd}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="navsplit-wrap">
         <div className="navsplit">
           <button

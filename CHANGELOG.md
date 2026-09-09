@@ -17,6 +17,15 @@ Layout customization, on top of the 0.3.0 workspace.
 - **Pane tool strips.** The pane header's content dropdown is gone; the kind is fixed and the header carries that kind's tools — terminals get split, clear, restart, external terminal, and open folder; the launcher gets new project and Projects folder. Ctrl+Shift+` opens a new terminal, Ctrl+, opens Settings.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
+## 0.4.4 — 2026-09-09
+
+Second batch of `4.3-plan.md`.
+
+- **Launch choice remembered per project.** The split row starts what you last picked *in this folder*; a folder you never picked in follows the global default (`tm.launch.v2`, the old single default migrates).
+- **Recent projects under the switcher.** Up to three chips for the other live projects — one click retargets the launch row. Hidden when there is nothing but the current project.
+- **Open windows left the sidebar.** The palette's `#` prefix raises any window; Limits is the sidebar's one section.
+- **First run offers the hooks.** With no hooks installed, the Agents pane says so and installs Claude Code or Codex hooks in place, instead of pointing at Settings.
+
 ## 0.4.3 — 2026-09-08
 
 First batch of `4.3-plan.md`.

@@ -31,7 +31,7 @@ import { ProviderBadge } from './ProviderBadge'
 import { Settings as SettingsIcon } from './Icons'
 import {
   MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, defaultPanes, emptySizes, isUniqueKind, loadPaneCols,
-  loadLaunch, loadPanes, loadSidebarCollapsed, loadSidebarViews, loadSizes, newPane, saveLaunch, savePaneCols,
+  loadLaunchPrefs, loadPanes, loadSidebarCollapsed, loadSidebarViews, loadSizes, newPane, saveLaunchPrefs, savePaneCols,
   savePanes, saveSidebarCollapsed, saveSidebarViews, saveSizes,
   type AllSizes, type PaneCols, type PaneInstance, type PaneKind, type PaneSizes, type SidebarView,
   type TerminalPaneConfig
@@ -41,7 +41,7 @@ import {
   PANE_MIN, PANE_MIN_ROW, clampSidebarWidth, columnTemplate, normalizeFractions, resizeFractions,
   trackWidths, viewportBucket, type SizeBucket
 } from '@shared/layout.mjs'
-import { WindowsPane, WindowsRefreshButton, useDesktopWindows } from './WorkspacePanes'
+import { launchFor, withLaunch, type LaunchPrefs } from '@shared/panes.mjs'
 import { LaunchNav, type LaunchTarget, type NavMenu } from './LaunchNav'
 import {
   AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Code2 as CursorIcon, Columns3, Copy,
@@ -77,13 +77,17 @@ export function App() {
   // What the nav's split launch row starts on a plain click. Deliberately only
   // the popover changes it: the palette and the Terminal menu are for a one-off
   // you already named, and should not silently move the nav's default.
-  const [launchKind, setLaunchKind] = useState<TerminalLaunch>(loadLaunch)
+  // Per folder (tm.launch.v2): the split row starts what you last picked *in
+  // this project*; a folder you never picked in follows the global default.
+  const [launchPrefs, setLaunchPrefs] = useState<LaunchPrefs<TerminalLaunch>>(loadLaunchPrefs)
   // The session being named, if any (the rows read the same store).
   const [renaming, setRenaming] = useState<string | null>(null)
   const sessionNames = useSessionNames()
   const [gridDropHot, setGridDropHot] = useState(false)
   const snapRef = useRef<StatusSnapshot | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // First-run hook installation from the Agents pane's empty state.
+  const [hookSetup, setHookSetup] = useState<{ busy: 'claude' | 'codex' | null; msg: string | null }>({ busy: null, msg: null })
   // Rebuild & relaunch: one state shared by the title-bar chip, File menu, and
   // palette so every entry point shows the same busy label and the same result.
   // Main guards against a second concurrent build; this only stops the UI
@@ -157,10 +161,6 @@ export function App() {
   // Drives the slide-up / slide-down transition. Starts closed so the very first
   // painted frame is already off-screen and the card rises into place.
   const [open, setOpen] = useState(false)
-  // Only enumerate windows while the sidebar section is actually showing them —
-  // a collapsed section stops the polling just like a hidden one.
-  const desktop = useDesktopWindows(sidebarViews.includes('windows') && !sidebarCollapsed.includes('windows'))
-
   useEffect(() => {
     window.watch.getStatus().then(setSnap)
     const off = window.watch.onStatus(setSnap)
@@ -169,7 +169,7 @@ export function App() {
   snapRef.current = snap
 
   useEffect(() => savePanes(panes), [panes])
-  useEffect(() => saveLaunch(launchKind), [launchKind])
+  useEffect(() => saveLaunchPrefs(launchPrefs), [launchPrefs])
   useEffect(() => saveSidebarViews(sidebarViews), [sidebarViews])
   useEffect(() => saveSidebarCollapsed(sidebarCollapsed), [sidebarCollapsed])
   useEffect(() => savePaneCols(paneCols), [paneCols])
@@ -355,6 +355,8 @@ export function App() {
     .filter((a) => a.cwd && !a.parentId)
     .sort((a, b) => b.updatedAt - a.updatedAt)[0]
   const context: LaunchTarget = launchChoice ?? { cwd: recent?.cwd, label: recent?.project }
+  const launchKind = launchFor(launchPrefs, context.cwd)
+  const setLaunchKind = (kind: TerminalLaunch) => setLaunchPrefs((current) => withLaunch(current, context.cwd, kind))
 
   /** Folders the switcher can point at: one per live project, newest first. */
   const launchProjects: LaunchTarget[] = []
@@ -393,14 +395,38 @@ export function App() {
   }
   const health = { providers: snap?.providers, mock: !!snap?.mock }
   const noHooks = !!snap && !snap.mock && Object.values(snap.providers).every((h) => !h.reporting)
+  // Providers whose hooks are not installed at all — the first-run offer.
+  const hookOffer = (['claude', 'codex'] as const).filter((p) => snap && !snap.providers[p]?.installed)
+  const installHooks = (provider: 'claude' | 'codex') => {
+    if (hookSetup.busy) return
+    setHookSetup({ busy: provider, msg: null })
+    window.watch.manageHooks(provider, 'install')
+      .then((result) => setHookSetup({ busy: null, msg: result.ok ? `${provider === 'claude' ? 'Claude Code' : 'Codex'} hooks installed — start a session and it will appear here.` : result.message }))
+      .catch((error) => setHookSetup({ busy: null, msg: String(error) }))
+  }
 
   const agentList = !snap ? (
     <div className="empty">Connecting…</div>
   ) : groups.length === 0 ? (
-    <div className="empty">
-      {noHooks
-        ? 'No provider reports yet. Install hooks and review Codex trust in /hooks.'
-        : 'No active agents. Start Claude Code, Codex, or Cursor in a project.'}
+    <div className="empty" data-testid="agents-empty">
+      {noHooks ? (
+        <>
+          {/* First run: nothing has ever reported. Offer the hooks right here
+              instead of pointing at Settings (4.3-plan.md item 8). */}
+          {hookOffer.length > 0 ? 'Nothing is reporting yet — this app hears about sessions through provider hooks.' : 'Hooks are installed but nothing has reported yet. Start Claude Code or Codex in a project.'}
+          {hookOffer.length > 0 && (
+            <div className="empty-actions">
+              {hookOffer.map((p) => (
+                <button key={p} className="hotkey-btn" disabled={hookSetup.busy !== null} onClick={() => installHooks(p)} data-testid={tid('install-hooks', p)}>
+                  {hookSetup.busy === p ? 'Installing…' : `Install ${p === 'claude' ? 'Claude Code' : 'Codex'} hooks`}
+                </button>
+              ))}
+            </div>
+          )}
+          {hookSetup.msg && <div className="empty-note">{hookSetup.msg}</div>}
+          {hookOffer.includes('codex') && <div className="empty-note">Codex also needs its hooks trusted once: run /hooks inside Codex.</div>}
+        </>
+      ) : 'No active agents. Start Claude Code, Codex, or Cursor in a project.'}
     </div>
   ) : (
     groups.map((group) => (
@@ -712,8 +738,6 @@ export function App() {
     switch (view) {
       case 'limits':
         return snap ? <UsageDashboard usage={snap.usage} /> : <div className="empty">Connecting…</div>
-      case 'windows':
-        return <WindowsPane windows={desktop.windows} />
     }
   }
 
@@ -734,7 +758,6 @@ export function App() {
             <ChevronDown className={`sidebar-caret ${rolled ? 'is-closed' : ''}`} strokeWidth={2} />
           </button>
           <span className="gpane-actions">
-            {v.id === 'windows' && !rolled && <WindowsRefreshButton refreshing={desktop.refreshing} refresh={desktop.refresh} />}
             <button
               className="iconbtn iconbtn--sm sideview-hide"
               onClick={() => toggleSidebarView(v.id)}
@@ -989,6 +1012,7 @@ export function App() {
             onLaunch={(kind, external) => (external ? window.watch.openTerminal(context.cwd, kind) : newTerminal(kind))}
             launchKind={launchKind}
             onLaunchKind={setLaunchKind}
+            recent={launchProjects.filter((p) => p.cwd !== context.cwd).slice(0, 3)}
             onNewProject={() => setNewProjectOpen(true)}
             onDropFolder={dropLaunchFolder}
           />

@@ -35,3 +35,10 @@ export function readPaneCols(raw: unknown): 'auto' | 1 | 2 | 3
 export function emptySizes(): Sizes
 export function readAllSizes(raw: unknown): Record<SizeBucket, Sizes>
 export function readLaunch<L extends string>(raw: unknown, launches: readonly L[]): L
+
+export interface LaunchPrefs<L extends string = string> { default: L; byCwd: Record<string, L> }
+export const MAX_LAUNCH_FOLDERS: number
+export function launchKey(cwd: string | undefined | null): string
+export function readLaunchPrefs<L extends string>(raw: unknown, legacyRaw: unknown, launches: readonly L[]): LaunchPrefs<L>
+export function launchFor<L extends string>(prefs: LaunchPrefs<L>, cwd: string | undefined | null): L
+export function withLaunch<L extends string>(prefs: LaunchPrefs<L>, cwd: string | undefined | null, launch: L): LaunchPrefs<L>

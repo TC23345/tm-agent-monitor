@@ -51,7 +51,7 @@ export function sanitizePanes(raw, { kinds, isUnique, maxPanes, launches = ['she
 
 /**
  * Sidebar views from the v2 value, else a one-time v1 migration (keep the
- * user's toggles, surface Open windows once), else the defaults. Ids not in
+ * user's toggles), else the defaults. Ids not in
  * the catalog fall out — that is how a retired view disappears without a
  * migration key.
  */
@@ -59,9 +59,7 @@ export function sanitizeSidebarViews(raw, legacyRaw, { ids, defaults }) {
   const known = new Set(ids)
   if (Array.isArray(raw)) return [...new Set(raw.filter((v) => known.has(v)))]
   if (Array.isArray(legacyRaw)) {
-    const views = [...new Set(legacyRaw.filter((v) => known.has(v)))]
-    if (known.has('windows') && !views.includes('windows')) views.push('windows')
-    return views
+    return [...new Set(legacyRaw.filter((v) => known.has(v)))]
   }
   return [...defaults]
 }
@@ -132,4 +130,48 @@ export function readAllSizes(raw) {
  */
 export function readLaunch(raw, launches) {
   return launches.includes(raw) ? raw : launches[0]
+}
+
+/** A folder key that survives slash and case differences on Windows. */
+export function launchKey(cwd) {
+  if (typeof cwd !== 'string' || !cwd.trim()) return ''
+  return cwd.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+}
+
+/** Most folders the per-project launch memory keeps; the oldest fall out. */
+export const MAX_LAUNCH_FOLDERS = 50
+
+/**
+ * The split row's launch preference — `tm.launch.v2`: a global default plus a
+ * per-folder override, so a project you always run Codex in starts Codex even
+ * after you picked Claude Code somewhere else. `legacyRaw` is the v1 string
+ * (one global default) and migrates once. Unknown launches and malformed keys
+ * fall out; the map is bounded to MAX_LAUNCH_FOLDERS.
+ */
+export function readLaunchPrefs(raw, legacyRaw, launches) {
+  const fallback = readLaunch(legacyRaw, launches)
+  if (!isRecord(raw)) return { default: fallback, byCwd: {} }
+  const byCwd = {}
+  if (isRecord(raw.byCwd)) {
+    const entries = Object.entries(raw.byCwd)
+      .filter(([key, value]) => typeof key === 'string' && key.length > 0 && key.length <= 4096 && launches.includes(value))
+      .slice(-MAX_LAUNCH_FOLDERS)
+    for (const [key, value] of entries) byCwd[launchKey(key)] = value
+  }
+  return { default: readLaunch(raw.default, launches), byCwd }
+}
+
+/** What the split row starts in `cwd`: the folder's own pick, else the default. */
+export function launchFor(prefs, cwd) {
+  const key = launchKey(cwd)
+  return (key && prefs?.byCwd && prefs.byCwd[key]) || prefs?.default
+}
+
+/** `prefs` with `launch` picked in `cwd` (globally too, so home follows the last pick). */
+export function withLaunch(prefs, cwd, launch) {
+  const key = launchKey(cwd)
+  const byCwd = key ? { ...prefs.byCwd, [key]: launch } : { ...prefs.byCwd }
+  const keys = Object.keys(byCwd)
+  if (keys.length > MAX_LAUNCH_FOLDERS) for (const k of keys.slice(0, keys.length - MAX_LAUNCH_FOLDERS)) delete byCwd[k]
+  return { default: launch, byCwd }
 }

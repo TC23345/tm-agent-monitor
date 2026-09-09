@@ -1,9 +1,9 @@
-import { Activity, AppWindow, Bot, Coins, Rss, Terminal, ChartColumn, History } from 'lucide-react'
+import { Activity, Bot, Coins, Rss, Terminal, ChartColumn, History } from 'lucide-react'
 import type { TerminalLaunch } from '@shared/types'
 import type { SizeBucket } from '@shared/layout.mjs'
 import {
-  emptySizes as emptySizesShared, migratePanesV3, readAllSizes, readLaunch, readPaneCols, sanitizeCollapsed,
-  sanitizePanes, sanitizeSidebarViews, type Sizes
+  emptySizes as emptySizesShared, migratePanesV3, readAllSizes, readLaunchPrefs, readPaneCols, sanitizeCollapsed,
+  sanitizePanes, sanitizeSidebarViews, type LaunchPrefs, type Sizes
 } from '@shared/panes.mjs'
 
 /** localStorage JSON, or null — every reader here tolerates null. */
@@ -106,20 +106,19 @@ export function savePanes(panes: PaneInstance[]): void {
 /** Data views stacked in the sidebar, toggled from the sidebar menu. The
  * `SIDEBAR_TOP` views pin above the agent list; the rest stack below, both in
  * catalog order. */
-export type SidebarView = 'windows' | 'limits'
+export type SidebarView = 'limits'
 
 /** Spend and Insights used to be sidebar views; they moved into the `usage`
  * pane. Their stored ids fall out of every sidebar key through `isSidebarView`,
  * which is derived from this catalog, so no migration is needed. */
 export const SIDEBAR_VIEWS: { id: SidebarView; label: string; icon: typeof Activity; hint: string }[] = [
-  { id: 'limits', label: 'Limits', icon: Activity, hint: 'Provider usage limits' },
-  { id: 'windows', label: 'Open windows', icon: AppWindow, hint: 'Switch to an open terminal, editor, or browser' }
+  { id: 'limits', label: 'Limits', icon: Activity, hint: 'Provider usage limits' }
 ]
 
-/** Views that pin above the agent list, in this order. Open windows leads: it
- * starts rolled up, so it costs one header row and is one click from the switcher.
- * Everything else stacks below the agents. */
-export const SIDEBAR_TOP: SidebarView[] = ['limits', 'windows']
+/** Views that pin above the agent list, in this order; everything else stacks
+ * below. Open windows used to live here — the palette's `#` prefix raises any
+ * window now (4.3-plan.md item 7). */
+export const SIDEBAR_TOP: SidebarView[] = ['limits']
 
 export function isTopSidebarView(view: SidebarView): boolean {
   return SIDEBAR_TOP.includes(view)
@@ -127,12 +126,12 @@ export function isTopSidebarView(view: SidebarView): boolean {
 
 const SIDEBAR_KEY = 'tm.sidebar.v2'
 const LEGACY_SIDEBAR_KEY = 'tm.sidebar.v1'
-const DEFAULT_SIDEBAR: SidebarView[] = ['limits', 'windows']
+const DEFAULT_SIDEBAR: SidebarView[] = ['limits']
 
 const SIDEBAR_IDS = SIDEBAR_VIEWS.map((v) => v.id)
 
 export function loadSidebarViews(): SidebarView[] {
-  // v2 wins; v1 migrates once (keeping the toggles, surfacing Open windows);
+  // v2 wins; v1 migrates once (keeping the toggles);
   // ids no longer in the catalog fall out — that is how a retired view goes.
   return sanitizeSidebarViews(readJson(SIDEBAR_KEY), readJson(LEGACY_SIDEBAR_KEY), { ids: SIDEBAR_IDS, defaults: DEFAULT_SIDEBAR })
 }
@@ -145,10 +144,9 @@ export function saveSidebarViews(views: SidebarView[]): void {
   }
 }
 
-/** Sections a user rolled up to just their header. Open windows starts
- * collapsed — it earns its space on demand, not by default. */
+/** Sections a user rolled up to just their header. */
 const COLLAPSED_KEY = 'tm.sidebar.collapsed.v1'
-const DEFAULT_COLLAPSED: SidebarView[] = ['windows']
+const DEFAULT_COLLAPSED: SidebarView[] = []
 
 export function loadSidebarCollapsed(): SidebarView[] {
   return sanitizeCollapsed(readJson(COLLAPSED_KEY), { ids: SIDEBAR_IDS, defaults: DEFAULT_COLLAPSED })
@@ -229,14 +227,18 @@ export const LAUNCH_KINDS: TerminalLaunch[] = ['claude', 'codex', 'shell']
 
 const LAUNCH_KEY = 'tm.launch.v1'
 
-export function loadLaunch(): TerminalLaunch {
-  return readLaunch(readJson(LAUNCH_KEY), LAUNCH_KINDS)
+/** `tm.launch.v2`: a global default plus per-folder picks (see `readLaunchPrefs`);
+ * the v1 key held one global string and migrates once. */
+const LAUNCH_KEY_V2 = 'tm.launch.v2'
+
+export function loadLaunchPrefs(): LaunchPrefs<TerminalLaunch> {
+  return readLaunchPrefs(readJson(LAUNCH_KEY_V2), readJson(LAUNCH_KEY), LAUNCH_KINDS)
 }
 
-export function saveLaunch(launch: TerminalLaunch): void {
+export function saveLaunchPrefs(prefs: LaunchPrefs<TerminalLaunch>): void {
   try {
-    localStorage.setItem(LAUNCH_KEY, JSON.stringify(launch))
+    localStorage.setItem(LAUNCH_KEY_V2, JSON.stringify(prefs))
   } catch {
-    /* private mode / quota — the default just resets next launch */
+    /* non-fatal */
   }
 }

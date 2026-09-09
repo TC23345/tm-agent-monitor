@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { emptySizes, migratePanesV3, readAllSizes, readLaunch, readPaneCols, sanitizeCollapsed, sanitizePanes, sanitizeSidebarViews } from './panes.mjs'
+import { emptySizes, launchFor, migratePanesV3, readAllSizes, readLaunch, readLaunchPrefs, readPaneCols, sanitizeCollapsed, sanitizePanes, sanitizeSidebarViews, withLaunch } from './panes.mjs'
 
 const KINDS = ['agents', 'terminal', 'usage', 'activity']
 const opts = { kinds: KINDS, isUnique: (k) => k !== 'terminal', maxPanes: 6 }
@@ -53,15 +53,34 @@ test('the v3 migration puts an Agents pane first, once, and respects the cap', (
   assert.deepEqual(migratePanesV3(null, { ...opts, newId: 'new' }).map((p) => p.kind), ['agents'])
 })
 
-test('sidebar views: v2 wins, v1 migrates once and surfaces Open windows, else defaults; retired ids vanish', () => {
-  const o = { ids: ['windows', 'limits'], defaults: ['windows', 'limits'] }
-  assert.deepEqual(sanitizeSidebarViews(['limits', 'spend', 'limits', 'insights'], null, o), ['limits'])
-  assert.deepEqual(sanitizeSidebarViews(null, ['limits', 'spend'], o), ['limits', 'windows'])
-  assert.deepEqual(sanitizeSidebarViews(null, ['windows'], o), ['windows'])
-  assert.deepEqual(sanitizeSidebarViews(undefined, undefined, o), ['windows', 'limits'])
+test('sidebar views: v2 wins, v1 migrates once, else defaults; retired ids (windows, spend) vanish', () => {
+  const o = { ids: ['limits'], defaults: ['limits'] }
+  assert.deepEqual(sanitizeSidebarViews(['limits', 'spend', 'limits', 'windows'], null, o), ['limits'])
+  assert.deepEqual(sanitizeSidebarViews(null, ['limits', 'windows'], o), ['limits'])
+  assert.deepEqual(sanitizeSidebarViews(null, ['windows'], o), [])
+  assert.deepEqual(sanitizeSidebarViews(undefined, undefined, o), ['limits'])
   assert.deepEqual(sanitizeSidebarViews([], null, o), [])
-  assert.deepEqual(sanitizeCollapsed(['spend', 'windows', 'windows'], o), ['windows'])
-  assert.deepEqual(sanitizeCollapsed('x', { ...o, defaults: ['windows'] }), ['windows'])
+  assert.deepEqual(sanitizeCollapsed(['spend', 'windows', 'limits', 'limits'], o), ['limits'])
+  assert.deepEqual(sanitizeCollapsed('x', { ...o, defaults: [] }), [])
+})
+
+test('launch prefs: v1 string migrates to a default, folders override it, junk falls out, the map is bounded', () => {
+  const L = ['claude', 'codex', 'shell']
+  assert.deepEqual(readLaunchPrefs(undefined, 'codex', L), { default: 'codex', byCwd: {} })
+  assert.deepEqual(readLaunchPrefs(undefined, undefined, L), { default: 'claude', byCwd: {} })
+  const prefs = readLaunchPrefs({ default: 'shell', byCwd: { 'C:\\Proj\\A': 'codex', 'c:/proj/b/': 'bash', 7: 'claude' } }, 'codex', L)
+  assert.deepEqual(prefs, { default: 'shell', byCwd: { 'c:/proj/a': 'codex', '7': 'claude' } })
+  assert.equal(launchFor(prefs, 'c:/Proj/A'), 'codex')
+  assert.equal(launchFor(prefs, 'C:/proj/b'), 'shell')
+  assert.equal(launchFor(prefs, undefined), 'shell')
+  const next = withLaunch(prefs, 'C:\\Proj\\B', 'claude')
+  assert.equal(next.default, 'claude')
+  assert.equal(next.byCwd['c:/proj/b'], 'claude')
+  assert.equal(launchFor(withLaunch(prefs, undefined, 'codex'), 'x:/nowhere'), 'codex')
+  const many = {}
+  for (let i = 0; i < 60; i++) many[`c:/p${i}`] = 'codex'
+  assert.equal(Object.keys(readLaunchPrefs({ default: 'claude', byCwd: many }, null, L).byCwd).length, 50)
+  assert.equal(Object.keys(withLaunch({ default: 'claude', byCwd: many }, 'c:/new', 'shell').byCwd).length, 50)
 })
 
 test('column choice and sizes read defensively, with the pre-bucket layout seeding both buckets', () => {
