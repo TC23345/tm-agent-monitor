@@ -1308,8 +1308,9 @@ function registerIpc(): void {
     if (req.launch !== 'shell' && req.launch !== 'claude' && req.launch !== 'codex') return null
     if (!validTermSize(req.cols) || !validTermSize(req.rows)) return null
     if (req.resume !== undefined && typeof req.resume !== 'boolean') return null
+    if (req.resumeId !== undefined && (typeof req.resumeId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(req.resumeId))) return null
     return terminals.create(
-      { cwd: req.cwd, launch: req.launch, cols: req.cols, rows: req.rows, resume: req.resume },
+      { cwd: req.cwd, launch: req.launch, cols: req.cols, rows: req.rows, resume: req.resume, resumeId: req.resumeId },
       resolveShell(),
       app.getPath('home')
     )

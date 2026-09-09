@@ -37,7 +37,8 @@ export function sanitizePanes(raw, { kinds, isUnique, maxPanes, launches = ['she
           cwd: typeof t.cwd === 'string' ? t.cwd : undefined,
           label: typeof t.label === 'string' ? t.label : undefined,
           sessionId: typeof t.sessionId === 'string' ? t.sessionId : undefined,
-          initialCommand: typeof t.initialCommand === 'string' ? t.initialCommand : undefined
+          initialCommand: typeof t.initialCommand === 'string' ? t.initialCommand : undefined,
+          resumeId: typeof t.resumeId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(t.resumeId) ? t.resumeId : undefined
         }
       })
     } else {

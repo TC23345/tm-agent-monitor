@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { nextWaiting, paneForAgent, waitingAgents, waitingFirst } from './attention.mjs'
+import { agentForTerminal, nextWaiting, paneForAgent, waitingAgents, waitingFirst } from './attention.mjs'
 
 const agent = (id, extra = {}) => ({ id, provider: 'claude', project: id, state: 'running', since: 0, updatedAt: 0, ...extra })
 const pane = (id, launch, cwd) => ({ id, kind: 'terminal', term: { launch, cwd } })
@@ -39,4 +39,16 @@ test('waitingFirst promotes waiting sessions and keeps the rest in order', () =>
   const agents = [agent('a'), agent('b', { state: 'waiting', since: 2 }), agent('c'), agent('d', { state: 'waiting', since: 1 })]
   assert.deepEqual(waitingFirst(agents).map((a) => a.id), ['d', 'b', 'a', 'c'])
   assert.deepEqual(waitingFirst(undefined), [])
+})
+
+test('agentForTerminal prefers the session whose hooks named this pane, else the first in the folder', () => {
+  const a = agent('a', { cwd: 'C:/proj', terminalId: 'pty-1' })
+  const b = agent('b', { cwd: 'C:/proj', terminalId: 'pty-2' })
+  const c = agent('c', { cwd: 'C:/other' })
+  assert.equal(agentForTerminal([a, b, c], { launch: 'claude', cwd: 'C:/proj', sessionId: 'pty-2' }), b)
+  assert.equal(agentForTerminal([a, b, c], { launch: 'claude', cwd: 'C:/proj', sessionId: 'pty-9' }), a)
+  assert.equal(agentForTerminal([a, b, c], { launch: 'claude', cwd: 'C:/proj' }), a)
+  assert.equal(agentForTerminal([a, b, c], { launch: 'shell', cwd: 'C:/proj', sessionId: 'pty-1' }), null)
+  assert.equal(agentForTerminal([a, b, c], { launch: 'codex', cwd: 'C:/proj', sessionId: 'pty-1' }), null)
+  assert.equal(agentForTerminal([a], { launch: 'claude', sessionId: 'pty-1' }), a)
 })

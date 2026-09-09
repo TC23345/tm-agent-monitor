@@ -154,7 +154,7 @@ export function validateAgentEventV1(value, now = Date.now()) {
   const obj = record(value)
   if (!obj || !onlyKeys(obj, new Set([
     'schemaVersion', 'provider', 'eventId', 'sessionId', 'turnId', 'actor', 'kind',
-    'timestamp', 'cwd', 'model', 'permissionMode', 'toolName', 'activity',
+    'timestamp', 'cwd', 'terminalId', 'model', 'permissionMode', 'toolName', 'activity',
     'attention', 'usage', 'transcript', 'focus'
   ]))) return null
   if (obj.schemaVersion !== 1 || !PROVIDERS.has(obj.provider) || !EVENT_KINDS.has(obj.kind)) return null
@@ -164,6 +164,7 @@ export function validateAgentEventV1(value, now = Date.now()) {
   const actor = validateActor(obj.actor)
   const at = timestamp(obj.timestamp, now)
   const cwd = text(obj.cwd, 4096)
+  const terminalId = text(obj.terminalId, 128, { pattern: /^[A-Za-z0-9_-]+$/ })
   const model = text(obj.model, 256)
   const permissionMode = text(obj.permissionMode, 128)
   const toolName = text(obj.toolName, 256)
@@ -172,7 +173,7 @@ export function validateAgentEventV1(value, now = Date.now()) {
   const usage = validateUsage(obj.usage)
   const transcript = validateTranscript(obj.transcript)
   const focus = validateFocus(obj.focus)
-  if ([eventId, sessionId, turnId, actor, at, cwd, model, permissionMode, toolName,
+  if ([eventId, sessionId, turnId, actor, at, cwd, terminalId, model, permissionMode, toolName,
     activity, attention, usage, transcript, focus].includes(null)) return null
   if ((obj.kind === 'subagent_started' || obj.kind === 'subagent_completed') && actor.kind !== 'subagent') return null
   if ((obj.kind === 'session_started' || obj.kind === 'session_ended') && actor.kind !== 'root') return null
@@ -180,7 +181,7 @@ export function validateAgentEventV1(value, now = Date.now()) {
 
   return compact({
     schemaVersion: 1, provider: obj.provider, eventId, sessionId, turnId, actor,
-    kind: obj.kind, timestamp: at, cwd, model, permissionMode, toolName, activity,
+    kind: obj.kind, timestamp: at, cwd, terminalId, model, permissionMode, toolName, activity,
     attention, usage, transcript, focus
   })
 }

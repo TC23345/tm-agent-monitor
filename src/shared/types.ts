@@ -16,6 +16,8 @@ export interface Agent {
   actorId?: string
   project: string
   cwd?: string
+  /** The embedded terminal pane (PTY session id) this session runs in, when known. */
+  terminalId?: string
   state: AgentState
   tool?: ToolKind
   activity?: string
@@ -193,6 +195,9 @@ export interface TerminalCreateRequest {
   /** A pane coming back after an app restart: start the CLI in its
    * "continue the last conversation in this folder" form. */
   resume?: boolean
+  /** With `resume`: the exact provider session to continue (`claude --resume
+   * <id>` / `codex resume <id>`) instead of the most recent one here. */
+  resumeId?: string
 }
 
 /** An embedded terminal session as the daemon lists it (`GET /v1/terminals`). */
@@ -260,6 +265,9 @@ export interface AgentEventV1 {
   kind: AgentEventKind
   timestamp: number
   cwd?: string
+  /** The embedded terminal (PTY session id) this session runs in, from the
+   * `TM_TERMINAL_ID` the app puts in every pane's environment. */
+  terminalId?: string
   model?: string
   permissionMode?: string
   toolName?: string

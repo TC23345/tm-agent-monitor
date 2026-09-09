@@ -64,3 +64,11 @@ test('v1 validator rejects wrong versions, invalid timestamps and excessive card
   assert.equal(validateAgentEventV1({ ...base, usage: { kind: 'cumulative', outputTokens: 1e16 } }, NOW), null)
   assert.equal(validateAgentEventV1({ ...base, eventId: 'e'.repeat(513) }, NOW), null)
 })
+
+test('v1 validator carries a well-formed terminalId and rejects a malformed one', () => {
+  const base = { schemaVersion: 1, provider: 'claude', eventId: 'claude:e1', sessionId: 's1', actor: { kind: 'root' }, kind: 'session_started', timestamp: NOW }
+  assert.equal(validateAgentEventV1({ ...base, terminalId: 'bb878513-17c2-4671-aa0f-65ff1f1f1b89' }, NOW).terminalId, 'bb878513-17c2-4671-aa0f-65ff1f1f1b89')
+  assert.equal(validateAgentEventV1(base, NOW).terminalId, undefined)
+  assert.equal(validateAgentEventV1({ ...base, terminalId: 'has space' }, NOW), null)
+  assert.equal(validateAgentEventV1({ ...base, terminalId: 'x'.repeat(129) }, NOW), null)
+})

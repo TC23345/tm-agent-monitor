@@ -7,6 +7,7 @@ export interface SanitizedTerm {
   label?: string
   sessionId?: string
   initialCommand?: string
+  resumeId?: string
 }
 export interface SanitizedPane<K extends string = string> {
   id: string

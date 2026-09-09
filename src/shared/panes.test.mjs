@@ -18,8 +18,8 @@ test('panes: unknown kinds drop, unique kinds dedupe, terminals keep only known 
   ]
   const panes = sanitizePanes(raw, opts)
   assert.deepEqual(panes.map((p) => p.id), ['a', 'c', 'e', 'f', 'g', 'h'])
-  assert.deepEqual(panes[1].term, { launch: 'shell', cwd: 'C:\\p', label: undefined, sessionId: 's1', initialCommand: 'npm test' })
-  assert.deepEqual(panes[2].term, { launch: 'shell', cwd: undefined, label: undefined, sessionId: undefined, initialCommand: undefined })
+  assert.deepEqual(panes[1].term, { launch: 'shell', cwd: 'C:\\p', label: undefined, sessionId: 's1', initialCommand: 'npm test', resumeId: undefined })
+  assert.deepEqual(panes[2].term, { launch: 'shell', cwd: undefined, label: undefined, sessionId: undefined, initialCommand: undefined, resumeId: undefined })
   assert.deepEqual(sanitizePanes('nope', opts), [])
 })
 
@@ -93,4 +93,12 @@ test('a retired pane kind comes back as its alias, deduped against the real thin
   assert.deepEqual(sanitizePanes([{ id: 'a', kind: 'usage' }, { id: 'b', kind: 'insights' }], opts), [{ id: 'a', kind: 'spend' }, { id: 'b', kind: 'insights' }])
   assert.deepEqual(sanitizePanes([{ id: 'a', kind: 'usage' }, { id: 'b', kind: 'spend' }], opts), [{ id: 'a', kind: 'spend' }])
   assert.deepEqual(sanitizePanes([{ id: 'a', kind: 'usage' }], { ...opts, aliases: {} }), [])
+})
+
+test('a terminal pane keeps a well-formed resumeId and drops a malformed one', () => {
+  const opts = { kinds: ['terminal'], isUnique: () => false, maxPanes: 6 }
+  const [ok] = sanitizePanes([{ id: 'a', kind: 'terminal', term: { launch: 'claude', resumeId: 'bb878513-17c2-4671-aa0f-65ff1f1f1b89' } }], opts)
+  assert.equal(ok.term.resumeId, 'bb878513-17c2-4671-aa0f-65ff1f1f1b89')
+  const [bad] = sanitizePanes([{ id: 'b', kind: 'terminal', term: { launch: 'claude', resumeId: 'nope; rm -rf' } }], opts)
+  assert.equal(bad.term.resumeId, undefined)
 })

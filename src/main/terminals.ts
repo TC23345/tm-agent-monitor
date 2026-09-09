@@ -40,11 +40,14 @@ const PROMPT_HOOK = [
 ].join('\n')
 
 /** What each launch runs after the hook. `resume` picks the CLI's own
- * "continue the last conversation here" form for a pane that is coming back
- * after a restart; a plain launch starts fresh. */
-function launchCommand(launch: TerminalLaunch, resume: boolean): string | null {
-  if (launch === 'claude') return resume ? 'claude --continue' : 'claude'
-  if (launch === 'codex') return resume ? 'codex resume --last' : 'codex'
+ * "continue" form for a pane that is coming back after a restart — the exact
+ * session when the pane knew which one it hosted (`resumeId`, learned from the
+ * hooks' `terminalId`), else the most recent one in this folder. A plain
+ * launch starts fresh. `resumeId` is validated by the caller (`[A-Za-z0-9_-]`),
+ * so it is safe to interpolate. */
+function launchCommand(launch: TerminalLaunch, resume: boolean, resumeId?: string): string | null {
+  if (launch === 'claude') return resumeId ? `claude --resume ${resumeId}` : resume ? 'claude --continue' : 'claude'
+  if (launch === 'codex') return resumeId ? `codex resume ${resumeId}` : resume ? 'codex resume --last' : 'codex'
   return null
 }
 
@@ -84,7 +87,7 @@ export class TerminalManager {
     // Every shell runs the prompt hook, then the CLI if any. -NoExit keeps the
     // pane on a usable prompt after the CLI exits (or when a resume finds
     // nothing to continue).
-    const cli = launchCommand(req.launch, req.resume === true)
+    const cli = launchCommand(req.launch, req.resume === true, req.resume === true ? req.resumeId : undefined)
     const script = cli ? `${PROMPT_HOOK}\n${cli}` : PROMPT_HOOK
     const args = ['-NoLogo', '-NoExit', '-EncodedCommand', encodedCommand(script)]
     const id = randomUUID()

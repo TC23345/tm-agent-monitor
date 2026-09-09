@@ -25,7 +25,7 @@ import { isWorkspaceCommand } from '@shared/workspaceCommand.mjs'
 import type { ProjectCommand } from '@shared/types'
 import { LAYOUT_NAME_MAX, loadLayouts, panesFromLayout, saveLayouts, snapshotLayout, type LayoutMap } from './layouts'
 import { tid } from './testid'
-import { nextWaiting, paneForAgent, waitingAgents, waitingFirst } from '@shared/attention.mjs'
+import { agentForTerminal, nextWaiting, paneForAgent, waitingAgents, waitingFirst } from '@shared/attention.mjs'
 import { CommandPalette, type PaletteItem } from './CommandPalette'
 import { ProviderBadge } from './ProviderBadge'
 import { Settings as SettingsIcon } from './Icons'
@@ -570,6 +570,19 @@ export function App() {
     setPanes((current) => current.map((p) =>
       p.id === paneId && p.term ? { ...p, term: { ...p.term, ...patch } } : p
     ))
+
+  // Remember which provider session each CLI pane hosts (the hooks carry the
+  // pane's PTY id as `terminalId`), so a restart resumes exactly that session
+  // (`claude --resume <id>`) rather than the most recent one in the folder.
+  useEffect(() => {
+    for (const p of panes) {
+      if (p.kind !== 'terminal' || !p.term || p.term.launch === 'shell') continue
+      const agent = agentForTerminal(agents, p.term)
+      if (agent && agent.terminalId === p.term.sessionId && agent.rawSessionId !== p.term.resumeId) {
+        updateTerm(p.id, { resumeId: agent.rawSessionId })
+      }
+    }
+  }, [agents, panes])
 
   const closePane = (paneId: string) => {
     const closing = panes.find((p) => p.id === paneId)

@@ -219,6 +219,9 @@ export function mapHookInput(provider, hook, { env = process.env, now = Date.now
     kind: event,
     timestamp,
     ...(hook.cwd || hook.workspace_roots?.[0] ? { cwd: String(hook.cwd || hook.workspace_roots[0]) } : {}),
+    // Set by the app in every embedded terminal's environment: which pane this
+    // session runs in, so the pane can resume *this* session after a restart.
+    ...(/^[A-Za-z0-9_-]{1,128}$/.test(env.TM_TERMINAL_ID ?? '') ? { terminalId: env.TM_TERMINAL_ID } : {}),
     ...(hook.tool_name ? { toolName: String(hook.tool_name) } : {}),
     ...(activity ? { activity } : {}),
     ...(event === 'attention_required' ? {

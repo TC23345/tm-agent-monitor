@@ -38,6 +38,9 @@ export interface TerminalPaneConfig {
   /** Typed into a freshly created shell once it is up (a project command).
    * Never replayed on reattach — the command already ran. */
   initialCommand?: string
+  /** The provider session this pane hosts (from the hooks' `terminalId`), so
+   * a restart resumes exactly it rather than "the latest one in this folder". */
+  resumeId?: string
 }
 
 export interface PaneInstance {

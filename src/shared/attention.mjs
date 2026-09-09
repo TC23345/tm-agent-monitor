@@ -41,9 +41,17 @@ export function paneForAgent(panes, agent) {
  * `paneForAgent`, for the daemon's terminal listing.
  */
 export function agentForTerminal(agents, term) {
-  if (!term || !term.cwd || !Array.isArray(agents)) return null
+  if (!term || !Array.isArray(agents)) return null
   const provider = term.launch === 'claude' ? 'claude' : term.launch === 'codex' ? 'codex' : null
   if (!provider) return null
+  // Exact: the session's hooks carried this pane's PTY id (TM_TERMINAL_ID).
+  if (term.sessionId) {
+    for (const agent of agents) {
+      if (agent && !agent.parentId && agent.provider === provider && agent.terminalId === term.sessionId) return agent
+    }
+  }
+  // Else: the first root session of this provider in this folder.
+  if (!term.cwd) return null
   const cwd = canonical(term.cwd)
   for (const agent of agents) {
     if (agent && !agent.parentId && agent.provider === provider && canonical(agent.cwd) === cwd) return agent

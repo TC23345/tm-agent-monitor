@@ -96,7 +96,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function Termi
         launch: configRef.current.launch,
         cols: Math.max(term.cols, 2),
         rows: Math.max(term.rows, 2),
-        resume
+        resume,
+        resumeId: resume ? configRef.current.resumeId : undefined
       })
       if (disposed) {
         if (created) window.watch.disposeTerminal(created.id)

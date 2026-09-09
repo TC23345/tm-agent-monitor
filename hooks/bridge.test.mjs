@@ -10,6 +10,20 @@ import {
   readEndpoint
 } from './bridge.mjs'
 
+// These tests may run inside one of the app's panes, where TM_TERMINAL_ID is
+// set; the default env is process.env, so pin it for the deep-equal cases.
+delete process.env.TM_TERMINAL_ID
+
+// The bridge stamps events with the pane it runs in (TM_TERMINAL_ID), read
+// from the `env` option so a test never depends on the shell it runs in.
+test('an embedded pane TM_TERMINAL_ID rides along as terminalId; a malformed one is dropped', () => {
+  const hook = { session_id: 'session-1', hook_event_name: 'SessionStart', cwd: 'C:/p' }
+  const withPane = mapHookInput('claude', hook, { env: { TM_TERMINAL_ID: 'bb878513-17c2-4671-aa0f-65ff1f1f1b89' } })
+  assert.equal(withPane?.terminalId, 'bb878513-17c2-4671-aa0f-65ff1f1f1b89')
+  assert.equal(mapHookInput('claude', hook, { env: { TM_TERMINAL_ID: 'not ok' } })?.terminalId, undefined)
+  assert.equal(mapHookInput('claude', hook, { env: {} })?.terminalId, undefined)
+})
+
 test('maps Codex permission and subagent events into the normalized envelope', () => {
   const permission = mapHookInput('codex', {
     hook_event_name: 'PermissionRequest',
