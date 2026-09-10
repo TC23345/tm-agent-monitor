@@ -22,6 +22,7 @@ Layout customization, on top of the 0.3.0 workspace.
 - **Agents in the sidebar, under Limits.** The agent list is a sidebar section by default (the grid starts empty); opening the Agents pane from Panes moves it into the grid instead, and turning the section back on closes the pane — it lives in one place.
 - **Resume works for shells you typed `claude` into.** The first exact-session restart did nothing because the panes were plain shells with Claude Code started by hand; now any session whose hooks name the pane is that pane's session — the header says *Claude Code*, and a restart runs `claude --resume <id>`.
 - **Terminal header.** The chip is gone: the title says what runs (Claude Code / Codex / Terminal) and the path after it is the click-to-copy folder. The focus ring goes all the way round the pane instead of only the header edge.
+- **The nav is a switcher and an icon row.** The split launch row and the New project row became four flat icons — Claude Code, Codex, terminal, new project — with the folder's usual launch marked; the same starts (with names) and *New project…* now live in the switcher dropdown under a *Start in <folder>* group. The dropdown's labels, rows, and separators were tightened.
 - **Leaner nav, richer switcher.** Open in Cursor and Projects folder left the nav (both are in File); the project switcher groups Follow / Live projects, shows each project's full path under its name, and no longer lists a folder twice.
 
 ## 0.4.4 — 2026-09-09

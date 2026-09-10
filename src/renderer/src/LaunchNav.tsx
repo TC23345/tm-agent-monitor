@@ -2,7 +2,7 @@ import { useState, type DragEvent, type MouseEvent, type ReactNode } from 'react
 import { Activity, Check, ChevronDown, Folder, FolderPlus, Home, SquareTerminal } from 'lucide-react'
 import type { TerminalLaunch } from '@shared/types'
 import { ProviderBadge } from './ProviderBadge'
-import { MenuCheckItem, MenuPop } from './Menu'
+import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
 import { tid } from './testid'
 
 /** Where launches land. `cwd` undefined means the home folder. */
@@ -11,11 +11,11 @@ export interface LaunchTarget {
   label?: string
 }
 
-/** The nav's two popovers. They live in App's single `openMenu` state rather
- * than in local state, so only one menu across the whole window is ever open
- * and Escape closes them at the documented point in the chain instead of
- * falling through to hiding the workspace. */
-export type NavMenu = 'launch-target' | 'launch-pick'
+/** The nav's popover. It lives in App's single `openMenu` state rather than
+ * in local state, so only one menu across the whole window is ever open and
+ * Escape closes it at the documented point in the chain instead of falling
+ * through to hiding the workspace. */
+export type NavMenu = 'launch-target'
 
 interface Props {
   /** The folder launches use right now. */
@@ -32,54 +32,31 @@ interface Props {
   openMenu: NavMenu | null
   onOpenMenu: (menu: NavMenu | null) => void
   onLaunch: (launch: TerminalLaunch, external: boolean) => void
-  /** What the split row starts on a plain click — the last thing picked. */
+  /** This folder's usual launch — highlighted in the icon row. */
   launchKind: TerminalLaunch
-  /** Picking from the popover starts it *and* makes it the row's default. */
+  /** Starting something records it as this folder's usual launch. */
   onLaunchKind: (launch: TerminalLaunch) => void
   onNewProject: () => void
   /** A folder dropped from Explorer becomes the launch target. */
   onDropFolder: (path: string) => void
 }
 
-/**
- * The three ways to start a session, in popover order. They are one row rather
- * than three: the verb is identical and only the agent differs, so listing them
- * separately spent a third of the nav on one decision. The row runs the last
- * one picked, so the common case is still one click.
- */
+/** The three ways to start a session, in row and menu order. */
 const LAUNCHES: { kind: TerminalLaunch; label: string; icon: ReactNode; testId: string; meta?: string; what: string }[] = [
   { kind: 'claude', label: 'New Claude Code', icon: <ProviderBadge provider="claude" />, testId: 'launch-claude', what: 'Claude Code' },
   { kind: 'codex', label: 'New Codex', icon: <ProviderBadge provider="codex" />, testId: 'launch-codex', what: 'Codex' },
   { kind: 'shell', label: 'New terminal', icon: <SquareTerminal strokeWidth={2} />, testId: 'launch-shell', meta: 'Ctrl+Shift+`', what: 'a PowerShell terminal' }
 ]
 
-function NavRow({ icon, label, meta, title, onClick, testId }: {
-  icon: ReactNode
-  label: string
-  meta?: string
-  title?: string
-  onClick: (event: MouseEvent<HTMLButtonElement>) => void
-  testId?: string
-}) {
-  return (
-    <button className="navrow" onClick={onClick} title={title} data-testid={testId}>
-      <span className="navrow-ic">{icon}</span>
-      <span className="navrow-label">{label}</span>
-      {meta && <span className="navrow-meta">{meta}</span>}
-    </button>
-  )
-}
-
 /**
- * The head of the sidebar: what to start, and where it lands — a workspace
- * switcher over a short list of actions, the shape a chat app uses for "new
- * chat" plus a couple of pages. It replaced the Launch pane, so the grid holds
- * only work (terminals, reports) and starting something never costs a pane.
+ * The head of the sidebar: where launches land, and how to start one.
  *
- * Starting a session is one split row rather than three: the button runs the
- * last thing picked (so the common case stays one click) and the chevron opens
- * the popover for the other two. Opening an app — Cursor, Chrome — is a
- * different verb and keeps its own row.
+ * One switcher (which project — following the active session by default),
+ * up to three chips for the other live projects, and one row of four icons:
+ * Claude Code, Codex, terminal, new project — the activity-bar shape an
+ * editor uses. The switcher's popover holds the same starts as a list with
+ * names, for anyone who wants words; both record the pick as this folder's
+ * usual launch, which the icon row highlights.
  *
  * Dropping a folder from Explorer here retargets every launch at it (the path
  * comes from `webUtils.getPathForFile` in the preload — `File.path` was
@@ -88,17 +65,12 @@ function NavRow({ icon, label, meta, title, onClick, testId }: {
 export function LaunchNav({ context, projects, following, onChoose, recent, openMenu, onOpenMenu, onLaunch, launchKind, onLaunchKind, onNewProject, onDropFolder }: Props) {
   const [dropHot, setDropHot] = useState(false)
   const switcherOpen = openMenu === 'launch-target'
-  const launchOpen = openMenu === 'launch-pick'
-  const toggle = (menu: NavMenu) => () => onOpenMenu(openMenu === menu ? null : menu)
 
   const where = context.cwd ? (context.label ?? context.cwd) : 'Home folder'
   const inWhere = context.cwd ? ` in ${context.label ?? context.cwd}` : ' in your home folder'
-  const primary = LAUNCHES.find((l) => l.kind === launchKind) ?? LAUNCHES[0]
-  // `.navsplit-wrap` wraps the popover as well as its trigger, so a pointerdown
-  // on a row is not "away" — otherwise the row would unmount before its click
-  // landed. The cost is that the buttons close the popover themselves.
-  const launch = (kind: TerminalLaunch) => (event: MouseEvent<HTMLButtonElement>) => {
+  const start = (kind: TerminalLaunch) => (event: MouseEvent<HTMLButtonElement>) => {
     onOpenMenu(null)
+    onLaunchKind(kind)
     onLaunch(kind, event.shiftKey)
   }
 
@@ -130,7 +102,7 @@ export function LaunchNav({ context, projects, following, onChoose, recent, open
       <div className="navswitch-wrap">
         <button
           className="navswitch"
-          onClick={toggle('launch-target')}
+          onClick={() => onOpenMenu(switcherOpen ? null : 'launch-target')}
           aria-expanded={switcherOpen}
           title={`Launches open ${context.cwd ? `in ${context.cwd}` : 'in your home folder'}${following ? ' — following the active session' : ''}\nDrop a folder here to launch there instead`}
           data-testid="launch-target"
@@ -184,6 +156,20 @@ export function LaunchNav({ context, projects, following, onChoose, recent, open
                 })}
               </>
             )}
+            <div className="menu-sep" />
+            <div className="menu-label"><SquareTerminal className="menu-label-ic" strokeWidth={2} />Start{context.cwd ? ` in ${context.label ?? context.cwd}` : ' at home'}</div>
+            {LAUNCHES.map((l) => (
+              <MenuCheckItem
+                key={l.kind}
+                icon={l.icon}
+                label={l.label}
+                hint={`Start ${l.what}${inWhere}${l.meta ? ` (${l.meta})` : ''} — Shift-click for an external window`}
+                checked={l.kind === launchKind}
+                testId={tid('menu', l.label)}
+                onClick={start(l.kind)}
+              />
+            ))}
+            <MenuItem icon={<FolderPlus strokeWidth={2} />} label="New project…" hint="Create a project folder and open it in Cursor" onClick={() => { onOpenMenu(null); onNewProject() }} />
           </MenuPop>
         )}
       </div>
@@ -199,57 +185,35 @@ export function LaunchNav({ context, projects, following, onChoose, recent, open
           ))}
         </div>
       )}
-      <div className="navsplit-wrap">
-        <div className="navsplit">
+
+      {/* The activity row: the three starts and a new project. The folder's
+          usual launch sits on a square, the way an editor marks the active
+          activity. Shift-click a start for an external window. */}
+      <div className="navicons" role="toolbar" aria-label="Start" data-testid="nav-icons">
+        {LAUNCHES.map((l) => (
           <button
-            className="navrow navsplit-go"
-            onClick={launch(primary.kind)}
-            title={`Start ${primary.what} in a terminal pane${inWhere} — Shift-click for an external window`}
-            data-testid="launch-new"
+            key={l.kind}
+            className={`naviconbtn ${l.kind === launchKind ? 'is-usual' : ''}`}
+            onClick={start(l.kind)}
+            title={`${l.label}${inWhere}${l.meta ? ` (${l.meta})` : ''}${l.kind === launchKind ? ' — this folder’s usual' : ''}\nShift-click for an external window`}
+            aria-label={l.label}
+            aria-pressed={l.kind === launchKind}
+            data-testid={l.testId}
           >
-            <span className="navrow-ic">{primary.icon}</span>
-            <span className="navrow-label">{primary.label}</span>
-            {primary.meta && <span className="navrow-meta">{primary.meta}</span>}
+            {l.icon}
           </button>
-          <button
-            className="navsplit-pick"
-            onClick={toggle('launch-pick')}
-            aria-expanded={launchOpen}
-            aria-label="Choose what to start"
-            title="Choose what to start"
-            data-testid="launch-pick"
-          >
-            <ChevronDown className="sidebar-caret" strokeWidth={2} />
-          </button>
-        </div>
-        {launchOpen && (
-          <MenuPop onAway={() => onOpenMenu(null)} ignoreSelector=".navsplit-wrap">
-            {LAUNCHES.map((l) => (
-              <MenuCheckItem
-                key={l.kind}
-                icon={l.icon}
-                label={l.label}
-                hint={`Start ${l.what}${inWhere}, and make it what this row starts${l.meta ? ` (${l.meta} always opens a terminal)` : ''} — Shift-click for an external window`}
-                checked={l.kind === primary.kind}
-                testId={l.testId}
-                onClick={(event) => { onLaunchKind(l.kind); launch(l.kind)(event) }}
-              />
-            ))}
-          </MenuPop>
-        )}
+        ))}
+        <span className="navicons-gap" />
+        <button
+          className="naviconbtn"
+          onClick={onNewProject}
+          title="New project — create a project folder and open it in Cursor"
+          aria-label="New project"
+          data-testid="launch-new-project"
+        >
+          <FolderPlus strokeWidth={2} />
+        </button>
       </div>
-      {/* Nothing else on the launch path. Open in Cursor, Open Chrome, and the
-          Projects folder are File-menu verbs (and palette items); the folder's
-          scripts are Terminal → Run. New project stays: it is how a project
-          starts existing. */}
-      <div className="navrule" />
-      <NavRow
-        icon={<FolderPlus strokeWidth={2} />}
-        label="New project"
-        title="Create a project folder and open it in Cursor"
-        onClick={onNewProject}
-        testId="launch-new-project"
-      />
     </nav>
   )
 }

@@ -546,7 +546,7 @@ kbd {
 }
 .launchnav.is-drop { box-shadow: inset 0 0 0 2px rgba(217, 119, 87, 0.5); background: rgba(217, 119, 87, 0.06); }
 .navswitch-wrap { position: relative; margin-bottom: 6px; }
-.navswitch-wrap .menu-pop { top: calc(100% + 4px); left: 0; min-width: 240px; }
+.navswitch-wrap .menu-pop { top: calc(100% + 4px); left: 0; }
 .navswitch {
   display: flex;
   align-items: center;
@@ -581,17 +581,7 @@ kbd {
 /* Start-a-session is one row with two targets: the button runs the remembered
    launch, the chevron opens the picker. They share a hover so it reads as one
    control, and a hairline keeps the smaller target findable. */
-.navsplit-wrap { position: relative; }
-.navsplit-wrap .menu-pop { top: calc(100% + 4px); left: 0; min-width: 250px; }
-.navsplit {
-  display: flex;
-  align-items: stretch;
-  border-radius: 7px;
-}
-.navsplit:hover { background: var(--elev); }
-/* The row paints the hover; its two halves stay transparent on top of it so
-   they read as one control. Colour still lifts, including on the chevron. */
-.navsplit:hover .navrow { background: transparent; color: var(--text); }
+.navrow { background: transparent; color: var(--text); }
 .navsplit:hover .navsplit-pick { color: var(--muted); }
 /* Scoped past `.navrow`, which sets a full radius later in this file at the
    same specificity and would otherwise round the split's inner edge. */
@@ -1644,8 +1634,39 @@ kbd {
 .navpick-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .navpick-path { font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; unicode-bidi: plaintext; text-align: left; }
 .navpick .menu-check { margin-top: 2px; }
-.navswitch-wrap .menu-pop { min-width: 300px; max-width: 380px; }
+.navswitch-wrap .menu-pop { min-width: 100%; max-width: 380px; padding: 6px; }
 
 /* The Agents section takes whatever the sidebar has left and scrolls. */
 .sideview--fill { flex: 1 1 auto; min-height: 120px; }
 .sideview--fill.is-collapsed { flex: 0 0 auto; min-height: 0; }
+
+/* Switcher popover rhythm: labels sit tight over their group, rows keep one
+   height, and the path line under a project name stays quiet. */
+.navswitch-wrap .menu-label { height: 22px; margin-top: 2px; font-size: 10.5px; letter-spacing: 0.06em; }
+.navswitch-wrap .menu-label:first-child { margin-top: 0; }
+.navswitch-wrap .menu-sep { margin: 6px 2px; }
+.navswitch-wrap .navpick { height: auto; padding: 5px 8px; }
+.navswitch-wrap .navpick-name { line-height: 16px; }
+.navswitch-wrap .navpick-path { line-height: 13px; margin-top: 1px; }
+
+/* The activity row under the switcher: four flat icons, the folder's usual
+   launch on a square (the editor activity-bar shape). */
+.navicons { display: flex; align-items: center; gap: 4px; padding: 2px 2px 6px; }
+.navicons-gap { flex: 1 1 auto; }
+.naviconbtn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.naviconbtn svg { width: 17px; height: 17px; }
+.naviconbtn:hover { background: var(--elev); color: var(--text); }
+.naviconbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.naviconbtn.is-usual { background: rgba(255, 255, 255, 0.07); color: var(--text); box-shadow: inset 0 0 0 1px var(--hairline); }

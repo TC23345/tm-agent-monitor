@@ -1030,7 +1030,7 @@ export function App() {
             projects={launchProjects}
             following={launchChoice === null}
             onChoose={setLaunchChoice}
-            openMenu={openMenu === 'launch-target' || openMenu === 'launch-pick' ? openMenu : null}
+            openMenu={openMenu === 'launch-target' ? openMenu : null}
             onOpenMenu={setOpenMenu}
             onLaunch={(kind, external) => (external ? window.watch.openTerminal(context.cwd, kind) : newTerminal(kind))}
             launchKind={launchKind}
