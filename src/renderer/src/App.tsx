@@ -41,7 +41,7 @@ import {
   PANE_MIN, PANE_MIN_ROW, clampSidebarWidth, columnTemplate, normalizeFractions, resizeFractions,
   trackWidths, viewportBucket, type SizeBucket
 } from '@shared/layout.mjs'
-import { launchFor, withLaunch, type LaunchPrefs } from '@shared/panes.mjs'
+import { launchFor, launchKey, withLaunch, type LaunchPrefs } from '@shared/panes.mjs'
 import { LaunchNav, type LaunchTarget, type NavMenu } from './LaunchNav'
 import {
   AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Code2 as CursorIcon, Columns3, Copy,
@@ -169,6 +169,12 @@ export function App() {
   snapRef.current = snap
 
   useEffect(() => savePanes(panes), [panes])
+  // A layout saved before Agents moved into the sidebar still holds an Agents
+  // pane; the sidebar section wins, once, at startup.
+  useEffect(() => {
+    if (sidebarViews.includes('agents')) setPanes((current) => (current.some((p) => p.kind === 'agents') ? current.filter((p) => p.kind !== 'agents') : current))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   useEffect(() => saveLaunchPrefs(launchPrefs), [launchPrefs])
   useEffect(() => saveSidebarViews(sidebarViews), [sidebarViews])
   useEffect(() => saveSidebarCollapsed(sidebarCollapsed), [sidebarCollapsed])
@@ -361,7 +367,7 @@ export function App() {
   /** Folders the switcher can point at: one per live project, newest first. */
   const launchProjects: LaunchTarget[] = []
   for (const a of [...agents].sort((x, y) => y.updatedAt - x.updatedAt)) {
-    if (a.cwd && !launchProjects.some((p) => p.cwd === a.cwd)) launchProjects.push({ cwd: a.cwd, label: a.project })
+    if (a.cwd && !launchProjects.some((p) => launchKey(p.cwd) === launchKey(a.cwd))) launchProjects.push({ cwd: a.cwd, label: a.project })
   }
 
   /** A folder dropped on the nav: main resolves it (a file means its parent). */
@@ -476,6 +482,8 @@ export function App() {
     const pane = newPane(kind, term)
     setPanes([...panes, pane])
     setFocusedPane(pane.id)
+    // One agent list: the pane replaces the sidebar section.
+    if (kind === 'agents') setSidebarViews((current) => current.filter((v) => v !== 'agents'))
   }
 
   /** Give a pane the keyboard: a terminal takes real focus, anything else the slot. */
@@ -600,12 +608,17 @@ export function App() {
   // Remember which provider session each CLI pane hosts (the hooks carry the
   // pane's PTY id as `terminalId`), so a restart resumes exactly that session
   // (`claude --resume <id>`) rather than the most recent one in the folder.
+  // A CLI typed into a plain shell pane counts too: the pane's launch becomes
+  // that provider, so its title says what it runs and a restart resumes it.
   useEffect(() => {
     for (const p of panes) {
-      if (p.kind !== 'terminal' || !p.term || p.term.launch === 'shell') continue
+      if (p.kind !== 'terminal' || !p.term || !p.term.sessionId) continue
       const agent = agentForTerminal(agents, p.term)
-      if (agent && agent.terminalId === p.term.sessionId && agent.rawSessionId !== p.term.resumeId) {
-        updateTerm(p.id, { resumeId: agent.rawSessionId })
+      if (!agent || agent.terminalId !== p.term.sessionId) continue
+      const launch = agent.provider === 'claude' ? 'claude' : agent.provider === 'codex' ? 'codex' : null
+      if (!launch) continue
+      if (agent.rawSessionId !== p.term.resumeId || p.term.launch !== launch) {
+        updateTerm(p.id, { resumeId: agent.rawSessionId, launch })
       }
     }
   }, [agents, panes])
@@ -666,14 +679,14 @@ export function App() {
       const roots = agents.filter((a) => !a.parentId).length
       return roots > 0 ? <span className="pane-count">{roots}</span> : null
     }
-    if (pane.kind === 'terminal' && pane.term) {
-      const label = pane.term.launch === 'shell' ? null : pane.term.launch === 'codex' ? 'Codex' : 'Claude Code'
-      const where = pane.term.label ?? (pane.term.cwd ? pane.term.cwd.split(/[\\/]/).pop() : null)
-      if (!label && !where) return null
-      return <span className="pane-context is-project" title={pane.term.cwd ?? 'Home folder'}>{[label, where].filter(Boolean).join(' · ')}</span>
-    }
+    // A terminal pane carries no chip: its title says what it runs and the
+    // live path after it says where (both click-to-copy).
     return null
   }
+
+  /** What a terminal pane runs, as its header title. */
+  const paneTitle = (pane: PaneInstance) =>
+    pane.kind === 'terminal' && pane.term ? (pane.term.launch === 'claude' ? 'Claude Code' : pane.term.launch === 'codex' ? 'Codex' : 'Terminal') : undefined
 
   const tool = (title: string, icon: ReactNode, onClick: () => void, disabled = false) => (
     <button className="iconbtn iconbtn--sm" onClick={onClick} title={title} aria-label={title} disabled={disabled} data-testid={tid('pane-tool', title)}>
@@ -722,11 +735,13 @@ export function App() {
     return null
   }
 
-  const toggleSidebarView = (view: SidebarView) =>
-    setSidebarViews((current) => current.includes(view)
-      ? current.filter((v) => v !== view)
-      : [...current, view]
-    )
+  const toggleSidebarView = (view: SidebarView) => {
+    const on = !sidebarViews.includes(view)
+    setSidebarViews((current) => (on ? [...current, view] : current.filter((v) => v !== view)))
+    // The agent list lives in one place: turning the sidebar section on closes
+    // the Agents pane (and adding the pane hides the section — see addPane).
+    if (view === 'agents' && on) setPanes((current) => current.filter((p) => p.kind !== 'agents'))
+  }
 
   const toggleSidebarCollapsed = (view: SidebarView) =>
     setSidebarCollapsed((current) => current.includes(view)
@@ -738,13 +753,15 @@ export function App() {
     switch (view) {
       case 'limits':
         return snap ? <UsageDashboard usage={snap.usage} /> : <div className="empty">Connecting…</div>
+      case 'agents':
+        return <div className="agents-inner">{agentList}</div>
     }
   }
 
   const sideSection = (v: (typeof SIDEBAR_VIEWS)[number], top = false) => {
     const rolled = sidebarCollapsed.includes(v.id)
     return (
-      <section className={`sideview ${top ? 'sideview--top' : ''} ${rolled ? 'is-collapsed' : ''}`} key={v.id}>
+      <section className={`sideview ${top ? 'sideview--top' : ''} ${v.id === 'agents' ? 'sideview--fill' : ''} ${rolled ? 'is-collapsed' : ''}`} key={v.id}>
         <div className="pane-head sideview-head">
           <button
             className="sidebar-title"
@@ -758,6 +775,12 @@ export function App() {
             <ChevronDown className={`sidebar-caret ${rolled ? 'is-closed' : ''}`} strokeWidth={2} />
           </button>
           <span className="gpane-actions">
+            {v.id === 'agents' && !rolled && (
+              <>
+                {tool(waitingOnly ? 'Show every session' : 'Show only sessions waiting on you', ic(Filter), () => setWaitingOnly((x) => !x), waiting === 0 && !waitingOnly)}
+                {tool(allCollapsed ? 'Expand all projects' : 'Collapse all projects', ic(allCollapsed ? ChevronsUpDown : ChevronsDownUp), collapseAll, groups.length < 2)}
+              </>
+            )}
             <button
               className="iconbtn iconbtn--sm sideview-hide"
               onClick={() => toggleSidebarView(v.id)}
@@ -1012,7 +1035,7 @@ export function App() {
             onLaunch={(kind, external) => (external ? window.watch.openTerminal(context.cwd, kind) : newTerminal(kind))}
             launchKind={launchKind}
             onLaunchKind={setLaunchKind}
-            recent={launchProjects.filter((p) => p.cwd !== context.cwd).slice(0, 3)}
+            recent={launchProjects.filter((p) => launchKey(p.cwd) !== launchKey(context.cwd)).slice(0, 3)}
             onNewProject={() => setNewProjectOpen(true)}
             onDropFolder={dropLaunchFolder}
           />
@@ -1097,6 +1120,7 @@ export function App() {
               <Pane
                 kind={pane.kind}
                 onClose={() => closePane(pane.id)}
+                title={paneTitle(pane)}
                 context={paneContext(pane)}
                 path={pane.kind === 'terminal' ? pane.term?.cwd : undefined}
                 onCopyPath={pane.kind === 'terminal' && pane.term?.cwd ? () => window.watch.copyText(pane.term!.cwd!) : undefined}

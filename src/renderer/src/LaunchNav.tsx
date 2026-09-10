@@ -1,5 +1,5 @@
 import { useState, type DragEvent, type MouseEvent, type ReactNode } from 'react'
-import { ChevronDown, Code2, Folder, FolderPlus, SquareTerminal } from 'lucide-react'
+import { Activity, Check, ChevronDown, Folder, FolderPlus, Home, SquareTerminal } from 'lucide-react'
 import type { TerminalLaunch } from '@shared/types'
 import { ProviderBadge } from './ProviderBadge'
 import { MenuCheckItem, MenuPop } from './Menu'
@@ -142,28 +142,48 @@ export function LaunchNav({ context, projects, following, onChoose, recent, open
         </button>
         {switcherOpen && (
           <MenuPop onAway={() => onOpenMenu(null)} ignoreSelector=".navswitch-wrap">
+            <div className="menu-label"><Activity className="menu-label-ic" strokeWidth={2} />Follow</div>
             <MenuCheckItem
+              icon={<Activity strokeWidth={2} />}
               label="Active session"
               hint="Follow whichever session was most recently active"
               checked={following}
               onClick={() => { onOpenMenu(null); onChoose(null) }}
             />
             <MenuCheckItem
+              icon={<Home strokeWidth={2} />}
               label="Home folder"
               hint="Launch outside any project"
               checked={!following && !context.cwd}
               onClick={() => { onOpenMenu(null); onChoose({}) }}
             />
-            {projects.length > 0 && <div className="menu-sep" />}
-            {projects.map((p) => (
-              <MenuCheckItem
-                key={p.cwd}
-                label={p.label ?? p.cwd!}
-                hint={p.cwd}
-                checked={!following && context.cwd === p.cwd}
-                onClick={() => { onOpenMenu(null); onChoose(p) }}
-              />
-            ))}
+            {projects.length > 0 && (
+              <>
+                <div className="menu-sep" />
+                <div className="menu-label"><Folder className="menu-label-ic" strokeWidth={2} />Live projects</div>
+                {/* Name over path: two projects can share a name, never a path. */}
+                {projects.map((p) => {
+                  const current = !following && context.cwd === p.cwd
+                  return (
+                    <button
+                      key={p.cwd}
+                      className="menu-item navpick"
+                      onClick={() => { onOpenMenu(null); onChoose(p) }}
+                      title={`Launch in ${p.cwd}`}
+                      aria-pressed={current}
+                      data-testid={tid('pick', p.label ?? p.cwd)}
+                    >
+                      <span className="menu-item-ic"><Folder strokeWidth={2} /></span>
+                      <span className="navpick-text">
+                        <span className="navpick-name">{p.label ?? p.cwd}</span>
+                        <span className="navpick-path">{p.cwd}</span>
+                      </span>
+                      <span className={`menu-check ${current ? '' : 'menu-check--off'}`}><Check strokeWidth={2.5} /></span>
+                    </button>
+                  )
+                })}
+              </>
+            )}
           </MenuPop>
         )}
       </div>
@@ -218,17 +238,10 @@ export function LaunchNav({ context, projects, following, onChoose, recent, open
           </MenuPop>
         )}
       </div>
-      {/* The one secondary row on the launch path: the code you are about to
-          point an agent at. Chrome is a different workflow and lives in File
-          and the palette; the folder's scripts are Terminal → Run. */}
-      <NavRow
-        icon={<Code2 strokeWidth={2} />}
-        label="Open in Cursor"
-        title={context.cwd ? `Open ${context.label ?? context.cwd} in Cursor` : 'Open a new Cursor window'}
-        onClick={() => window.watch.openCursor(context.cwd)}
-        testId="launch-cursor"
-      />
-
+      {/* Nothing else on the launch path. Open in Cursor, Open Chrome, and the
+          Projects folder are File-menu verbs (and palette items); the folder's
+          scripts are Terminal → Run. New project stays: it is how a project
+          starts existing. */}
       <div className="navrule" />
       <NavRow
         icon={<FolderPlus strokeWidth={2} />}
@@ -236,13 +249,6 @@ export function LaunchNav({ context, projects, following, onChoose, recent, open
         title="Create a project folder and open it in Cursor"
         onClick={onNewProject}
         testId="launch-new-project"
-      />
-      <NavRow
-        icon={<Folder strokeWidth={2} />}
-        label="Projects folder"
-        title="Open the Projects folder in File Explorer"
-        onClick={() => window.watch.openProjectsDir()}
-        testId="launch-projects-dir"
       />
     </nav>
   )

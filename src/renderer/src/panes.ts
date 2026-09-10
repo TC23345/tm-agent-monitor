@@ -64,10 +64,10 @@ export function newPane(kind: PaneKind, term?: TerminalPaneConfig): PaneInstance
   return { id: crypto.randomUUID(), kind, term: kind === 'terminal' ? (term ?? { launch: 'shell' }) : undefined }
 }
 
-/** The agent list is what this app is for, so it is the one pane a fresh
- * workspace opens. Nothing is spawned before the user asks. */
+/** A fresh grid is empty: the agent list lives in the sidebar by default
+ * (`SidebarView` 'agents'), and nothing is spawned before the user asks. */
 export function defaultPanes(): PaneInstance[] {
-  return [newPane('agents')]
+  return []
 }
 
 /** Kinds that may appear only once. Terminals repeat — one shell per pane. */
@@ -106,13 +106,14 @@ export function savePanes(panes: PaneInstance[]): void {
 /** Data views stacked in the sidebar, toggled from the sidebar menu. The
  * `SIDEBAR_TOP` views pin above the agent list; the rest stack below, both in
  * catalog order. */
-export type SidebarView = 'limits'
+export type SidebarView = 'limits' | 'agents'
 
 /** Spend and Insights used to be sidebar views; they moved into the `usage`
  * pane. Their stored ids fall out of every sidebar key through `isSidebarView`,
  * which is derived from this catalog, so no migration is needed. */
 export const SIDEBAR_VIEWS: { id: SidebarView; label: string; icon: typeof Activity; hint: string }[] = [
-  { id: 'limits', label: 'Limits', icon: Activity, hint: 'Provider usage limits' }
+  { id: 'limits', label: 'Limits', icon: Activity, hint: 'Provider usage limits' },
+  { id: 'agents', label: 'Agents', icon: Bot, hint: 'Live Claude Code, Codex, and Cursor sessions by project' }
 ]
 
 /** Views that pin above the agent list, in this order; everything else stacks
@@ -124,16 +125,18 @@ export function isTopSidebarView(view: SidebarView): boolean {
   return SIDEBAR_TOP.includes(view)
 }
 
-const SIDEBAR_KEY = 'tm.sidebar.v2'
-const LEGACY_SIDEBAR_KEY = 'tm.sidebar.v1'
-const DEFAULT_SIDEBAR: SidebarView[] = ['limits']
+/** v3 added Agents under Limits (0.4.5); a v2 sidebar migrates once and gains it. */
+const SIDEBAR_KEY = 'tm.sidebar.v3'
+const LEGACY_SIDEBAR_KEY = 'tm.sidebar.v2'
+const DEFAULT_SIDEBAR: SidebarView[] = ['limits', 'agents']
+const SURFACE_SIDEBAR: SidebarView[] = ['agents']
 
 const SIDEBAR_IDS = SIDEBAR_VIEWS.map((v) => v.id)
 
 export function loadSidebarViews(): SidebarView[] {
-  // v2 wins; v1 migrates once (keeping the toggles);
+  // v3 wins; v2 migrates once (keeping the toggles, surfacing Agents);
   // ids no longer in the catalog fall out — that is how a retired view goes.
-  return sanitizeSidebarViews(readJson(SIDEBAR_KEY), readJson(LEGACY_SIDEBAR_KEY), { ids: SIDEBAR_IDS, defaults: DEFAULT_SIDEBAR })
+  return sanitizeSidebarViews(readJson(SIDEBAR_KEY), readJson(LEGACY_SIDEBAR_KEY), { ids: SIDEBAR_IDS, defaults: DEFAULT_SIDEBAR, surface: SURFACE_SIDEBAR })
 }
 
 export function saveSidebarViews(views: SidebarView[]): void {

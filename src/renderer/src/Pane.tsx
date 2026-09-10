@@ -4,6 +4,9 @@ import { PANE_KINDS, type PaneKind } from './panes'
 
 interface Props {
   kind: PaneKind
+  /** Overrides the kind's label — a terminal pane says what it runs
+   * (Claude Code / Codex / Terminal) instead of wearing a chip. */
+  title?: string
   onClose: () => void
   /** Rendered right after the title — the launch-context chip, a cwd label. */
   context?: ReactNode
@@ -38,7 +41,7 @@ interface Props {
  * whose header carries its kind's tools. The kind itself is fixed for the
  * pane's life — swapping one kind for another would kill a running shell, so
  * a different kind is a new pane (View → Add pane, or the palette). */
-export function Pane({ kind, onClose, context, path, onCopyPath, tools, attention, zoomed, onZoom, dragHandle, children }: Props) {
+export function Pane({ kind, title, onClose, context, path, onCopyPath, tools, attention, zoomed, onZoom, dragHandle, children }: Props) {
   const meta = PANE_KINDS.find((p) => p.id === kind)!
   const Icon = meta.icon
   const [copied, setCopied] = useState(false)
@@ -71,7 +74,7 @@ export function Pane({ kind, onClose, context, path, onCopyPath, tools, attentio
         }}
       >
         <Icon className="gpane-ic" strokeWidth={2} />
-        <span className="gpane-title" title={meta.hint}>{meta.label}</span>
+        <span className="gpane-title" title={meta.hint}>{title ?? meta.label}</span>
         {/* The chip shares the path's click: both copy, both flash. */}
         {context && onCopyPath ? <span className="gpane-ctxwrap" onClick={copy}>{context}</span> : context}
         {path && (

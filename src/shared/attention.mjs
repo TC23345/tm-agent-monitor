@@ -42,16 +42,17 @@ export function paneForAgent(panes, agent) {
  */
 export function agentForTerminal(agents, term) {
   if (!term || !Array.isArray(agents)) return null
-  const provider = term.launch === 'claude' ? 'claude' : term.launch === 'codex' ? 'codex' : null
-  if (!provider) return null
   // Exact: the session's hooks carried this pane's PTY id (TM_TERMINAL_ID).
+  // Any launch qualifies — a CLI typed into a plain shell pane is still that
+  // pane's session, and is what a restart should resume.
   if (term.sessionId) {
     for (const agent of agents) {
-      if (agent && !agent.parentId && agent.provider === provider && agent.terminalId === term.sessionId) return agent
+      if (agent && !agent.parentId && agent.terminalId === term.sessionId) return agent
     }
   }
-  // Else: the first root session of this provider in this folder.
-  if (!term.cwd) return null
+  // Else: the first root session of the launched provider in this folder.
+  const provider = term.launch === 'claude' ? 'claude' : term.launch === 'codex' ? 'codex' : null
+  if (!provider || !term.cwd) return null
   const cwd = canonical(term.cwd)
   for (const agent of agents) {
     if (agent && !agent.parentId && agent.provider === provider && canonical(agent.cwd) === cwd) return agent

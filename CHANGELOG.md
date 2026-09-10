@@ -17,6 +17,13 @@ Layout customization, on top of the 0.3.0 workspace.
 - **Pane tool strips.** The pane header's content dropdown is gone; the kind is fixed and the header carries that kind's tools — terminals get split, clear, restart, external terminal, and open folder; the launcher gets new project and Projects folder. Ctrl+Shift+` opens a new terminal, Ctrl+, opens Settings.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
+## 0.4.5 — 2026-09-10
+
+- **Agents in the sidebar, under Limits.** The agent list is a sidebar section by default (the grid starts empty); opening the Agents pane from Panes moves it into the grid instead, and turning the section back on closes the pane — it lives in one place.
+- **Resume works for shells you typed `claude` into.** The first exact-session restart did nothing because the panes were plain shells with Claude Code started by hand; now any session whose hooks name the pane is that pane's session — the header says *Claude Code*, and a restart runs `claude --resume <id>`.
+- **Terminal header.** The chip is gone: the title says what runs (Claude Code / Codex / Terminal) and the path after it is the click-to-copy folder. The focus ring goes all the way round the pane instead of only the header edge.
+- **Leaner nav, richer switcher.** Open in Cursor and Projects folder left the nav (both are in File); the project switcher groups Follow / Live projects, shows each project's full path under its name, and no longer lists a folder twice.
+
 ## 0.4.4 — 2026-09-09
 
 Second batch of `4.3-plan.md`.

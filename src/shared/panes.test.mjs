@@ -53,12 +53,13 @@ test('the v3 migration puts an Agents pane first, once, and respects the cap', (
   assert.deepEqual(migratePanesV3(null, { ...opts, newId: 'new' }).map((p) => p.kind), ['agents'])
 })
 
-test('sidebar views: v2 wins, v1 migrates once, else defaults; retired ids (windows, spend) vanish', () => {
-  const o = { ids: ['limits'], defaults: ['limits'] }
+test('sidebar views: current key wins, the legacy key migrates once and surfaces new views, else defaults; retired ids vanish', () => {
+  const o = { ids: ['limits', 'agents'], defaults: ['limits', 'agents'], surface: ['agents'] }
   assert.deepEqual(sanitizeSidebarViews(['limits', 'spend', 'limits', 'windows'], null, o), ['limits'])
-  assert.deepEqual(sanitizeSidebarViews(null, ['limits', 'windows'], o), ['limits'])
-  assert.deepEqual(sanitizeSidebarViews(null, ['windows'], o), [])
-  assert.deepEqual(sanitizeSidebarViews(undefined, undefined, o), ['limits'])
+  assert.deepEqual(sanitizeSidebarViews(null, ['limits', 'windows'], o), ['limits', 'agents'])
+  assert.deepEqual(sanitizeSidebarViews(null, ['windows'], o), ['agents'])
+  assert.deepEqual(sanitizeSidebarViews(null, ['agents', 'limits'], o), ['agents', 'limits'])
+  assert.deepEqual(sanitizeSidebarViews(undefined, undefined, o), ['limits', 'agents'])
   assert.deepEqual(sanitizeSidebarViews([], null, o), [])
   assert.deepEqual(sanitizeCollapsed(['spend', 'windows', 'limits', 'limits'], o), ['limits'])
   assert.deepEqual(sanitizeCollapsed('x', { ...o, defaults: [] }), [])

@@ -48,7 +48,10 @@ test('agentForTerminal prefers the session whose hooks named this pane, else the
   assert.equal(agentForTerminal([a, b, c], { launch: 'claude', cwd: 'C:/proj', sessionId: 'pty-2' }), b)
   assert.equal(agentForTerminal([a, b, c], { launch: 'claude', cwd: 'C:/proj', sessionId: 'pty-9' }), a)
   assert.equal(agentForTerminal([a, b, c], { launch: 'claude', cwd: 'C:/proj' }), a)
-  assert.equal(agentForTerminal([a, b, c], { launch: 'shell', cwd: 'C:/proj', sessionId: 'pty-1' }), null)
-  assert.equal(agentForTerminal([a, b, c], { launch: 'codex', cwd: 'C:/proj', sessionId: 'pty-1' }), null)
+  // A CLI typed into a plain shell pane is still that pane's session.
+  assert.equal(agentForTerminal([a, b, c], { launch: 'shell', cwd: 'C:/proj', sessionId: 'pty-1' }), a)
+  assert.equal(agentForTerminal([a, b, c], { launch: 'shell', cwd: 'C:/proj', sessionId: 'pty-9' }), null)
+  assert.equal(agentForTerminal([a, b, c], { launch: 'codex', cwd: 'C:/proj', sessionId: 'pty-1' }), a)
+  assert.equal(agentForTerminal([a, b, c], { launch: 'codex', cwd: 'C:/proj', sessionId: 'pty-9' }), null)
   assert.equal(agentForTerminal([a], { launch: 'claude', sessionId: 'pty-1' }), a)
 })

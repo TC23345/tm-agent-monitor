@@ -50,16 +50,19 @@ export function sanitizePanes(raw, { kinds, isUnique, maxPanes, launches = ['she
 }
 
 /**
- * Sidebar views from the v2 value, else a one-time v1 migration (keep the
- * user's toggles), else the defaults. Ids not in
- * the catalog fall out — that is how a retired view disappears without a
- * migration key.
+ * Sidebar views from the current key, else a one-time migration from the
+ * previous key (keep the user's toggles, and `surface` any view that is new
+ * since — that is how Agents reached existing sidebars in 0.4.5), else the
+ * defaults. Ids not in the catalog fall out — that is how a retired view
+ * disappears without a migration key.
  */
-export function sanitizeSidebarViews(raw, legacyRaw, { ids, defaults }) {
+export function sanitizeSidebarViews(raw, legacyRaw, { ids, defaults, surface = [] }) {
   const known = new Set(ids)
   if (Array.isArray(raw)) return [...new Set(raw.filter((v) => known.has(v)))]
   if (Array.isArray(legacyRaw)) {
-    return [...new Set(legacyRaw.filter((v) => known.has(v)))]
+    const views = [...new Set(legacyRaw.filter((v) => known.has(v)))]
+    for (const id of surface) if (known.has(id) && !views.includes(id)) views.push(id)
+    return views
   }
   return [...defaults]
 }

@@ -522,7 +522,9 @@ kbd {
   animation: pulse-soft 1.4s ease-in-out infinite;
 }
 .gpane-attn svg { width: 12px; height: 12px; }
-.pane-slot.is-focused > .gpane { box-shadow: inset 0 0 0 1px rgba(217, 119, 87, 0.55); }
+/* The focused pane's own border tints — not an inset shadow, which the body
+   paints over so only the header edge ever showed. */
+.pane-slot.is-focused > .gpane { border-color: rgba(217, 119, 87, 0.6); box-shadow: 0 0 0 1px rgba(217, 119, 87, 0.25); }
 .pane-slot:focus { outline: none; }
 .conn--cdp { color: var(--accent-bright); font-variant-numeric: tabular-nums; }
 /* Snippet menu opens under its tool button, flush right so it stays in the pane. */
@@ -1634,3 +1636,16 @@ kbd {
 /* First-run: the Agents pane offers the hooks instead of an empty sentence. */
 .empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
 .empty-note { margin-top: 10px; font-size: 12px; color: var(--faint); }
+
+/* Project switcher rows: name over path, so two folders that share a name
+   are still telling you which is which. */
+.navpick { align-items: flex-start; }
+.navpick-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.navpick-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.navpick-path { font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; unicode-bidi: plaintext; text-align: left; }
+.navpick .menu-check { margin-top: 2px; }
+.navswitch-wrap .menu-pop { min-width: 300px; max-width: 380px; }
+
+/* The Agents section takes whatever the sidebar has left and scrolls. */
+.sideview--fill { flex: 1 1 auto; min-height: 120px; }
+.sideview--fill.is-collapsed { flex: 0 0 auto; min-height: 0; }
