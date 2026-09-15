@@ -930,6 +930,32 @@ kbd {
 .notes-editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .notes-text { flex: 1 1 auto; min-height: 0; width: 100%; padding: 14px 16px; border: 0; outline: none; resize: none; background: transparent; color: var(--text); font: 13.5px/1.55 ui-monospace, "Cascadia Code", Consolas, monospace; tab-size: 2; }
 .notes-text::placeholder { color: var(--muted); }
+.notes-rendered { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 14px 18px; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+/* Rendered Markdown (MarkdownView): a reading column, nothing fancy. */
+.md { max-width: 760px; font-size: 13.5px; line-height: 1.6; color: var(--text); }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 1.1em 0 0.4em; line-height: 1.25; font-weight: 700; }
+.md h1 { font-size: 1.45em; } .md h2 { font-size: 1.25em; } .md h3 { font-size: 1.1em; } .md h4, .md h5, .md h6 { font-size: 1em; }
+.md > :first-child { margin-top: 0; }
+.md p { margin: 0 0 0.75em; }
+.md ul, .md ol { margin: 0 0 0.75em; padding-left: 1.4em; }
+.md li { margin: 0.15em 0; }
+.md li > p { margin: 0; }
+.md li > ul, .md li > ol { margin: 0.15em 0 0; }
+.md-task { list-style: none; margin-left: -1.4em; padding-left: 0; display: grid; grid-template-columns: 18px 1fr; gap: 6px; align-items: start; }
+.md-task input { margin: 4px 0 0; accent-color: var(--accent); pointer-events: none; }
+/* Everything after the box — the text and any nested list — sits in the text column. */
+.md-task > :not(input) { grid-column: 2; }
+.md-task.is-done > p { color: var(--muted); text-decoration: line-through; }
+.md code { padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.07); font: 12.5px ui-monospace, "Cascadia Code", Consolas, monospace; }
+.md pre { margin: 0 0 0.9em; padding: 10px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.28); overflow-x: auto; }
+.md pre code { padding: 0; background: transparent; font-size: 12.5px; line-height: 1.5; }
+.md blockquote { margin: 0 0 0.75em; padding: 2px 0 2px 12px; border-left: 3px solid var(--hairline); color: var(--muted); }
+.md hr { border: 0; border-top: 1px solid var(--hairline); margin: 1em 0; }
+.md a { color: var(--accent-bright); text-decoration: none; }
+.md a:hover { text-decoration: underline; }
+.md strong { font-weight: 700; }
+.md del { color: var(--muted); }
+.iconbtn.is-on { color: var(--accent-bright); background: rgba(217, 119, 87, 0.14); }
 .notes-status { flex: 0 0 auto; height: 22px; padding: 0 12px; font-size: 11px; color: var(--muted); text-align: right; line-height: 22px; border-top: 1px solid var(--hairline); }
 /* Side-edge grips: the window has no OS resize border (it is transparent), so
    an 8px strip down each side of the card is the handle for the edge-pull

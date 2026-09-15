@@ -115,6 +115,8 @@ const api = {
   createNote: (): Promise<string | null> => ipcRenderer.invoke('notes:create'),
   deleteNote: (name: string): Promise<boolean> => ipcRenderer.invoke('notes:delete', name),
   openNotesFolder: (): Promise<string> => ipcRenderer.invoke('notes:open-folder'),
+  /** Open a web or mail link in the default app (a note preview's links). */
+  openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('shell:open-external', url),
   /** Something in the notes folder changed on disk (an agent wrote a note). */
   onNotesChanged: (cb: () => void) => {
     const listener = () => cb()

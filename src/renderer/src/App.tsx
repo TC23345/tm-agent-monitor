@@ -47,8 +47,8 @@ import { launchFor, launchKey, withLaunch, type LaunchPrefs } from '@shared/pane
 import { LaunchNav, type LaunchTarget, type NavMenu } from './LaunchNav'
 import {
   AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Code2 as CursorIcon, Columns3, Copy,
-  EyeOff, FilePlus2, Filter, Folder, FolderOpen, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
-  NotebookPen, PanelLeft, PanelRight, Play, Power, RefreshCw, Rss, Ruler, Save, Shrink, SquareSlash,
+  Eye, EyeOff, FilePlus2, Filter, Folder, FolderOpen, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
+  NotebookPen, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, Rss, Ruler, Save, Shrink, SquareSlash,
   SquareTerminal, Terminal, Trash2, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
@@ -144,6 +144,14 @@ export function App() {
   const notesRef = useRef<NotesPaneHandle | null>(null)
   /** The notes folder, once the pane has asked main — the header's copy-to-clipboard path. */
   const [notesDir, setNotesDir] = useState<string | undefined>(undefined)
+  /** Preview (rendered Markdown) instead of the editor — the header toggle; remembered. */
+  const [notesPreview, setNotesPreview] = useState<boolean>(() => {
+    try { return localStorage.getItem('tm.notes.preview') === '1' } catch { return false }
+  })
+  const toggleNotesPreview = () => setNotesPreview((v) => {
+    try { localStorage.setItem('tm.notes.preview', v ? '0' : '1') } catch { /* preference only */ }
+    return !v
+  })
   const [frameW, setFrameW] = useState(() => window.innerWidth)
   const frameRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLElement>(null)
@@ -671,7 +679,7 @@ export function App() {
       case 'activity':
         return <ActivityPane onFocusAgent={focusAgentAnywhere} />
       case 'notes':
-        return <NotesPane ref={notesRef} onDir={setNotesDir} />
+        return <NotesPane ref={notesRef} onDir={setNotesDir} preview={notesPreview} />
       case 'terminal':
         return (
           <Suspense fallback={<div className="empty">Starting terminal…</div>}>
@@ -703,8 +711,8 @@ export function App() {
   const paneTitle = (pane: PaneInstance) =>
     pane.kind === 'terminal' && pane.term ? (pane.term.launch === 'claude' ? 'Claude Code' : pane.term.launch === 'codex' ? 'Codex' : 'Terminal') : undefined
 
-  const tool = (title: string, icon: ReactNode, onClick: () => void, disabled = false) => (
-    <button className="iconbtn iconbtn--sm" onClick={onClick} title={title} aria-label={title} disabled={disabled} data-testid={tid('pane-tool', title)}>
+  const tool = (title: string, icon: ReactNode, onClick: () => void, disabled = false, active = false) => (
+    <button className={`iconbtn iconbtn--sm ${active ? 'is-on' : ''}`} onClick={onClick} title={title} aria-label={title} aria-pressed={active || undefined} disabled={disabled} data-testid={tid('pane-tool', title)}>
       {icon}
     </button>
   )
@@ -715,6 +723,7 @@ export function App() {
     if (pane.kind === 'notes') {
       return (
         <>
+          {tool(notesPreview ? 'Edit' : 'Preview', ic(notesPreview ? PenLine : Eye), toggleNotesPreview, false, notesPreview)}
           {tool('New note', ic(FilePlus2), () => notesRef.current?.newNote())}
           {tool('Open the notes folder', ic(FolderOpen), () => { void window.watch.openNotesFolder() })}
         </>

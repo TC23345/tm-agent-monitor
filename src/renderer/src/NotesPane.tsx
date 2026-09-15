@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { FilePlus2, Trash2 } from 'lucide-react'
 import { noteTitle, notePreview, sortNotes, type NoteMeta } from '@shared/notes.mjs'
+import { MarkdownView } from './MarkdownView'
 import { tid } from './testid'
 
 const SAVE_AFTER_MS = 600
@@ -27,7 +28,7 @@ function ago(mtime: number, now: number): string {
  * the text. Nothing here is rendered Markdown: it is a notepad, and the
  * point is that the file on disk is exactly what is on screen.
  */
-export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => void }>(function NotesPane({ onDir }, ref) {
+export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => void; preview?: boolean }>(function NotesPane({ onDir, preview = false }, ref) {
   const [notes, setNotes] = useState<NoteMeta[] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [text, setText] = useState('')
@@ -150,7 +151,11 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
         ))}
       </div>
       <div className="notes-editor">
-        {selected ? (
+        {selected && preview ? (
+          <div className="notes-rendered">
+            <MarkdownView source={text} />
+          </div>
+        ) : selected ? (
           <>
             <textarea
               ref={editorRef}

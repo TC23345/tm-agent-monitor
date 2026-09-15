@@ -1759,6 +1759,11 @@ function registerIpc(): void {
     try { await fsp.unlink(join(ensureNotesDir(), name)); return true } catch { return false }
   })
   ipcMain.handle('notes:open-folder', async (): Promise<string> => shell.openPath(ensureNotesDir()))
+  // A link in a note's preview. Only web/mail schemes leave the sandbox.
+  ipcMain.handle('shell:open-external', async (_e, url: unknown): Promise<boolean> => {
+    if (typeof url !== 'string' || url.length > 2048 || !/^(https?:\/\/|mailto:)/i.test(url)) return false
+    try { await shell.openExternal(url); return true } catch { return false }
+  })
   ipcMain.on('window:hide', () => hideWindow())
   ipcMain.on('window:edge-drag', (_event, edge: unknown, delta: unknown) => {
     if ((edge !== 'left' && edge !== 'right') || typeof delta !== 'number' || !Number.isFinite(delta) || Math.abs(delta) > 10_000) return
