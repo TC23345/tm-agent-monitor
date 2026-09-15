@@ -8,7 +8,7 @@ export type StoreEventV1 = AgentEventV1
 export function validateMutableSettingsPatch(value: unknown): AppSettingsPatch | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const input = value as Record<string, unknown>
-  const allowed = new Set(['hotkey', 'notifications', 'launchAtLogin', 'mock', 'sizeMode', 'pushUrl', 'pushAfterMin'])
+  const allowed = new Set(['hotkey', 'notifications', 'launchAtLogin', 'mock', 'sizeMode', 'windowMaterial', 'pushUrl', 'pushAfterMin'])
   if (Object.keys(input).some((key) => !allowed.has(key))) return null
 
   const result: AppSettingsPatch = {}
@@ -20,6 +20,10 @@ export function validateMutableSettingsPatch(value: unknown): AppSettingsPatch |
   if ('sizeMode' in input) {
     if (input.sizeMode !== 'full' && input.sizeMode !== 'left' && input.sizeMode !== 'right') return null
     result.sizeMode = input.sizeMode
+  }
+  if ('windowMaterial' in input) {
+    if (input.windowMaterial !== 'none' && input.windowMaterial !== 'mica' && input.windowMaterial !== 'acrylic') return null
+    result.windowMaterial = input.windowMaterial
   }
   for (const key of ['notifications', 'launchAtLogin', 'mock'] as const) {
     if (key in input) {

@@ -1,4 +1,8 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, clipboard, screen } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, clipboard, screen, powerMonitor } from 'electron'
+import { attentionTransition, badgeLabel } from '../shared/attentionSignal.mjs'
+import { blankBitmap, drawBadge } from '../shared/trayBadge.mjs'
+import { isWake, tickAllowed, type PowerState } from '../shared/pauses.mjs'
+import { reloadBudget } from '../shared/crashPolicy.mjs'
 import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
 import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
@@ -26,7 +30,7 @@ import { estimateCostUsd } from '../shared/pricing.mjs'
 // export 'autoUpdater' not found"), so import the default export and destructure.
 import electronUpdater from 'electron-updater'
 import { validateMutableSettingsPatch } from './store.js'
-import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights } from '../shared/types.js'
+import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type WindowMaterial, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights } from '../shared/types.js'
 
 const { autoUpdater } = electronUpdater
 
@@ -62,6 +66,7 @@ interface Settings {
   notifications?: boolean
   mock?: boolean
   sizeMode?: SizeMode
+  windowMaterial?: WindowMaterial
   pushUrl?: string
   pushAfterMin?: number
   /** Set only after a real Codex hook event reaches this app installation. */
@@ -221,6 +226,45 @@ function trayImage() {
   return img.isEmpty() ? nativeImage.createFromDataURL(`data:image/png;base64,${TRAY_FALLBACK}`) : img
 }
 
+// The tray icon with a red count badge (the app has no taskbar button while
+// hidden, so this is the one always-visible "N waiting"), and the 16px taskbar
+// overlay for the visible-but-buried case. Drawn into raw BGRA (trayBadge.mjs)
+// because nativeImage decodes only PNG/JPEG and main has no canvas. Cached per label.
+const TRAY_PX = 32
+const badgedTray = new Map<string, Electron.NativeImage>()
+function trayImageFor(count: number): Electron.NativeImage {
+  const label = badgeLabel(count)
+  if (!label) return trayImage()
+  const cached = badgedTray.get(label)
+  if (cached) return cached
+  const base = trayImage().resize({ width: TRAY_PX, height: TRAY_PX })
+  const buf = Buffer.from(base.toBitmap())
+  drawBadge(buf, TRAY_PX, TRAY_PX, label, { scale: 2 })
+  const image = nativeImage.createFromBitmap(buf, { width: TRAY_PX, height: TRAY_PX })
+  badgedTray.set(label, image)
+  return image
+}
+const overlayBadges = new Map<string, Electron.NativeImage>()
+function overlayImageFor(count: number): Electron.NativeImage | null {
+  const label = badgeLabel(count)
+  if (!label) return null
+  const cached = overlayBadges.get(label)
+  if (cached) return cached
+  const image = nativeImage.createFromBitmap(drawBadge(blankBitmap(16), 16, 16, label, { scale: 2 }), { width: 16, height: 16 })
+  overlayBadges.set(label, image)
+  return image
+}
+
+// The system-drawn backdrop behind the frameless card (Windows 11 22H2+; a
+// no-op elsewhere). A mutable setting, applied live; the renderer is told so
+// the card can go translucent (`data-material` on the root).
+let materialPref: WindowMaterial = 'mica'
+function applyWindowMaterial(): void {
+  if (!win || win.isDestroyed()) return
+  try { win.setBackgroundMaterial(materialPref) } catch (error) { console.error(`[window] backdrop: ${error instanceof Error ? error.message : error}`) }
+  win.webContents.send('window:material', materialPref)
+}
+
 function createWindow(): void {
   win = new BrowserWindow({
     // Placeholders; positionWorkspace() sets the real work-area bounds before every show.
@@ -235,6 +279,7 @@ function createWindow(): void {
     hasShadow: false,
     fullscreenable: false,
     backgroundColor: '#00000000',
+    backgroundMaterial: materialPref,
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       sandbox: true,
@@ -255,6 +300,48 @@ function createWindow(): void {
   // (deliberately not always-on-top), so anything it launches or focuses simply
   // appears in front while the workspace waits behind; the hotkey raises it.
   win.on('closed', () => { win = null })
+  // A taskbar flash (updateTray) stops the moment the workspace has focus.
+  win.on('focus', () => { win?.flashFrame(false) })
+
+  // The renderer can die (GPU reset, OOM) while the PTYs, which main owns,
+  // live on. Reload it — panes reattach to their sessions by stored id, so the
+  // shells and their scrollback come back — within a budget (crashPolicy.mjs)
+  // so a crash loop ends in a notification rather than a strobe.
+  const contents = win.webContents
+  contents.on('render-process-gone', (_event, details) => {
+    if (details.reason === 'clean-exit') return
+    console.error(`[renderer] process gone: ${details.reason} (exit ${details.exitCode})`)
+    recoverRenderer()
+  })
+  let unresponsiveTimer: ReturnType<typeof setTimeout> | null = null
+  contents.on('unresponsive', () => {
+    if (unresponsiveTimer) return
+    unresponsiveTimer = setTimeout(() => {
+      unresponsiveTimer = null
+      console.error('[renderer] unresponsive for 10s — reloading')
+      recoverRenderer()
+    }, 10_000)
+  })
+  contents.on('responsive', () => {
+    if (unresponsiveTimer) { clearTimeout(unresponsiveTimer); unresponsiveTimer = null }
+  })
+}
+
+let rendererReloads: number[] = []
+function recoverRenderer(): void {
+  if (!win || win.isDestroyed()) return
+  const budget = reloadBudget(rendererReloads, Date.now())
+  rendererReloads = budget.history
+  if (budget.allow) {
+    win.webContents.reload()
+    return
+  }
+  console.error('[renderer] reload budget spent — waiting for the user')
+  if (Notification.isSupported()) {
+    const note = new Notification({ title: 'Workspace crashed', body: 'It kept crashing, so it was not reloaded again. Click, or use the tray icon, to reopen it.', icon: notificationIcon() })
+    note.on('click', () => { rendererReloads = []; win?.webContents.reload(); showWindow() })
+    note.show()
+  }
 }
 
 // The workspace fills the work area of whichever display the cursor is on — the
@@ -543,7 +630,7 @@ function buildSnapshot(): StatusSnapshot {
   const now = Date.now()
   const health = (provider: ProviderId) => {
     const lastReportAt = daemon.getProviderLastReport(provider)
-    const hookState = providerHookState(provider)
+    const hookState = providerHookStateCached(provider)
     const installed = hookState.installed
     const reporting = lastReportAt > 0 && now - lastReportAt < DEFAULTS.staleMs
     if (provider === 'codex' && installed && settings.codexHookTrustVerified !== true && !trustPendingSince.has(provider)) {
@@ -649,10 +736,28 @@ function stagePackagedHookRuntime(): string {
   return bridge
 }
 
-function providerHookState(provider: ProviderId): { installed: boolean; needsRepair: boolean } {
-  const path = provider === 'claude'
+function hookConfigPath(provider: ProviderId): string {
+  return provider === 'claude'
     ? join(app.getPath('home'), '.claude', 'settings.json')
     : join(app.getPath('home'), provider === 'codex' ? '.codex' : '.cursor', 'hooks.json')
+}
+
+// The snapshot is built once a second; parsing three hook config files each
+// time was the single biggest steady-state cost in main. One stat per file
+// instead, re-parsed only when its mtime moves (or after hooks:manage).
+const hookStateCache = new Map<ProviderId, { mtime: number; value: { installed: boolean; needsRepair: boolean } }>()
+function providerHookStateCached(provider: ProviderId): { installed: boolean; needsRepair: boolean } {
+  let mtime = -1
+  try { mtime = statSync(hookConfigPath(provider)).mtimeMs } catch { /* absent: -1 */ }
+  const hit = hookStateCache.get(provider)
+  if (hit && hit.mtime === mtime) return hit.value
+  const value = providerHookState(provider)
+  hookStateCache.set(provider, { mtime, value })
+  return value
+}
+
+function providerHookState(provider: ProviderId): { installed: boolean; needsRepair: boolean } {
+  const path = hookConfigPath(provider)
   try {
     const hookConfig = JSON.parse(readFileSync(path, 'utf8')) as { hooks?: Record<string, unknown> }
     const normalize = (value: unknown) => String(value ?? '').trim().replace(/\s+/g, ' ')
@@ -722,6 +827,22 @@ function liveHistoryDay(date: string, previous?: DailyUsageDay): DailyUsageDay |
   }
 }
 
+// What powerMonitor last told us. Locked or asleep, background ticks skip
+// (pauses.mjs); the edge back to active refreshes everything once.
+let power: PowerState = { locked: false, suspended: false }
+function setPower(next: PowerState): void {
+  const prev = power
+  power = next
+  if (isWake(prev, next)) {
+    console.log('[power] active again — refreshing')
+    void refreshWindows()
+    void refreshCodexWindow()
+    void localUsage.refresh()
+    void refreshCodexUsage()
+  }
+}
+const whenActive = (fn: () => void) => () => { if (tickAllowed(power)) fn() }
+
 function pushStatus(): void {
   const snap = buildSnapshot()
   if (win && !win.isDestroyed()) win.webContents.send('status:update', snap)
@@ -729,12 +850,35 @@ function pushStatus(): void {
   notifyTransitions(snap)
 }
 
+let prevWaitingCount = 0
 function updateTray(snap: StatusSnapshot): void {
   if (!tray) return
   const n = snap.waitingCount
   const hk = activeHotkey ? ` · ${activeHotkey}` : ''
   tray.setToolTip(n > 0 ? `TaylorMade Agent Monitor — ${n} waiting${hk}` : `TaylorMade Agent Monitor${hk}`)
+  // OS-level attention (attentionSignal.mjs): the tray badge always follows the
+  // count; the taskbar button appears, badged, and flashes once on the 0→N
+  // edge only while the workspace is visible-but-buried and not muted.
+  const t = attentionTransition({
+    prev: prevWaitingCount,
+    next: n,
+    muted: !notify || snap.mock,
+    focused: !!win && !win.isDestroyed() && win.isFocused(),
+    visible: !!win && !win.isDestroyed() && win.isVisible()
+  })
+  prevWaitingCount = n
+  if (t.badge !== lastTrayBadge) { tray.setImage(trayImageFor(t.badge)); lastTrayBadge = t.badge }
+  if (win && !win.isDestroyed()) {
+    if (t.taskbar !== lastTaskbar) {
+      win.setSkipTaskbar(!t.taskbar)
+      lastTaskbar = t.taskbar
+    }
+    win.setOverlayIcon(t.taskbar ? overlayImageFor(t.badge) : null, t.taskbar ? `${t.badge} waiting for your input` : '')
+    if (t.flash) win.flashFrame(true)
+  }
 }
+let lastTrayBadge = 0
+let lastTaskbar = false
 
 function notifyTransitions(snap: StatusSnapshot): void {
   // Mock/capture mode must never generate real desktop interruptions.
@@ -1012,6 +1156,7 @@ function settingsView() {
     launchAtLogin: app.getLoginItemSettings().openAtLogin,
     mock: mockMode,
     sizeMode: sizeModePref,
+    windowMaterial: materialPref,
     hasAdminKey: !!ADMIN_KEY,
     port: PORT,
     version: app.getVersion(),
@@ -1111,6 +1256,7 @@ function registerIpc(): void {
     if ((provider !== 'claude' && provider !== 'codex' && provider !== 'cursor') || !['install', 'repair', 'remove', 'status'].includes(action)) {
       throw new Error('Invalid hook operation')
     }
+    hookStateCache.clear() // the config is about to change under the mtime cache
     const script = app.isPackaged ? join(process.resourcesPath, 'hooks', 'install.mjs') : join(__dirname, '../../hooks/install.mjs')
     const args = [script, '--provider', provider, ...(action === 'install' ? [] : [`--${action}`])]
     let bridgePath: string
@@ -1176,6 +1322,11 @@ function registerIpc(): void {
     }
     if (typeof patch.notifications === 'boolean') { notify = patch.notifications; settings.notifications = patch.notifications }
     if (patch.sizeMode) { applySizeMode(patch.sizeMode); settings.sizeMode = patch.sizeMode }
+    if (patch.windowMaterial) {
+      materialPref = patch.windowMaterial
+      settings.windowMaterial = patch.windowMaterial
+      applyWindowMaterial()
+    }
     if (typeof patch.mock === 'boolean' && !mockForced) { mockMode = patch.mock; settings.mock = patch.mock; pushStatus() }
     if (typeof patch.launchAtLogin === 'boolean') app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin, args: ['--hidden'] })
     if (typeof patch.pushUrl === 'string') { pushUrl = patch.pushUrl; settings.pushUrl = patch.pushUrl; pushed.clear() }
@@ -1499,11 +1650,12 @@ if (!gotLock) {
     settings = loadSettings()
     if (typeof settings.pushUrl === 'string' && /^https?:\/\/\S+$/.test(settings.pushUrl)) pushUrl = settings.pushUrl
     if (Number.isInteger(settings.pushAfterMin) && settings.pushAfterMin! >= 1 && settings.pushAfterMin! <= 240) pushAfterMin = settings.pushAfterMin!
-    setInterval(checkPush, 60_000)
+    setInterval(whenActive(checkPush), 60_000)
     loadUsageHistory()
     if (settings.hotkey) hotkeyPref = settings.hotkey
     // Capture tooling pins the boot view; the persisted mode must not override it.
     if (!process.env.CLAUDE_WATCH_CAPTURE_HALF && (settings.sizeMode === 'full' || settings.sizeMode === 'left' || settings.sizeMode === 'right')) applySizeMode(settings.sizeMode)
+    if (settings.windowMaterial === 'none' || settings.windowMaterial === 'mica' || settings.windowMaterial === 'acrylic') materialPref = settings.windowMaterial
     if (typeof settings.notifications === 'boolean') notify = settings.notifications
     if (typeof settings.mock === 'boolean' && !mockForced) mockMode = settings.mock
 
@@ -1566,16 +1718,24 @@ if (!gotLock) {
         `[selftest] personal=${personal.available} 5h=${personal.session?.usedPct ?? '-'}% wk=${personal.week?.usedPct ?? '-'}% | ` +
         `api=${api.available} | todayOut=${localUsage.todayTokensOut() ?? '-'}`
       )
-    setInterval(refreshWindows, USAGE_POLL_MS)
-    setInterval(refreshCodexWindow, CODEX_USAGE_POLL_MS)
-    setInterval(refreshApi, 60_000)
-    setInterval(() => { void localUsage.refresh() }, 30_000)
-    setInterval(() => { void refreshCodexUsage() }, 30_000)
+    // Every background tick goes through whenActive (pauses.mjs): a locked or
+    // sleeping machine polls nothing, and the first tick after a wake is
+    // immediate rather than up to an interval stale. pushStatus keeps running —
+    // it is cheap now (hook state is cached) and the renderer is hidden anyway.
+    setInterval(whenActive(refreshWindows), USAGE_POLL_MS)
+    setInterval(whenActive(refreshCodexWindow), CODEX_USAGE_POLL_MS)
+    setInterval(whenActive(refreshApi), 60_000)
+    setInterval(whenActive(() => { void localUsage.refresh() }), 30_000)
+    setInterval(whenActive(() => { void refreshCodexUsage() }), 30_000)
     setInterval(pushStatus, DEFAULTS.pollMs)
     pushStatus()
     // Daily-history sync: first flush now that the initial scan is done, then 5-min cadence.
     void flushHistory()
-    setInterval(() => { void flushHistory() }, 5 * 60_000)
+    setInterval(whenActive(() => { void flushHistory() }), 5 * 60_000)
+    powerMonitor.on('suspend', () => setPower({ ...power, suspended: true }))
+    powerMonitor.on('resume', () => setPower({ ...power, suspended: false }))
+    powerMonitor.on('lock-screen', () => setPower({ ...power, locked: true }))
+    powerMonitor.on('unlock-screen', () => setPower({ ...power, locked: false }))
 
     // Show once on first launch so it's discoverable — unless started at login.
     const startedHidden = process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAtLogin

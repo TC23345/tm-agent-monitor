@@ -70,6 +70,8 @@ test('settings patches allow only mutable fields with bounded runtime types', ()
     hotkey: 'Control+Alt+W', notifications: false
   })
   assert.equal(validateMutableSettingsPatch({ port: 9999 }), null)
+  assert.deepEqual(validateMutableSettingsPatch({ windowMaterial: 'acrylic' }), { windowMaterial: 'acrylic' })
+  assert.equal(validateMutableSettingsPatch({ windowMaterial: 'glass' }), null)
   assert.equal(validateMutableSettingsPatch({ notifications: 'yes' }), null)
   assert.equal(validateMutableSettingsPatch({ hotkey: `Alt+W\nInjected` }), null)
   assert.deepEqual(validateMutableSettingsPatch({ sizeMode: 'left' }), { sizeMode: 'left' })

@@ -165,6 +165,23 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             </div>
 
             <div className="srow">
+              <span className="slabel">Window backdrop<span className="shint">system-drawn material behind the workspace (Windows 11)</span></span>
+              <span className="sseg" role="radiogroup" aria-label="Window backdrop">
+                {(['mica', 'acrylic', 'none'] as const).map((m) => (
+                  <button
+                    key={m}
+                    className={`hotkey-btn is-compact ${s.windowMaterial === m ? 'is-on' : ''}`}
+                    aria-pressed={s.windowMaterial === m}
+                    onClick={() => apply({ windowMaterial: m })}
+                    data-testid={`material-${m}`}
+                  >
+                    {m === 'mica' ? 'Mica' : m === 'acrylic' ? 'Acrylic' : 'Solid'}
+                  </button>
+                ))}
+              </span>
+            </div>
+
+            <div className="srow">
               <span className="slabel">Phone push<span className="shint">POST a waiting session's question to an ntfy / Pushover URL</span></span>
               <TextSetting value={s.pushUrl} placeholder="https://ntfy.sh/your-topic" onCommit={(v) => apply({ pushUrl: v })} validate={(v) => (v === '' || /^https?:\/\/\S+$/.test(v) ? null : 'Needs an http(s) URL')} testId="push-url" />
             </div>

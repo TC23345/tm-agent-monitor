@@ -164,7 +164,8 @@ export function App() {
   useEffect(() => {
     window.watch.getStatus().then(setSnap)
     const off = window.watch.onStatus(setSnap)
-    return off
+    const offMaterial = window.watch.onWindowMaterial((material) => { document.documentElement.dataset.material = material })
+    return () => { off(); offMaterial() }
   }, [])
   snapRef.current = snap
 
@@ -217,6 +218,9 @@ export function App() {
     window.watch.getSettings().then((s) => {
       setSizeMode(s.sizeMode)
       setAppInfo({ version: s.version, debugPort: s.debugPort })
+      // The system backdrop (Windows 11) shows through a translucent card;
+      // styles.css keys off this attribute, main pushes changes live.
+      document.documentElement.dataset.material = s.windowMaterial ?? 'none'
     }).catch(() => {})
   }, [])
   const applySizeMode = (mode: SizeMode) => {

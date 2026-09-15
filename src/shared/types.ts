@@ -317,12 +317,16 @@ export interface HookReport {
  * half-view hotkey uses. */
 export type SizeMode = 'full' | 'left' | 'right'
 
+/** The system-drawn backdrop behind the workspace (Windows 11 22H2+; ignored elsewhere). */
+export type WindowMaterial = 'none' | 'mica' | 'acrylic'
+
 export interface AppSettingsPatch {
   hotkey?: string
   notifications?: boolean
   launchAtLogin?: boolean
   mock?: boolean
   sizeMode?: SizeMode
+  windowMaterial?: WindowMaterial
   /** ntfy / Pushover-style POST target for long waits; '' clears it. */
   pushUrl?: string
   /** Minutes a session must have waited before it is pushed (1–240). */
@@ -335,6 +339,7 @@ export interface AppSettings {
   launchAtLogin: boolean
   mock: boolean
   sizeMode: SizeMode
+  windowMaterial: WindowMaterial
   hasAdminKey: boolean
   port: number
   version: string

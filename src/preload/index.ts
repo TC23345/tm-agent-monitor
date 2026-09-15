@@ -37,6 +37,14 @@ const api = {
       ipcRenderer.removeListener('term:exit', listener)
     }
   },
+  /** The window backdrop setting changed; the root's `data-material` follows it. */
+  onWindowMaterial: (cb: (material: string) => void) => {
+    const listener = (_e: unknown, material: string) => cb(material)
+    ipcRenderer.on('window:material', listener)
+    return () => {
+      ipcRenderer.removeListener('window:material', listener)
+    }
+  },
   /** The shell reported a new working directory (its prompt hook). */
   onTermCwd: (cb: (id: string, cwd: string) => void) => {
     const listener = (_e: unknown, id: string, cwd: string) => cb(id, cwd)

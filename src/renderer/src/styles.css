@@ -1670,3 +1670,13 @@ kbd {
 .naviconbtn:hover { background: var(--elev); color: var(--text); }
 .naviconbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .naviconbtn.is-usual { background: rgba(255, 255, 255, 0.07); color: var(--text); box-shadow: inset 0 0 0 1px var(--hairline); }
+
+/* Settings: a three-way segment, reusing the compact button. */
+.sseg { display: inline-flex; gap: 4px; }
+.hotkey-btn.is-on { border-color: var(--accent); color: var(--text); background: rgba(217, 119, 87, 0.12); }
+
+/* With a system backdrop behind the window (data-material on the root), the
+   card goes translucent so the desktop shows through its margins and the
+   sidebar; panes keep their own opaque surfaces. */
+:root[data-material="mica"] .app { background: rgba(28, 27, 32, 0.78); }
+:root[data-material="acrylic"] .app { background: rgba(28, 27, 32, 0.66); }
