@@ -273,6 +273,67 @@ export class LocalUsage {
       this.#aggregate.cache = buildTodayCache(this.#aggregate, now)
     }
   }
+
+  /**
+   * Everything a reader needs, as plain data: the usage worker sends this to
+   * main after each refresh and `LocalUsageView` answers from it.
+   */
+  snapshot() {
+    return {
+      seen: this.#seen,
+      days: this.retainedDays().map((day) => this.dayTotals(day)).filter(Boolean)
+    }
+  }
+}
+
+/**
+ * The read side of `LocalUsage` over a snapshot — same answers, no ledger,
+ * so main can keep serving the 1 Hz status build while the scan runs in a
+ * utility process. `today*` re-derive from the day's rows each call, so a day
+ * rollover between refreshes reads as an empty today rather than yesterday.
+ */
+export class LocalUsageView {
+  #now
+  #snapshot = { seen: false, days: [] }
+
+  constructor(options = {}) {
+    this.#now = options.now || Date.now
+  }
+
+  apply(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object' || !Array.isArray(snapshot.days)) return
+    this.#snapshot = { seen: snapshot.seen === true, days: snapshot.days.filter((day) => day && typeof day.day === 'string') }
+  }
+
+  get seen() {
+    return this.#snapshot.seen
+  }
+
+  todayTokensOut(now = this.#now()) {
+    if (!this.#snapshot.seen) return undefined
+    return this.dayTotals(dayKey(new Date(now)))?.tokensOut ?? 0
+  }
+
+  todayCostUsd(now = this.#now()) {
+    if (!this.#snapshot.seen) return undefined
+    return this.dayTotals(dayKey(new Date(now)))?.costUsd ?? 0
+  }
+
+  todayByProject(now = this.#now()) {
+    if (!this.#snapshot.seen) return undefined
+    const rows = this.dayTotals(dayKey(new Date(now)))?.byProject ?? []
+    const byProject = foldTopN(rows, 5)
+    if (rows.length > 5) byProject[byProject.length - 1].valueComplete = rows.slice(5).every((row) => row.valueComplete !== false)
+    return byProject
+  }
+
+  retainedDays() {
+    return this.#snapshot.days.map((day) => day.day).sort()
+  }
+
+  dayTotals(day) {
+    return this.#snapshot.days.find((entry) => entry.day === day)
+  }
 }
 
 function newFileState(dirLabel) {

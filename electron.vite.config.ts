@@ -5,7 +5,13 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   main: {
     build: {
-      rollupOptions: { input: { index: resolve('src/main/index.ts') } }
+      rollupOptions: {
+        input: {
+          index: resolve('src/main/index.ts'),
+          // The usage worker is forked as a utilityProcess from out/main/usageWorker.js.
+          usageWorker: resolve('src/main/usageWorker.ts')
+        }
+      }
     }
   },
   preload: {

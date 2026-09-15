@@ -1,6 +1,6 @@
 import { hostname } from 'node:os'
 import { MongoClient, type Collection, type Document } from 'mongodb'
-import type { DayTotals } from './localUsage.js'
+import type { DayTotals } from './localUsageCore.mjs'
 import type { DailyUsageDay, ProviderId } from '../shared/types.js'
 import { dailyDocuments, hasFlushPayload, machineId, normalizeDailyDocument } from './historyCore.mjs'
 import type { ApiDayUsage } from './historyCore.mjs'

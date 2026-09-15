@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { LocalUsage } from './localUsageCore.mjs'
+import { LocalUsage, LocalUsageView } from './localUsageCore.mjs'
 
 const NOW = new Date(2026, 6, 17, 12).getTime()
 const TODAY = localDay(NOW)
@@ -147,3 +147,29 @@ function localDay(ms) {
   const date = new Date(ms)
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
+
+test('LocalUsageView answers from a snapshot exactly as the ledger does', async (t) => {
+  const fixture = await transcriptFixture(t)
+  await writeFile(fixture.file, [
+    assistant('m1', 100, 'claude-opus-4', NOW - 1000),
+    assistant('m2', 50, 'claude-opus-4', NOW)
+  ].join('\n'))
+  const ledger = new LocalUsage({ projectsDir: fixture.root, now: () => NOW })
+  await ledger.refresh()
+  const snapshot = JSON.parse(JSON.stringify(ledger.snapshot()))
+
+  const view = new LocalUsageView({ now: () => NOW })
+  assert.equal(view.seen, false)
+  assert.equal(view.todayTokensOut(), undefined, 'nothing applied yet reads as unknown, like an unscanned ledger')
+  view.apply(snapshot)
+  assert.equal(view.seen, true)
+  assert.equal(view.todayTokensOut(), ledger.todayTokensOut())
+  assert.equal(view.todayCostUsd(), ledger.todayCostUsd())
+  assert.deepEqual(view.todayByProject(), ledger.todayByProject())
+  assert.deepEqual(view.retainedDays(), ledger.retainedDays())
+  assert.deepEqual(view.dayTotals(TODAY), ledger.dayTotals(TODAY))
+  assert.equal(view.todayTokensOut(NOW + 36 * 3_600_000), 0, 'a rolled-over day is empty, not yesterday')
+
+  view.apply({ garbage: true })
+  assert.equal(view.todayTokensOut(), ledger.todayTokensOut(), 'a malformed snapshot is ignored')
+})

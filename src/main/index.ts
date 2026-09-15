@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, clipboard, screen, powerMonitor } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, clipboard, screen, powerMonitor, utilityProcess } from 'electron'
 import { attentionTransition, badgeLabel } from '../shared/attentionSignal.mjs'
 import { blankBitmap, drawBadge } from '../shared/trayBadge.mjs'
 import { isWake, tickAllowed, type PowerState } from '../shared/pauses.mjs'
@@ -6,19 +6,19 @@ import { reloadBudget } from '../shared/crashPolicy.mjs'
 import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
 import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { statSync } from 'node:fs'
 import { Daemon } from './daemon.js'
 import { TerminalManager } from './terminals.js'
 import { fetchApiUsage } from './usage.js'
-import { LocalUsage } from './localUsage.js'
+import { LocalUsageView, type LocalUsageSnapshot } from './localUsageCore.mjs'
 import { UsageHistorySync } from './history.js'
 import { bootstrapConfig } from './config.js'
 import { readPersonalToken, fetchWindow } from './subscriptionUsage.js'
 import { readCodexAuth, fetchCodexWindow } from './codexSubscriptionUsage.js'
-import { scanCodexUsage, type CodexRateLimits } from './codexUsage.mjs'
-import { scanUsageInsights } from './usageInsightsCore.mjs'
+import type { scanCodexUsage, CodexRateLimits } from './codexUsage.mjs'
+import { PendingCalls, WORKER_TIMEOUT_MS, type WorkerKind } from '../shared/usageWorkerProtocol.mjs'
 import { mockSnapshot, mockHistory, mockUsageInsights, mockWindows, mockEvents } from './mock.js'
 import { parseWorkspaceArgs } from '../shared/workspaceCommand.mjs'
 import { focusHwnd, focusByPid, listDesktopWindows, available as winAvailable } from '../native/win32.mjs'
@@ -131,7 +131,76 @@ const terminals = new TerminalManager(
   // knows which terminal it is (its row in GET /v1/terminals).
   (id) => ({ TM_AGENT_MONITOR_ENDPOINT_FILE: config.endpointFile, TM_TERMINAL_ID: id })
 )
-const localUsage = new LocalUsage({ projectsDir: config.transcriptDir })
+// ---- usage worker ---------------------------------------------------------
+// The Claude ledgers, the Codex rollout scan, and the insights scan run in a
+// utilityProcess (usageWorker.ts): they read and parse JSONL synchronously, and
+// on a heavy transcript day that hitched main — the IPC hub for six xterm panes
+// and the 1 Hz snapshot. Main keeps only the read side, a snapshot the worker
+// sends back after each refresh. A dead worker is re-forked on the next call
+// under the same budget as a renderer reload (three per five minutes).
+const localUsage = new LocalUsageView()
+const USAGE_WORKER = 'tm-usage-worker'
+let usageWorker: Electron.UtilityProcess | undefined
+let usageWorkerForks: number[] = []
+const usageCalls = new PendingCalls()
+let localUsageNote: string | undefined
+
+function ensureUsageWorker(): Electron.UtilityProcess | undefined {
+  if (usageWorker) return usageWorker
+  const budget = reloadBudget(usageWorkerForks, Date.now())
+  usageWorkerForks = budget.history
+  if (!budget.allow) return undefined
+  const child = utilityProcess.fork(join(__dirname, 'usageWorker.js'), [], { serviceName: USAGE_WORKER })
+  child.on('message', (message) => {
+    if (!usageCalls.settle(message)) console.warn('[usage-worker] unmatched message')
+  })
+  child.on('exit', (code) => {
+    if (usageWorker === child) usageWorker = undefined
+    const failed = usageCalls.failAll(`usage worker exited (${code})`)
+    if (code !== 0 || failed) console.warn(`[usage-worker] exited code=${code}; ${failed} call(s) failed`)
+  })
+  usageWorker = child
+  return child
+}
+
+function callWorker<T>(kind: WorkerKind, args: Record<string, unknown> = {}): Promise<T> {
+  const child = ensureUsageWorker()
+  if (!child) return Promise.reject(new Error('usage worker crashed repeatedly; retrying in a few minutes'))
+  const id = randomUUID()
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (usageCalls.take(id)) reject(new Error(`usage worker timed out: ${kind}`))
+    }, WORKER_TIMEOUT_MS)
+    usageCalls.add(id, {
+      resolve: (value) => { clearTimeout(timer); resolve(value as T) },
+      reject: (error) => { clearTimeout(timer); reject(error) }
+    })
+    child.postMessage({ id, kind, args })
+  })
+}
+
+function stopUsageWorker(): void {
+  const child = usageWorker
+  usageWorker = undefined
+  child?.kill()
+}
+
+let localRefresh: Promise<void> | null = null
+function refreshLocalUsage(): Promise<void> {
+  if (localRefresh) return localRefresh
+  localRefresh = callWorker<LocalUsageSnapshot>('claude-refresh', { projectsDir: config.transcriptDir })
+    .then((snapshot) => {
+      localUsage.apply(snapshot)
+      localUsageNote = undefined
+    })
+    .catch((error) => {
+      const text = error instanceof Error ? error.message : String(error)
+      localUsageNote = `Local usage unavailable: ${text}`
+      console.warn(`[usage-worker] claude refresh failed: ${text}`)
+    })
+    .finally(() => { localRefresh = null })
+  return localRefresh
+}
 // Daily-totals sync to MongoDB (token_board.daily_usage). Inert without a URI.
 const history = new UsageHistorySync(
   config.mongoUri,
@@ -664,7 +733,7 @@ function buildSnapshot(): StatusSnapshot {
       {
         id: 'claude-local', provider: 'claude', kind: 'local', available: true, label: 'Claude local', provenance: 'transcript',
         todayTokensOut: localUsage.todayTokensOut(), todayCostUsd: localUsage.todayCostUsd(), todayByProject: localUsage.todayByProject(),
-        valueComplete: localUsage.dayTotals(localDay())?.valueComplete
+        valueComplete: localUsage.dayTotals(localDay())?.valueComplete, note: localUsageNote
       },
       {
         id: 'codex-local', provider: 'codex', kind: 'local', available: !codexUsageNote,
@@ -837,7 +906,7 @@ function setPower(next: PowerState): void {
     console.log('[power] active again — refreshing')
     void refreshWindows()
     void refreshCodexWindow()
-    void localUsage.refresh()
+    void refreshLocalUsage()
     void refreshCodexUsage()
   }
 }
@@ -1066,7 +1135,8 @@ function codexTokensCost(tokens: { inputTokens: number; cachedInputTokens: numbe
   }, model, 'codex')
 }
 
-function codexDayTotals(day: Awaited<ReturnType<typeof scanCodexUsage>>['byDay'][number]): ProviderUsageTotals {
+type CodexScan = Awaited<ReturnType<typeof scanCodexUsage>>
+function codexDayTotals(day: CodexScan['byDay'][number]): ProviderUsageTotals {
   let costUsd = 0
   let valueComplete = true
   const byModel = day.byModel.map((model) => {
@@ -1094,7 +1164,7 @@ async function refreshCodexUsage(): Promise<void> {
   if (mockMode) return
   if (codexRefresh) return codexRefresh
   codexRefresh = (async () => {
-    const result = await scanCodexUsage()
+    const result = await callWorker<CodexScan>('codex-scan')
     codexRateLimits = result.rateLimits
     if (result.schemaDrift) {
       codexUsageNote = 'Local usage schema changed; live monitoring is still active.'
@@ -1117,7 +1187,7 @@ async function getUsageInsights(): Promise<UsageInsights> {
   if (mockMode) return mockUsageInsights()
   if (insightsCache && Date.now() - insightsCache.generatedAt < 5 * 60_000) return insightsCache
   if (insightsRefresh) return insightsRefresh
-  insightsRefresh = scanUsageInsights({ claudeRoot: config.transcriptDir })
+  insightsRefresh = callWorker<UsageInsights>('insights', { claudeRoot: config.transcriptDir })
     .then((value) => (insightsCache = value))
     .finally(() => { insightsRefresh = null })
   return insightsRefresh
@@ -1712,7 +1782,7 @@ if (!gotLock) {
 
     // Subscription windows (real, OAuth), API usage (admin), and the local
     // today-tokens scan all refresh in the background on their own cadence.
-    await Promise.all([localUsage.refresh(), refreshWindows(), refreshCodexWindow(), refreshApi(), refreshCodexUsage()])
+    await Promise.all([refreshLocalUsage(), refreshWindows(), refreshCodexWindow(), refreshApi(), refreshCodexUsage()])
     if (process.env.CLAUDE_WATCH_SELFTEST)
       console.log(
         `[selftest] personal=${personal.available} 5h=${personal.session?.usedPct ?? '-'}% wk=${personal.week?.usedPct ?? '-'}% | ` +
@@ -1725,13 +1795,17 @@ if (!gotLock) {
     setInterval(whenActive(refreshWindows), USAGE_POLL_MS)
     setInterval(whenActive(refreshCodexWindow), CODEX_USAGE_POLL_MS)
     setInterval(whenActive(refreshApi), 60_000)
-    setInterval(whenActive(() => { void localUsage.refresh() }), 30_000)
+    setInterval(whenActive(() => { void refreshLocalUsage() }), 30_000)
     setInterval(whenActive(() => { void refreshCodexUsage() }), 30_000)
     setInterval(pushStatus, DEFAULTS.pollMs)
     pushStatus()
     // Daily-history sync: first flush now that the initial scan is done, then 5-min cadence.
     void flushHistory()
     setInterval(whenActive(() => { void flushHistory() }), 5 * 60_000)
+    app.on('child-process-gone', (_event, details) => {
+      if (details.type === 'Utility' && details.serviceName === USAGE_WORKER)
+        console.warn(`[usage-worker] gone: ${details.reason} (exit ${details.exitCode})`)
+    })
     powerMonitor.on('suspend', () => setPower({ ...power, suspended: true }))
     powerMonitor.on('resume', () => setPower({ ...power, suspended: false }))
     powerMonitor.on('lock-screen', () => setPower({ ...power, locked: true }))
@@ -1819,9 +1893,10 @@ if (!gotLock) {
     const timeout = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
     void (async () => {
       try {
-        await Promise.race([Promise.all([localUsage.refresh(), refreshCodexUsage()]), timeout(5_000)])
+        await Promise.race([Promise.all([refreshLocalUsage(), refreshCodexUsage()]), timeout(5_000)])
         await Promise.race([flushHistory(), timeout(1_500)])
         await Promise.race([history.close(), timeout(500)])
+        stopUsageWorker()
       } catch (error) {
         console.error(`[shutdown] final flush failed: ${error instanceof Error ? error.message : String(error)}`)
       } finally {

@@ -23,4 +23,21 @@ export class LocalUsage {
   todayByProject(now?: number): ProjectUsage[] | undefined
   retainedDays(): string[]
   dayTotals(day: string): DayTotals | undefined
+  snapshot(): LocalUsageSnapshot
+}
+
+export interface LocalUsageSnapshot {
+  seen: boolean
+  days: DayTotals[]
+}
+
+export class LocalUsageView {
+  constructor(options?: { now?: () => number })
+  apply(snapshot: unknown): void
+  readonly seen: boolean
+  todayTokensOut(now?: number): number | undefined
+  todayCostUsd(now?: number): number | undefined
+  todayByProject(now?: number): ProjectUsage[] | undefined
+  retainedDays(): string[]
+  dayTotals(day: string): DayTotals | undefined
 }
