@@ -61,6 +61,15 @@ test('the chip rolls providers up, worst first', () => {
   assert.equal(drift.label, 'Claude Code · attention')
 
   assert.equal(overallStatus({ claude: { installed: false, awaitingTrust: false, reporting: false } }, NOW).label, 'no hooks')
+  // Hooks written by another build (a different bridge path) still report —
+  // the daemon flags them installed=false + needsRepair. That is "repair
+  // hooks", never "no hooks": the user has hooks and they are working.
+  const stale = { installed: false, needsRepair: true, awaitingTrust: false, reporting: true, lastReportAt: NOW - 30_000 }
+  assert.deepEqual(providerStatus(stale, NOW), { tone: 'warn', reason: 'hooks need repair' })
+  const repair = overallStatus({ claude: stale, codex: { ...stale, reporting: false }, cursor: { ...stale, reporting: false } }, NOW)
+  assert.equal(repair.state, 'warn')
+  assert.equal(repair.label, 'repair hooks')
+  assert.match(repair.title, /Settings → Provider hooks$/)
   assert.equal(overallStatus({ claude: { installed: true, awaitingTrust: false, reporting: false } }, NOW).label, 'no reports')
   assert.equal(overallStatus(providers, NOW, true).label, 'mock data')
   assert.equal(overallStatus(undefined, NOW).state, 'off')

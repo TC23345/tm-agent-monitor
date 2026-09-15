@@ -77,6 +77,8 @@ const api = {
   createProject: (name: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
     ipcRenderer.invoke('project:create', name),
   hide: () => ipcRenderer.send('window:hide'),
+  /** A real minimize: the workspace stays in the taskbar and Alt+Tab; the hotkey restores it. */
+  minimize: () => ipcRenderer.send('window:minimize'),
   getHistory: (): Promise<DailyUsageDay[]> => ipcRenderer.invoke('history:recent'),
   /** Per-folder facts: `.tm.json` + package.json scripts, and git branch/dirty state. */
   getProjectCommands: (cwd: string): Promise<ProjectCommand[]> => ipcRenderer.invoke('project:commands', cwd),

@@ -466,6 +466,9 @@ function sendPhase(phase: 'enter' | 'exit'): void {
 function showWindow(): void {
   if (!win) return
   if (pendingHide) { clearTimeout(pendingHide); pendingHide = null }
+  // Minimized (the title-bar button) counts as visible to Windows, so restore
+  // first or show()/focus() leave it in the taskbar.
+  if (win.isMinimized()) win.restore()
   positionWorkspace()
   win.show()
   win.focus()
@@ -492,6 +495,7 @@ function hideWindow(): void {
  * animated loop. */
 function toggleWindowMode(mode: ViewMode): void {
   if (!win) return
+  if (win.isMinimized()) { viewMode = mode; showWindow(); return }
   if (win.isVisible() && !pendingHide) {
     if (viewMode === mode) {
       if (win.isFocused()) hideWindow()
@@ -1654,6 +1658,7 @@ function registerIpc(): void {
   })
   ipcMain.handle('usage:insights', () => getUsageInsights())
   ipcMain.on('window:hide', () => hideWindow())
+  ipcMain.on('window:minimize', () => { if (win && !win.isDestroyed() && win.isVisible() && !pendingHide) win.minimize() })
   ipcMain.on('app:quit', () => { app.quit() })
 }
 

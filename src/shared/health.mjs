@@ -42,8 +42,12 @@ export function providerStatus(health, now, options = {}) {
   const silentAfter = options.silentAfterMs ?? SILENT_AFTER_MS
   const expected = options.bridgeVersion ?? BRIDGE_VERSION
   const h = health ?? {}
-  if (!h.installed) return { tone: 'off', reason: 'not installed' }
+  // needsRepair means "our hooks are there but not what this build would
+  // write" (another install location, a stale bridge path) — and the daemon
+  // only ever sets it with installed=false, so it must be read first or it is
+  // dead code and a working-but-stale install reads as "not installed".
   if (h.needsRepair) return { tone: 'warn', reason: 'hooks need repair' }
+  if (!h.installed) return { tone: 'off', reason: 'not installed' }
   if (h.awaitingTrust) return { tone: 'warn', reason: 'awaiting trust review in /hooks' }
   if (typeof h.error === 'string' && h.error.trim()) return { tone: 'warn', reason: `hook error: ${h.error.trim()}` }
   if (h.bridgeVersion && h.bridgeVersion !== expected) {
@@ -67,16 +71,19 @@ export function overallStatus(providers, now, mock = false, options = {}) {
   const entries = Object.entries(providers ?? {})
   const statuses = entries.map(([id, h]) => [id, providerStatus(h, now, options)])
   const reporting = statuses.filter(([, s]) => s.tone === 'on' || s.tone === 'warn').length
-  const installed = entries.filter(([, h]) => h && h.installed).length
+  // Present = ours are on disk, correct or not. "no hooks" is only for none at all.
+  const present = entries.filter(([, h]) => h && (h.installed || h.needsRepair)).length
   const warn = statuses.filter(([, s]) => s.tone === 'warn')
   const title = statuses.map(([id, s]) => `${providerLabel(id)}: ${s.reason}`).join('\n')
-  if (installed === 0) return { state: 'off', label: 'no hooks', title: title || 'No provider hooks installed — Settings → Provider hooks' }
-  if (reporting === 0) return { state: 'off', label: 'no reports', title }
+  if (present === 0) return { state: 'off', label: 'no hooks', title: title || 'No provider hooks installed — Settings → Provider hooks' }
   if (warn.length > 0) {
     const first = warn[0]
-    const short = first[1].reason.startsWith('silent') ? `${providerLabel(first[0])} ${first[1].reason}` : `${providerLabel(first[0])} · attention`
-    return { state: 'warn', label: short, title }
+    const short = first[1].reason.startsWith('silent') ? `${providerLabel(first[0])} ${first[1].reason}`
+      : first[1].reason === 'hooks need repair' ? 'repair hooks'
+        : `${providerLabel(first[0])} · attention`
+    return { state: 'warn', label: short, title: `${title}\n\nSettings → Provider hooks` }
   }
+  if (reporting === 0) return { state: 'off', label: 'no reports', title }
   // Healthy names the state, never a ratio: "1/3 providers" beside a green dot
   // reads as a failure and sends the user hunting for two broken things, when
   // the other two are simply not installed. A number appears only when it is

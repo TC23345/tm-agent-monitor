@@ -1021,6 +1021,8 @@ export function App() {
         openMenu={openMenu === 'file' || openMenu === 'terminal' || openMenu === 'user' ? openMenu : null}
         onOpenMenu={setOpenMenu}
         onPalette={() => { setOpenMenu(null); setPalette((v) => !v) }}
+        onMinimize={() => { setOpenMenu(null); window.watch.minimize() }}
+        onHide={() => { setOpenMenu(null); window.watch.hide() }}
         onOpenPane={openUnique}
         hot={hot}
         onFocusAgent={focusAgentAnywhere}

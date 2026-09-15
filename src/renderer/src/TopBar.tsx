@@ -1,5 +1,5 @@
 import {
-  Code2, Folder, FolderPlus, Globe, ListRestart, Minus, Play, Power, RefreshCw, Search, SquareTerminal, Terminal
+  Code2, Folder, FolderPlus, Globe, ListRestart, Minus, Play, Power, RefreshCw, Search, SquareTerminal, Terminal, X
 } from 'lucide-react'
 import { Settings } from './Icons'
 import mark from './assets/icon.png'
@@ -58,6 +58,10 @@ interface Props {
   onOpenMenu: (menu: MenuName | null) => void
   /** The command center: opens the palette. */
   onPalette: () => void
+  /** Window controls at the far right: a real minimize (the workspace stays in
+   * the taskbar and Alt+Tab; the hotkey restores it) and hide-to-tray. */
+  onMinimize: () => void
+  onHide: () => void
   /** User → Spend / Insights / History / Activity: open the pane, or bring the open one forward. */
   onOpenPane: (kind: PaneKind) => void
   /** Root sessions near their context limit and still climbing. */
@@ -77,7 +81,7 @@ interface Props {
 export function TopBar(props: Props) {
   const {
     waiting, waitingOnly, onWaitingOnly, onRouteWaiting, health, panes, context, onNewTerminal, onNewProject, commands, onRunCommand,
-    canResetOrder, onResetOrder, onSettings, openMenu, onOpenMenu, onPalette, onOpenPane, hot, onFocusAgent,
+    canResetOrder, onResetOrder, onSettings, openMenu, onOpenMenu, onPalette, onMinimize, onHide, onOpenPane, hot, onFocusAgent,
     rebuild, onRebuild
   } = props
 
@@ -227,6 +231,14 @@ export function TopBar(props: Props) {
           </button>
         )}
         <ConnChip health={health} />
+        <div className="winctl">
+          <button className="winbtn" onClick={onMinimize} title="Minimize — the hotkey or the taskbar brings it back" aria-label="Minimize" data-testid="win-minimize">
+            <Minus strokeWidth={2} />
+          </button>
+          <button className="winbtn winbtn--close" onClick={onHide} title="Hide to tray (Esc)" aria-label="Hide to tray" data-testid="win-hide">
+            <X strokeWidth={2} />
+          </button>
+        </div>
       </div>
     </header>
   )
