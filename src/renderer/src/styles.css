@@ -907,6 +907,12 @@ kbd {
 
 /* ---- connection pill (top bar) ---- */
 .conn { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+/* Side-edge grips: the window has no OS resize border (it is transparent), so
+   an 8px strip down each side of the card is the handle for the edge-pull
+   gesture (EdgeGrip.tsx). Invisible; the cursor is the affordance. */
+.edge-grip { position: absolute; top: 0; bottom: 0; width: 8px; z-index: 40; cursor: ew-resize; -webkit-app-region: no-drag; touch-action: none; }
+.edge-grip--left { left: 0; }
+.edge-grip--right { right: 0; }
 /* Window controls: the two an IDE keeps at the far right. Minimize is real
    (taskbar + Alt+Tab); the close glyph hides to the tray, the same as Esc. */
 .winctl { display: flex; align-items: center; gap: 2px; margin-left: 6px; -webkit-app-region: no-drag; }

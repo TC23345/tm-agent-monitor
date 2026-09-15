@@ -122,6 +122,20 @@ implementing; here the user explicitly rejected blur-hide.
    key each time, and never let a writer clobber a sibling's field. Keys the
    capture hook seeds (`tm.panes.v2`, `tm.sidebar.v2`, `tm.layout.v1` via
    `CLAUDE_WATCH_CAPTURE_LAYOUT`) must keep their shape.
+15. **An edge drag is a gesture, never a resize — and it cannot be the OS
+   border.** A transparent frameless window has no resize border on Windows:
+   `resizable: true` plus a `will-resize` listener never fired under a real
+   mouse drag (probed 2026-09-15). The handle is the renderer's `EdgeGrip`
+   strips (`.edge-grip`, 8px down each side of the card), which report one
+   `window:edge-drag` (edge, delta) per pointer-down once the pointer has gone
+   `EDGE_COMMIT_PX`; main's `commitEdgeDrag` then asks `edgeDragTarget`
+   (`src/shared/edgeDrag.mjs`) whether that flips the size mode (left half →
+   full, full → the half on the far side). The flip goes through
+   `applySizeMode`, persists, and is pushed as `window:size-mode` so the
+   Layout chip follows — because the geometry the user sees must be the
+   setting (gotcha 3 still holds: Alt+Q's transient flip is a different path).
+   The effective mode fed to the helper is `viewMode === 'half' ? halfSide()
+   : 'full'`, not the pref, or a peek at the half view would misread the drag.
 14. **Settings that move the window should update renderer state
    optimistically.** The window re-bounds in the same beat as the IPC call;
    waiting for the round-trip makes the radio lag the visible change. Set local

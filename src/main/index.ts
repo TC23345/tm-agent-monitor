@@ -1,5 +1,6 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, clipboard, screen, powerMonitor, utilityProcess } from 'electron'
 import { attentionTransition, badgeLabel } from '../shared/attentionSignal.mjs'
+import { edgeDragTarget } from '../shared/edgeDrag.mjs'
 import { blankBitmap, drawBadge } from '../shared/trayBadge.mjs'
 import { isWake, tickAllowed, type PowerState } from '../shared/pauses.mjs'
 import { reloadBudget } from '../shared/crashPolicy.mjs'
@@ -342,6 +343,10 @@ function createWindow(): void {
     show: false,
     frame: false,
     transparent: true,
+    // Not resizable — and a transparent window has no OS resize border on
+    // Windows anyway (probed 2026-09-15: `resizable: true` + `will-resize`
+    // never fired). The edge-pull gesture is the renderer's `.edge-grip`
+    // strips → `window:edge-drag` → edgeDrag.mjs, and bounds never track it.
     resizable: false,
     // No skipTaskbar: on Windows that flag also drops the window from Alt+Tab,
     // and a workspace you clicked away from should come back like any other
@@ -432,6 +437,29 @@ let viewMode: ViewMode = process.env.CLAUDE_WATCH_CAPTURE_HALF ? 'half' : 'full'
 
 function halfSide(): 'left' | 'right' {
   return sizeModePref === 'left' ? 'left' : 'right'
+}
+
+/** An edge pull from the renderer's grip strips: `delta` is how far the
+ * grabbed edge has travelled in screen pixels. The window never stretches —
+ * edgeDrag.mjs says whether the pull commits to another size mode, and that
+ * goes through the same path as a Layout-popover pick (persisted, pushed
+ * back so the chip says what is on screen). The effective mode is what is on
+ * screen, not the pref: an Alt+Q peek at the half view is still a half. */
+function commitEdgeDrag(edge: 'left' | 'right', delta: number): void {
+  if (!win || win.isDestroyed() || !win.isVisible() || pendingHide) return
+  const current = win.getBounds()
+  const proposed = edge === 'right'
+    ? { x: current.x, width: current.width + delta }
+    : { x: current.x + delta, width: current.width - delta }
+  const mode: SizeMode = viewMode === 'half' ? halfSide() : 'full'
+  const target = edgeDragTarget({ mode, edge, current, proposed })
+  // Compare with what is on screen, never the pref: an Alt+Q peek at the half
+  // view has pref 'full', and pulling that half out must still land on full.
+  if (!target || target === mode) return
+  applySizeMode(target)
+  settings.sizeMode = target
+  saveSettings()
+  win.webContents.send('window:size-mode', target)
 }
 
 function applySizeMode(mode: SizeMode): void {
@@ -1658,6 +1686,10 @@ function registerIpc(): void {
   })
   ipcMain.handle('usage:insights', () => getUsageInsights())
   ipcMain.on('window:hide', () => hideWindow())
+  ipcMain.on('window:edge-drag', (_event, edge: unknown, delta: unknown) => {
+    if ((edge !== 'left' && edge !== 'right') || typeof delta !== 'number' || !Number.isFinite(delta) || Math.abs(delta) > 10_000) return
+    commitEdgeDrag(edge, Math.round(delta))
+  })
   ipcMain.on('window:minimize', () => { if (win && !win.isDestroyed() && win.isVisible() && !pendingHide) win.minimize() })
   ipcMain.on('app:quit', () => { app.quit() })
 }

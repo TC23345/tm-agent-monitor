@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, DailyUsageDay, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights, WorkspaceCommand } from '../shared/types.js'
+import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, DailyUsageDay, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SizeMode, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights, WorkspaceCommand } from '../shared/types.js'
 
 const api = {
   getStatus: (): Promise<StatusSnapshot> => ipcRenderer.invoke('status:get'),
@@ -45,6 +45,14 @@ const api = {
       ipcRenderer.removeListener('window:material', listener)
     }
   },
+  /** Main changed the workspace size itself (an edge drag); the Layout chip follows. */
+  onSizeMode: (cb: (mode: SizeMode) => void) => {
+    const listener = (_e: unknown, mode: SizeMode) => cb(mode)
+    ipcRenderer.on('window:size-mode', listener)
+    return () => {
+      ipcRenderer.removeListener('window:size-mode', listener)
+    }
+  },
   /** The shell reported a new working directory (its prompt hook). */
   onTermCwd: (cb: (id: string, cwd: string) => void) => {
     const listener = (_e: unknown, id: string, cwd: string) => cb(id, cwd)
@@ -77,6 +85,8 @@ const api = {
   createProject: (name: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
     ipcRenderer.invoke('project:create', name),
   hide: () => ipcRenderer.send('window:hide'),
+  /** The grip strip on a side edge was pulled `delta` screen px; main decides whether that flips the size mode. */
+  edgeDrag: (edge: 'left' | 'right', delta: number) => ipcRenderer.send('window:edge-drag', edge, delta),
   /** A real minimize: the workspace stays in the taskbar and Alt+Tab; the hotkey restores it. */
   minimize: () => ipcRenderer.send('window:minimize'),
   getHistory: (): Promise<DailyUsageDay[]> => ipcRenderer.invoke('history:recent'),

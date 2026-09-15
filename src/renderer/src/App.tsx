@@ -10,6 +10,7 @@ import { SettingsPanel } from './SettingsPanel'
 import { COLLAPSE_ALL_EVENT } from './useCollapse'
 import { HistoryPane, InsightsPane, SpendPane } from './UsagePane'
 import { TopBar, type MenuName } from './TopBar'
+import { EdgeGrip } from './EdgeGrip'
 import { StatusBar, type StatusMenu } from './StatusBar'
 import { Pane } from './Pane'
 import type { TerminalPaneHandle } from './TerminalPane'
@@ -222,6 +223,8 @@ export function App() {
       // styles.css keys off this attribute, main pushes changes live.
       document.documentElement.dataset.material = s.windowMaterial ?? 'none'
     }).catch(() => {})
+    // An edge drag flips the mode in main; the radio and chip follow.
+    return window.watch.onSizeMode((mode) => setSizeMode(mode))
   }, [])
   const applySizeMode = (mode: SizeMode) => {
     setSizeMode(mode) // optimistic — the window re-sizes in the same beat
@@ -1001,6 +1004,8 @@ export function App() {
 
   return (
     <div className={`app ${open ? 'is-open' : ''}`}>
+      <EdgeGrip edge="left" />
+      <EdgeGrip edge="right" />
       <TopBar
         waiting={waiting}
         waitingOnly={waitingOnly}
