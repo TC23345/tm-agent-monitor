@@ -1,4 +1,4 @@
-import { Activity, Bot, Coins, Rss, Terminal, ChartColumn, History } from 'lucide-react'
+import { Activity, Bot, Coins, NotebookPen, Rss, Terminal, ChartColumn, History } from 'lucide-react'
 import type { TerminalLaunch } from '@shared/types'
 import type { SizeBucket } from '@shared/layout.mjs'
 import {
@@ -22,7 +22,7 @@ function readJson(key: string): unknown {
  * a pane. At-a-glance status — open windows and limit bars — stacks in the
  * sidebar as toggleable sections; see `SidebarView`.
  */
-export type PaneKind = 'agents' | 'terminal' | 'spend' | 'insights' | 'history' | 'activity'
+export type PaneKind = 'agents' | 'terminal' | 'spend' | 'insights' | 'history' | 'activity' | 'notes'
 
 /** Retired kinds and what a persisted layout holding one becomes. The old
  * `usage` pane stacked Spend, Insights, and History; it comes back as Spend. */
@@ -55,7 +55,8 @@ export const PANE_KINDS: { id: PaneKind; label: string; icon: typeof Activity; h
   { id: 'spend', label: 'Spend', icon: Coins, hint: 'Today’s tokens, estimated value, and budget by provider and project' },
   { id: 'insights', label: 'Insights', icon: ChartColumn, hint: 'What is driving local usage: context size, subagents, skills, MCP servers' },
   { id: 'history', label: 'History', icon: History, hint: 'The last 30 days of usage, by day and model' },
-  { id: 'activity', label: 'Activity', icon: Rss, hint: 'What sessions asked, finished, started, and ended' }
+  { id: 'activity', label: 'Activity', icon: Rss, hint: 'What sessions asked, finished, started, and ended' },
+  { id: 'notes', label: 'Notes', icon: NotebookPen, hint: 'A shared notepad — Markdown files you and your agents both read and write' }
 ]
 
 export const MAX_PANES = 6

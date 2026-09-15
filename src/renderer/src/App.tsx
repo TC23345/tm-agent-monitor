@@ -22,6 +22,7 @@ import { NameDialog } from './NameDialog'
 import { SESSION_NAME_MAX, setSessionName, useSessionNames } from './sessionNames'
 import { useProjectCommands } from './useProject'
 import { ActivityPane } from './ActivityPane'
+import { NotesPane, type NotesPaneHandle } from './NotesPane'
 import { isWorkspaceCommand } from '@shared/workspaceCommand.mjs'
 import type { ProjectCommand } from '@shared/types'
 import { LAYOUT_NAME_MAX, loadLayouts, panesFromLayout, saveLayouts, snapshotLayout, type LayoutMap } from './layouts'
@@ -46,8 +47,8 @@ import { launchFor, launchKey, withLaunch, type LaunchPrefs } from '@shared/pane
 import { LaunchNav, type LaunchTarget, type NavMenu } from './LaunchNav'
 import {
   AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Code2 as CursorIcon, Columns3, Copy,
-  EyeOff, Filter, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
-  PanelLeft, PanelRight, Play, Power, RefreshCw, Rss, Ruler, Save, Shrink, SquareSlash,
+  EyeOff, FilePlus2, Filter, Folder, FolderOpen, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
+  NotebookPen, PanelLeft, PanelRight, Play, Power, RefreshCw, Rss, Ruler, Save, Shrink, SquareSlash,
   SquareTerminal, Terminal, Trash2, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
@@ -140,6 +141,9 @@ export function App() {
   const [paletteWindows, setPaletteWindows] = useState<DesktopWindow[]>([])
   // Live handles to the terminal panes, for the header tools (clear/restart).
   const termRefs = useRef(new Map<string, TerminalPaneHandle>())
+  const notesRef = useRef<NotesPaneHandle | null>(null)
+  /** The notes folder, once the pane has asked main — the header's copy-to-clipboard path. */
+  const [notesDir, setNotesDir] = useState<string | undefined>(undefined)
   const [frameW, setFrameW] = useState(() => window.innerWidth)
   const frameRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLElement>(null)
@@ -324,6 +328,7 @@ export function App() {
       case 'palette': setPalette(true); break
       case 'usage': openUsage(); break
       case 'activity': openActivity(); break
+      case 'notes': openNotes(); break
       case 'layout': applyLayout(raw.name); break
       case 'open': {
         const label = raw.cwd ? raw.cwd.split(/[\\/]/).pop() : undefined
@@ -538,6 +543,7 @@ export function App() {
   // History are their own panes now (status bar → Panes).
   const openUsage = () => openUnique('spend')
   const openActivity = () => openUnique('activity')
+  const openNotes = () => openUnique('notes')
 
   /** The agent a feed row or chip points at: its pane when it has one, else its window. */
   const focusAgentAnywhere = (id: string) => {
@@ -664,6 +670,8 @@ export function App() {
         return <HistoryPane />
       case 'activity':
         return <ActivityPane onFocusAgent={focusAgentAnywhere} />
+      case 'notes':
+        return <NotesPane ref={notesRef} onDir={setNotesDir} />
       case 'terminal':
         return (
           <Suspense fallback={<div className="empty">Starting terminal…</div>}>
@@ -704,6 +712,14 @@ export function App() {
 
   /** The header tool strip, per kind — an editor title bar's actions. */
   const paneTools = (pane: PaneInstance) => {
+    if (pane.kind === 'notes') {
+      return (
+        <>
+          {tool('New note', ic(FilePlus2), () => notesRef.current?.newNote())}
+          {tool('Open the notes folder', ic(FolderOpen), () => { void window.watch.openNotesFolder() })}
+        </>
+      )
+    }
     if (pane.kind === 'agents') {
       return (
         <>
@@ -895,6 +911,12 @@ export function App() {
       icon: <Rss strokeWidth={2} />,
       keywords: ['events', 'timeline', 'questions', 'history', 'log'],
       detail: hasActivity ? 'zoom the open pane' : full ? 'all six panes are open' : undefined
+    })
+    const hasNotes = panes.some((p) => p.kind === 'notes')
+    cmd('notes', 'Notes', openNotes, {
+      icon: <NotebookPen strokeWidth={2} />,
+      keywords: ['notepad', 'scratch', 'markdown', 'todo', 'shared'],
+      detail: hasNotes ? 'zoom the open pane' : full ? 'all six panes are open' : 'the shared notepad'
     })
     for (const k of PANE_KINDS) {
       if (k.id !== 'spend' && k.id !== 'insights' && k.id !== 'history') continue
@@ -1133,8 +1155,12 @@ export function App() {
                 onClose={() => closePane(pane.id)}
                 title={paneTitle(pane)}
                 context={paneContext(pane)}
-                path={pane.kind === 'terminal' ? pane.term?.cwd : undefined}
-                onCopyPath={pane.kind === 'terminal' && pane.term?.cwd ? () => window.watch.copyText(pane.term!.cwd!) : undefined}
+                path={pane.kind === 'terminal' ? pane.term?.cwd : pane.kind === 'notes' ? notesDir : undefined}
+                onCopyPath={
+                  pane.kind === 'terminal' && pane.term?.cwd ? () => window.watch.copyText(pane.term!.cwd!)
+                    : pane.kind === 'notes' && notesDir ? () => window.watch.copyText(notesDir)
+                      : undefined
+                }
                 tools={paneTools(pane)}
                 attention={paneAttention.get(pane.id)}
                 zoomed={zoomed === pane.id}

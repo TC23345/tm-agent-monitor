@@ -27,6 +27,15 @@ retry in a loop.
 If `TM_TERMINAL_ID` is set, you are running inside a monitor pane; that id is
 your row in `GET /v1/terminals`.
 
+## The shared notepad
+
+`%USERPROFILE%\Notes` (or `TM_NOTES_DIR`) is a folder of plain Markdown files
+the user edits in the app's **Notes** pane. Read it when the user says "my
+notes", "the notepad", or points you at a note by name; write there when they
+ask you to leave them something. One file per note, `<name>.md`, no
+subfolders. The pane picks up your edits on its own — do not tell the user to
+refresh. Do not delete or rewrite a note they did not ask you to touch.
+
 ## Routes
 
 | Route | Purpose |

@@ -14,7 +14,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 function userArgs(argv) {
   const list = Array.isArray(argv) ? argv.filter((a) => typeof a === 'string') : []
   // The first entry is the executable (dev: electron.exe + script path).
-  const start = list.findIndex((a) => a === '--' || a === 'open' || a === 'layout' || a === 'palette' || a === 'usage' || a === 'activity' || a === 'show' || a === 'hide')
+  const start = list.findIndex((a) => a === '--' || a === 'open' || a === 'layout' || a === 'palette' || a === 'usage' || a === 'activity' || a === 'notes' || a === 'show' || a === 'hide')
   if (start < 0) return []
   return list.slice(list[start] === '--' ? start + 1 : start)
 }
@@ -37,6 +37,7 @@ export function parseWorkspaceArgs(argv) {
   if (verb === 'palette') return { kind: 'palette' }
   if (verb === 'usage') return { kind: 'usage' }
   if (verb === 'activity') return { kind: 'activity' }
+  if (verb === 'notes') return { kind: 'notes' }
   if (verb === 'show') return { kind: 'show' }
   if (verb === 'hide') return { kind: 'hide' }
   if (verb === 'layout') {
@@ -62,7 +63,7 @@ export function isWorkspaceCommand(value) {
   if (!value || typeof value !== 'object') return false
   const c = value
   switch (c.kind) {
-    case 'palette': case 'usage': case 'activity': case 'show': case 'hide': return true
+    case 'palette': case 'usage': case 'activity': case 'notes': case 'show': case 'hide': return true
     case 'layout': return typeof c.name === 'string' && c.name.length > 0 && c.name.length <= MAX_NAME
     case 'open':
       return LAUNCHES.has(c.launch)
@@ -79,7 +80,7 @@ export function isWorkspaceCommand(value) {
 export const USAGE = `tm — drive the TaylorMade Agent Monitor workspace
 
   Workspace (opens the window):
-    tm show | hide | palette | usage | activity
+    tm show | hide | palette | usage | activity | notes
     tm open [--cwd <folder>] [--launch shell|claude|codex] [--run "<command>"]
     tm layout <name>
 

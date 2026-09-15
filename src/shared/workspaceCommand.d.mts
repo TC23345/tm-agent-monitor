@@ -4,6 +4,7 @@ export type WorkspaceCommand =
   | { kind: 'palette' }
   | { kind: 'usage' }
   | { kind: 'activity' }
+  | { kind: 'notes' }
   | { kind: 'show' }
   | { kind: 'hide' }
   | { kind: 'layout'; name: string }

@@ -907,6 +907,30 @@ kbd {
 
 /* ---- connection pill (top bar) ---- */
 .conn { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+/* ---- notes pane: a list of Markdown files and a plain editor. The body
+   scrolls per column; the pane's own body padding is reclaimed so the editor
+   can run edge to edge. ---- */
+.notes { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 0; height: 100%; margin: -12px; min-height: 0; }
+.notes-list { overflow-y: auto; border-right: 1px solid var(--hairline); padding: 8px 6px; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+.notes-row { display: grid; grid-template-columns: 1fr auto; align-items: center; border-radius: 7px; }
+.notes-row:hover, .notes-row.is-active { background: var(--elev); }
+.notes-row.is-active { box-shadow: inset 2px 0 0 var(--accent); }
+.notes-open { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "title when" "meta meta"; gap: 1px 8px; width: 100%; padding: 7px 8px; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.notes-title { grid-area: title; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notes-meta { grid-area: meta; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notes-when { grid-area: when; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.notes-del { width: 26px; height: 26px; display: grid; place-items: center; margin-right: 4px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0; }
+.notes-del svg { width: 13px; height: 13px; }
+.notes-row:hover .notes-del, .notes-row.is-active .notes-del { opacity: 1; }
+.notes-del:hover { color: var(--st-question); background: rgba(255, 255, 255, 0.06); }
+.notes-empty { padding: 20px 8px; font-size: 12.5px; color: var(--muted); text-align: center; line-height: 1.6; }
+.notes-newbtn { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 5px 10px; border: 1px solid var(--hairline); border-radius: 7px; background: transparent; color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.notes-newbtn svg { width: 14px; height: 14px; }
+.notes-newbtn:hover { background: var(--elev); }
+.notes-editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.notes-text { flex: 1 1 auto; min-height: 0; width: 100%; padding: 14px 16px; border: 0; outline: none; resize: none; background: transparent; color: var(--text); font: 13.5px/1.55 ui-monospace, "Cascadia Code", Consolas, monospace; tab-size: 2; }
+.notes-text::placeholder { color: var(--muted); }
+.notes-status { flex: 0 0 auto; height: 22px; padding: 0 12px; font-size: 11px; color: var(--muted); text-align: right; line-height: 22px; border-top: 1px solid var(--hairline); }
 /* Side-edge grips: the window has no OS resize border (it is transparent), so
    an 8px strip down each side of the card is the handle for the edge-pull
    gesture (EdgeGrip.tsx). Invisible; the cursor is the affordance. */

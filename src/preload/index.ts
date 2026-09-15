@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import type { NoteMeta } from '../shared/notes.mjs'
 import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, DailyUsageDay, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SizeMode, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights, WorkspaceCommand } from '../shared/types.js'
 
 const api = {
@@ -107,6 +108,21 @@ const api = {
   describePath: (path: string): Promise<{ dir: string; label: string } | null> => ipcRenderer.invoke('path:describe', path),
   /** The activity feed: attention-worthy moments across sessions, newest first. */
   getEvents: (): Promise<ActivityEvent[]> => ipcRenderer.invoke('agent:events'),
+  /** The shared notepad (Notes pane): Markdown files in the notes folder. */
+  listNotes: (): Promise<{ dir: string; notes: NoteMeta[] }> => ipcRenderer.invoke('notes:list'),
+  readNote: (name: string): Promise<string | null> => ipcRenderer.invoke('notes:read', name),
+  writeNote: (name: string, text: string): Promise<boolean> => ipcRenderer.invoke('notes:write', name, text),
+  createNote: (): Promise<string | null> => ipcRenderer.invoke('notes:create'),
+  deleteNote: (name: string): Promise<boolean> => ipcRenderer.invoke('notes:delete', name),
+  openNotesFolder: (): Promise<string> => ipcRenderer.invoke('notes:open-folder'),
+  /** Something in the notes folder changed on disk (an agent wrote a note). */
+  onNotesChanged: (cb: () => void) => {
+    const listener = () => cb()
+    ipcRenderer.on('notes:changed', listener)
+    return () => {
+      ipcRenderer.removeListener('notes:changed', listener)
+    }
+  },
   /** A command a second instance sent (`tm open …`); the renderer re-validates it. */
   onCommand: (cb: (command: WorkspaceCommand) => void) => {
     const listener = (_e: unknown, command: WorkspaceCommand) => cb(command)

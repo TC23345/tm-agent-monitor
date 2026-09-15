@@ -6,7 +6,8 @@ import { isWake, tickAllowed, type PowerState } from '../shared/pauses.mjs'
 import { reloadBudget } from '../shared/crashPolicy.mjs'
 import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
-import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
+import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, promises as fsp, watch as fsWatch, type FSWatcher } from 'node:fs'
+import { isNoteName, nextNoteName, notePreview, MAX_NOTES, MAX_NOTE_BYTES, type NoteMeta } from '../shared/notes.mjs'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { statSync } from 'node:fs'
@@ -437,6 +438,31 @@ let viewMode: ViewMode = process.env.CLAUDE_WATCH_CAPTURE_HALF ? 'half' : 'full'
 
 function halfSide(): 'left' | 'right' {
   return sizeModePref === 'left' ? 'left' : 'right'
+}
+
+// The notes folder exists from the first look, and is watched from then on
+// (one debounced 'notes:changed' per burst — the pane re-lists and, when its
+// editor is clean, re-reads). fs.watch on a directory is best effort on
+// Windows; the pane also refreshes on its own actions, so a missed event
+// costs nothing worse than a stale list until the next one.
+let notesWatcher: FSWatcher | undefined
+let notesChangedTimer: NodeJS.Timeout | null = null
+function ensureNotesDir(): string {
+  const dir = config.notesDir
+  try { mkdirSync(dir, { recursive: true }) } catch { /* reported by the write that follows */ }
+  if (!notesWatcher) {
+    try {
+      notesWatcher = fsWatch(dir, { persistent: false }, () => {
+        if (notesChangedTimer) clearTimeout(notesChangedTimer)
+        notesChangedTimer = setTimeout(() => {
+          notesChangedTimer = null
+          if (win && !win.isDestroyed()) win.webContents.send('notes:changed')
+        }, 300)
+      })
+      notesWatcher.on('error', () => { notesWatcher?.close(); notesWatcher = undefined })
+    } catch { notesWatcher = undefined }
+  }
+  return dir
 }
 
 /** An edge pull from the renderer's grip strips: `delta` is how far the
@@ -1685,6 +1711,54 @@ function registerIpc(): void {
     return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
   })
   ipcMain.handle('usage:insights', () => getUsageInsights())
+  // ---- the shared notepad: Markdown files in config.notesDir. Names are
+  // validated on the way in (one segment, .md) because they become paths;
+  // the folder is watched so an agent's edit from a shell shows up in the pane.
+  ipcMain.handle('notes:list', async (): Promise<{ dir: string; notes: NoteMeta[] }> => {
+    const dir = ensureNotesDir()
+    const names = (await fsp.readdir(dir).catch(() => [] as string[])).filter(isNoteName).slice(0, MAX_NOTES)
+    const notes = await Promise.all(names.map(async (name): Promise<NoteMeta | null> => {
+      try {
+        const st = await fsp.stat(join(dir, name))
+        if (!st.isFile()) return null
+        const preview = st.size <= 64 * 1024 ? notePreview(await fsp.readFile(join(dir, name), 'utf8')) : ''
+        return { name, mtime: st.mtimeMs, size: st.size, preview }
+      } catch { return null }
+    }))
+    return { dir, notes: notes.filter((n): n is NoteMeta => n !== null) }
+  })
+  ipcMain.handle('notes:read', async (_e, name: unknown): Promise<string | null> => {
+    if (!isNoteName(name)) return null
+    try { return await fsp.readFile(join(ensureNotesDir(), name), 'utf8') } catch { return null }
+  })
+  ipcMain.handle('notes:write', async (_e, name: unknown, text: unknown): Promise<boolean> => {
+    if (!isNoteName(name) || typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > MAX_NOTE_BYTES) return false
+    const dir = ensureNotesDir()
+    const tmp = join(dir, `.${name}.${process.pid}.tmp`)
+    try {
+      await fsp.writeFile(tmp, text, 'utf8')
+      await fsp.rename(tmp, join(dir, name))
+      return true
+    } catch (error) {
+      console.warn(`[notes] write failed: ${error instanceof Error ? error.message : String(error)}`)
+      await fsp.unlink(tmp).catch(() => {})
+      return false
+    }
+  })
+  ipcMain.handle('notes:create', async (): Promise<string | null> => {
+    const dir = ensureNotesDir()
+    const existing = (await fsp.readdir(dir).catch(() => [] as string[])).filter(isNoteName)
+    const name = nextNoteName(existing)
+    try {
+      await fsp.writeFile(join(dir, name), '', { encoding: 'utf8', flag: 'wx' })
+      return name
+    } catch { return null }
+  })
+  ipcMain.handle('notes:delete', async (_e, name: unknown): Promise<boolean> => {
+    if (!isNoteName(name)) return false
+    try { await fsp.unlink(join(ensureNotesDir(), name)); return true } catch { return false }
+  })
+  ipcMain.handle('notes:open-folder', async (): Promise<string> => shell.openPath(ensureNotesDir()))
   ipcMain.on('window:hide', () => hideWindow())
   ipcMain.on('window:edge-drag', (_event, edge: unknown, delta: unknown) => {
     if ((edge !== 'left' && edge !== 'right') || typeof delta !== 'number' || !Number.isFinite(delta) || Math.abs(delta) > 10_000) return
