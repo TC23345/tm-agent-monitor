@@ -343,7 +343,9 @@ function createWindow(): void {
     frame: false,
     transparent: true,
     resizable: false,
-    skipTaskbar: true,
+    // No skipTaskbar: on Windows that flag also drops the window from Alt+Tab,
+    // and a workspace you clicked away from should come back like any other
+    // window. Hidden, it has no button anyway — the tray is the app then.
     icon: notificationIcon(),
     hasShadow: false,
     fullscreenable: false,
@@ -926,8 +928,9 @@ function updateTray(snap: StatusSnapshot): void {
   const hk = activeHotkey ? ` · ${activeHotkey}` : ''
   tray.setToolTip(n > 0 ? `TaylorMade Agent Monitor — ${n} waiting${hk}` : `TaylorMade Agent Monitor${hk}`)
   // OS-level attention (attentionSignal.mjs): the tray badge always follows the
-  // count; the taskbar button appears, badged, and flashes once on the 0→N
-  // edge only while the workspace is visible-but-buried and not muted.
+  // count; the taskbar button (there whenever the window is visible) carries
+  // the count as an overlay and flashes once on the 0→N edge while the
+  // workspace is buried and notifications are not muted.
   const t = attentionTransition({
     prev: prevWaitingCount,
     next: n,
@@ -938,16 +941,17 @@ function updateTray(snap: StatusSnapshot): void {
   prevWaitingCount = n
   if (t.badge !== lastTrayBadge) { tray.setImage(trayImageFor(t.badge)); lastTrayBadge = t.badge }
   if (win && !win.isDestroyed()) {
-    if (t.taskbar !== lastTaskbar) {
-      win.setSkipTaskbar(!t.taskbar)
-      lastTaskbar = t.taskbar
+    if (t.overlay !== lastOverlay || (t.overlay && t.badge !== lastOverlayBadge)) {
+      win.setOverlayIcon(t.overlay ? overlayImageFor(t.badge) : null, t.overlay ? `${t.badge} waiting for your input` : '')
+      lastOverlay = t.overlay
+      lastOverlayBadge = t.badge
     }
-    win.setOverlayIcon(t.taskbar ? overlayImageFor(t.badge) : null, t.taskbar ? `${t.badge} waiting for your input` : '')
     if (t.flash) win.flashFrame(true)
   }
 }
 let lastTrayBadge = 0
-let lastTaskbar = false
+let lastOverlay = false
+let lastOverlayBadge = 0
 
 function notifyTransitions(snap: StatusSnapshot): void {
   // Mock/capture mode must never generate real desktop interruptions.
