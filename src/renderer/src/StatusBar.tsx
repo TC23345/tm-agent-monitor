@@ -1,4 +1,4 @@
-import { ChevronUp, Columns3, LayoutGrid, LayoutTemplate, Monitor, PanelLeft, PanelRight, RefreshCw, Ruler, Save, Trash2 } from 'lucide-react'
+import { ChevronUp, Columns3, LayoutGrid, LayoutTemplate, Monitor, PanelLeft, PanelRight, RefreshCw, Ruler, Save, Sparkles, Trash2 } from 'lucide-react'
 import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
 import { MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, isUniqueKind, type PaneCols, type PaneInstance, type PaneKind, type SidebarView } from './panes'
 import type { SizeMode } from '@shared/types'
@@ -25,6 +25,9 @@ interface Props {
   onPaneCols: (cols: PaneCols) => void
   canResetSizes: boolean
   onResetSizes: () => void
+  /** The session field — the glow behind the sidebar's session rows. */
+  fieldOn: boolean
+  onToggleField: () => void
   /** Named layouts: save the current one, apply or forget a saved one. */
   layouts: string[]
   onSaveLayout: () => void
@@ -52,7 +55,7 @@ const SIZE_LABEL: Record<SizeMode, string> = { full: 'Full', left: 'Left half', 
 export function StatusBar(props: Props) {
   const {
     rebuild, onRebuild, panes, onAddPane, onClosePane, sidebarViews, onToggleSidebarView,
-    sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes,
+    sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, fieldOn, onToggleField,
     layouts, onSaveLayout, onApplyLayout, onDeleteLayout, openMenu, onOpenMenu, version, debugPort
   } = props
   const full = panes.length >= MAX_PANES
@@ -146,6 +149,14 @@ export function StatusBar(props: Props) {
               <MenuCheckItem label="1 column" checked={paneCols === 1} onClick={() => onPaneCols(1)} />
               <MenuCheckItem label="2 columns" checked={paneCols === 2} onClick={() => onPaneCols(2)} />
               <MenuCheckItem label="3 columns" checked={paneCols === 3} onClick={() => onPaneCols(3)} />
+              <div className="menu-sep" />
+              <MenuCheckItem
+                icon={<Sparkles strokeWidth={2} />}
+                label="Session glow"
+                hint="A soft glow behind each session in the sidebar — its provider's colour, breathing while it runs, red when it waits on you"
+                checked={fieldOn}
+                onClick={onToggleField}
+              />
               <div className="menu-sep" />
               <div className="menu-label"><LayoutTemplate className="menu-label-ic" strokeWidth={2} />Saved layouts</div>
               <MenuItem icon={<Save strokeWidth={2} />} label="Save current layout…" hint="Panes, sizes, and sidebar views under a name" onClick={run(onSaveLayout)} />

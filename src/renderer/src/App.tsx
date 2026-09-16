@@ -11,6 +11,7 @@ import { COLLAPSE_ALL_EVENT } from './useCollapse'
 import { HistoryPane, InsightsPane, SpendPane } from './UsagePane'
 import { TopBar, type MenuName } from './TopBar'
 import { EdgeGrip } from './EdgeGrip'
+import { SessionField } from './SessionField'
 import { StatusBar, type StatusMenu } from './StatusBar'
 import { Pane } from './Pane'
 import type { TerminalPaneHandle } from './TerminalPane'
@@ -48,7 +49,7 @@ import { LaunchNav, type LaunchTarget, type NavMenu } from './LaunchNav'
 import {
   AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Code2 as CursorIcon, Columns3, Copy,
   Eye, EyeOff, FilePlus2, Filter, Folder, FolderOpen, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
-  NotebookPen, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, Rss, Ruler, Save, Shrink, SquareSlash,
+  NotebookPen, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, Rss, Ruler, Save, Shrink, Sparkles, SquareSlash,
   SquareTerminal, Terminal, Trash2, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
@@ -150,6 +151,14 @@ export function App() {
   })
   const toggleNotesPreview = () => setNotesPreview((v) => {
     try { localStorage.setItem('tm.notes.preview', v ? '0' : '1') } catch { /* preference only */ }
+    return !v
+  })
+  /** The session field (the WebGPU glow behind the sidebar's rows) — on unless switched off; remembered. */
+  const [fieldOn, setFieldOn] = useState<boolean>(() => {
+    try { return localStorage.getItem('tm.field.v1') !== '0' } catch { return true }
+  })
+  const toggleField = () => setFieldOn((v) => {
+    try { localStorage.setItem('tm.field.v1', v ? '0' : '1') } catch { /* preference only */ }
     return !v
   })
   const [frameW, setFrameW] = useState(() => window.innerWidth)
@@ -965,6 +974,7 @@ export function App() {
       cmd(`cols-${c}`, `Columns: ${c === 'auto' ? 'Auto' : c}`, () => setPaneCols(c), { icon: <Columns3 strokeWidth={2} />, detail: paneCols === c ? 'current' : undefined, keywords: ['grid', 'layout'] })
     }
     if (sized) cmd('reset-sizes', 'Reset pane sizes', resetSizes, { icon: <Ruler strokeWidth={2} />, keywords: ['layout', 'splitter'] })
+    cmd('field', `Session glow: ${fieldOn ? 'off' : 'on'}`, toggleField, { icon: <Sparkles strokeWidth={2} />, detail: 'sidebar', keywords: ['field', 'gpu', 'webgpu', 'sidebar', 'ambient'] })
     if (!full) {
       for (const c of projectCommands) {
         cmd(`run:${c.command}`, `Run: ${c.label}`, () => runProjectCommand(c), { icon: <Play strokeWidth={2} />, detail: `${c.command} · ${context.label ?? 'this folder'}`, keywords: ['project', 'script', 'npm', c.command] })
@@ -1067,6 +1077,7 @@ export function App() {
 
       <div className="frame" ref={frameRef}>
         <aside className="sidebar" style={{ flexBasis: sidebarWidth }}>
+          <SessionField agents={agents} active={open && fieldOn} />
           <LaunchNav
             context={context}
             projects={launchProjects}
@@ -1233,6 +1244,8 @@ export function App() {
         onPaneCols={setPaneCols}
         canResetSizes={sized}
         onResetSizes={resetSizes}
+        fieldOn={fieldOn}
+        onToggleField={toggleField}
         layouts={layoutNames}
         onSaveLayout={() => setLayoutDialog(true)}
         onApplyLayout={applyLayout}

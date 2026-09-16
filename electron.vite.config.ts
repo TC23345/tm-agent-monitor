@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
+import { wgslVitePlugin } from '@vgpu/wgsl/loader-vite'
 
 export default defineConfig({
   main: {
@@ -32,6 +33,7 @@ export default defineConfig({
     resolve: {
       alias: { '@shared': resolve('src/shared') }
     },
-    plugins: [react()]
+    // `.wgsl` imports as `{ wgsl }` modules for the session field (SessionField.tsx).
+    plugins: [react(), wgslVitePlugin({ minify: { whitespace: true } })]
   }
 })
