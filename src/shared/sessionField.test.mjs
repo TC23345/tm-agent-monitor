@@ -61,37 +61,44 @@ test('trackFlares starts a flare on the edge into waiting and drops burnt-out on
   assert.deepEqual([...track.flares], [['a', t0 + 3100]])
 })
 
-test('fieldGlows centres each glow on its row, skips rows without a box, waiting first', () => {
+const SIZE = { w: 400, h: 1000 }
+
+test('fieldGlows: a broad light per session, anchored at its row when it has one, waiting first', () => {
   const agents = [agent('a', 'running'), agent('b', 'waiting', 'codex'), agent('c', 'idle')]
   const rects = new Map([['a', rect(100)], ['b', rect(150)]])
   const flares = new Map([['b', 5000]])
-  const glows = fieldGlows(agents, rects, flares, 5000)
-  assert.deepEqual(glows.map((g) => g.id), ['b', 'a'])
+  const glows = fieldGlows(agents, rects, flares, 5000, SIZE)
+  assert.deepEqual(glows.map((g) => g.id), ['b', 'a', 'c'])
   const b = glows[0]
-  assert.equal(b.x, 8 + 180)
   assert.equal(b.y, 150 + 20)
-  assert.equal(b.rx, 360 * 0.45)
-  assert.equal(b.ry, 44)
+  assert.equal(b.rx, 300, 'most of the sidebar width')
+  assert.equal(b.ry, 160, 'a slice of its height')
+  assert.ok(b.x >= 140 && b.x <= 260, `x stays in the middle band: ${b.x}`)
   assert.deepEqual(b.color, ATTENTION_RGB)
   assert.equal(b.flare, 1)
   assert.equal(glows[1].flare, 0)
   assert.equal(glows[1].seed, seedFor('a'))
+  // c has no row: it takes the last of three even slots down the sidebar.
+  assert.equal(glows[2].y, 1000 * (2.5 / 3))
+})
+
+test('fieldGlows never depends on the rows being visible', () => {
+  const agents = [agent('a', 'running'), agent('b', 'idle')]
+  const glows = fieldGlows(agents, new Map(), new Map(), 0, SIZE)
+  assert.deepEqual(glows.map((g) => g.y), [250, 750])
+  assert.equal(fieldGlows(agents, undefined, undefined, 0, { w: 0, h: 0 }).length, 2, 'a zero-size canvas still packs cleanly')
 })
 
 test('fieldGlows caps at MAX_GLOWS without losing a waiting session', () => {
   const agents = []
-  const rects = new Map()
-  for (let i = 0; i < MAX_GLOWS + 5; i++) {
-    agents.push(agent(`s${i}`, i === MAX_GLOWS + 3 ? 'waiting' : 'running'))
-    rects.set(`s${i}`, rect(i * 40))
-  }
-  const glows = fieldGlows(agents, rects, new Map(), 0)
+  for (let i = 0; i < MAX_GLOWS + 5; i++) agents.push(agent(`s${i}`, i === MAX_GLOWS + 3 ? 'waiting' : 'running'))
+  const glows = fieldGlows(agents, new Map(), new Map(), 0, SIZE)
   assert.equal(glows.length, MAX_GLOWS)
   assert.equal(glows[0].id, `s${MAX_GLOWS + 3}`)
 })
 
 test('packField lays the header and each glow out as field.wgsl declares them', () => {
-  const glows = fieldGlows([agent('a', 'waiting'), agent('b', 'running', 'codex')], new Map([['a', rect(0)], ['b', rect(50)]]), new Map([['a', 100]]), 100)
+  const glows = fieldGlows([agent('a', 'waiting'), agent('b', 'running', 'codex')], new Map([['a', rect(0)], ['b', rect(50)]]), new Map([['a', 100]]), 100, SIZE)
   const data = packField(glows, { time: 2.5, sx: 2, sy: 2 })
   assert.equal(data.length, FIELD_FLOATS)
   assert.equal(FIELD_FLOATS, HEADER_FLOATS + MAX_GLOWS * FLOATS_PER_GLOW)
@@ -99,8 +106,8 @@ test('packField lays the header and each glow out as field.wgsl declares them', 
   assert.deepEqual([...data.slice(0, 4)], [2.5, 2, 2, 2])
   const o = HEADER_FLOATS + FLOATS_PER_GLOW
   const b = glows[1]
-  assert.deepEqual([...data.slice(o, o + 4)], [b.x, b.y, b.rx, b.ry])
-  assert.deepEqual([...data.slice(o + 4, o + 8)].map((v) => Math.round(v * 1000) / 1000), [0.416, 0.69, 0.91, 0.5])
+  assert.deepEqual([...data.slice(o, o + 4)].map((v) => Math.round(v * 100) / 100), [b.x, b.y, b.rx, b.ry].map((v) => Math.round(v * 100) / 100))
+  assert.deepEqual([...data.slice(o + 4, o + 8)].map((v) => Math.round(v * 1000) / 1000), [0.416, 0.69, 0.91, 0.11])
   // Float32 rounds 0.35; compare at the precision the shader sees.
   assert.deepEqual([...data.slice(o + 8, o + 11)].map((v) => Math.round(v * 1000) / 1000), [1, 0.35, 0])
   assert.ok(Math.abs(data[o + 11] - seedFor('b')) < 1e-6)

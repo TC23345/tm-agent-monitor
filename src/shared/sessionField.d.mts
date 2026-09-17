@@ -32,6 +32,7 @@ export function fieldGlows(
   agents: readonly Pick<Agent, 'id' | 'provider' | 'state'>[],
   rects: Map<string, Rect>,
   flares: Map<string, number> | undefined,
-  now: number
+  now: number,
+  size: { w: number; h: number }
 ): Glow[]
 export function packField(glows: readonly Glow[], head: FieldHead, out?: Float32Array): Float32Array

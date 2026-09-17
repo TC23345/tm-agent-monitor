@@ -46,12 +46,14 @@ export function seedFor(id) {
 export function glowFor(agent) {
   const provider = PROVIDER_RGB[agent?.provider] ?? PROVIDER_RGB.claude
   switch (agent?.state) {
+    // A wash, not a halo: these are low on purpose. The sidebar's background
+    // should read as faintly lit from somewhere, never as a row being outlined.
     case 'waiting':
-      return { color: ATTENTION_RGB, intensity: 0.72, motion: 0, pulse: 1 }
+      return { color: ATTENTION_RGB, intensity: 0.22, motion: 0, pulse: 1 }
     case 'running':
-      return { color: provider, intensity: 0.5, motion: 1, pulse: 0.35 }
+      return { color: provider, intensity: 0.11, motion: 1, pulse: 0.35 }
     default:
-      return { color: provider, intensity: 0.18, motion: 0, pulse: 0 }
+      return { color: provider, intensity: 0.05, motion: 0, pulse: 0 }
   }
 }
 
@@ -85,30 +87,42 @@ export function trackFlares(prev, agents, now) {
 }
 
 /**
- * The glows to draw this frame. `rects` maps a session id to its row's box in
- * canvas pixels (a row without a box — filtered out, scrolled away — draws
- * nothing). Waiting sessions come first so the cap never drops one of them.
+ * The glows to draw this frame: an ambient wash over the whole sidebar
+ * (`size`, in css px), one broad light per session. A session whose row is
+ * on screen (`rects`, canvas px) is anchored loosely at that row's height, so
+ * a red wash rises from roughly where the waiting session sits; a session
+ * with no row — the list scrolled, or the agent list living in a pane —
+ * takes an even slot down the sidebar instead, so the wash never depends on
+ * the list being visible. Waiting sessions come first so the cap never drops
+ * one of them.
  */
-export function fieldGlows(agents, rects, flares, now) {
+export function fieldGlows(agents, rects, flares, now, size) {
   const out = []
-  const list = [...(agents ?? [])].filter((a) => a && rects?.has(a.id))
+  const w = Math.max(size?.w ?? 0, 1)
+  const h = Math.max(size?.h ?? 0, 1)
+  const list = [...(agents ?? [])].filter((a) => a && typeof a.id === 'string')
   list.sort((a, b) => Number(b.state === 'waiting') - Number(a.state === 'waiting'))
-  for (const a of list) {
-    if (out.length >= MAX_GLOWS) break
-    const r = rects.get(a.id)
+  const n = Math.min(list.length, MAX_GLOWS)
+  const rx = w * 0.75
+  const ry = Math.max(h * 0.16, 90)
+  for (let i = 0; i < n; i++) {
+    const a = list[i]
+    const r = rects?.get(a.id)
     const g = glowFor(a)
+    // Off-centre horizontally by seed so two lights never stack into one.
+    const seed = seedFor(a.id)
     out.push({
       id: a.id,
-      x: r.x + r.w / 2,
-      y: r.y + r.h / 2,
-      rx: Math.max(r.w * 0.45, 24),
-      ry: Math.max(r.h * 1.1, 20),
+      x: w * (0.35 + 0.3 * seed),
+      y: r ? r.y + r.h / 2 : h * ((i + 0.5) / n),
+      rx,
+      ry,
       color: g.color,
       intensity: g.intensity,
       motion: g.motion,
       pulse: g.pulse,
       flare: flareStrength(now, flares?.get(a.id)),
-      seed: seedFor(a.id)
+      seed
     })
   }
   return out

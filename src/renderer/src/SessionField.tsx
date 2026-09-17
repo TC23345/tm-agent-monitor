@@ -6,11 +6,13 @@ import type { Agent } from '@shared/types'
 import { tid } from './testid'
 
 /**
- * The session field: a WebGPU canvas under the sidebar that puts one soft glow
- * behind each session row — provider colour, drifting and breathing while it
- * runs, still and dim when idle, red and pulsing when it waits on a person,
- * with a burst on the edge into waiting. The same signal as the tray badge,
- * readable from across the room while the workspace is up.
+ * The session field: a WebGPU canvas under the sidebar that washes its
+ * background with one broad, faint light per session — provider colour,
+ * drifting and breathing while it runs, still and dimmer when idle, red and
+ * pulsing when it waits on a person, with a burst on the edge into waiting.
+ * Anchored loosely at the session's row when that row is on screen, spread
+ * evenly otherwise. The same signal as the tray badge, as atmosphere rather
+ * than outline, while the workspace is up.
  *
  * What is drawn is decided in `@shared/sessionField.mjs` (pure, tested); this
  * component only measures the rows, uploads the packed uniform, and runs the
@@ -135,7 +137,7 @@ export function SessionField({ agents, active }: { agents: Agent[]; active: bool
     const frame = (now: number) => {
       if (!gpu) return
       track = trackFlares(track, agentsRef.current, now)
-      const glows = fieldGlows(agentsRef.current, measure(), track.flares, now)
+      const glows = fieldGlows(agentsRef.current, measure(), track.flares, now, css)
       packField(glows, { time: reduced ? 0 : (now % 1_000_000) / 1000, sx: css.w / canvas.width, sy: css.h / canvas.height }, data)
       gpu.uniforms.write(data)
       pass(gpu, glows.length > 0)
