@@ -17,12 +17,17 @@ Layout customization, on top of the 0.3.0 workspace.
 - **Pane tool strips.** The pane header's content dropdown is gone; the kind is fixed and the header carries that kind's tools — terminals get split, clear, restart, external terminal, and open folder; the launcher gets new project and Projects folder. Ctrl+Shift+` opens a new terminal, Ctrl+, opens Settings.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
+
+## 0.4.9 — 2026-09-18
+
+- **The sidebar glow is gone.** 0.4.8 lit the sidebar's background with a slow wash of colour per session. It read as an animation behind the agent list and did not fit this app, so it is removed: the sidebar is flat again, with no colour and nothing moving behind it. The two effects that only appear when something happens stay — the burst over a pane whose session starts waiting with the hover beam to its pane, and the pace streaks on the Session bar — under one switch, Layout → *Attention effects*.
+
 ## 0.4.8 — 2026-09-16
 
-- **Session glow.** The sidebar's background is faintly lit by your sessions, drawn on the GPU (WebGPU, via vgpu): a broad wash in each provider's colour, drifting and breathing while a session runs, stiller and dimmer when it is idle, and red — pulsing, with a burst the moment it happens — rising from wherever a session is waiting on you. Atmosphere, not outline: the same signal as the tray badge, readable at a glance while the workspace is up.
+- **Session glow.** The sidebar's background is faintly lit by your sessions, drawn on the GPU (WebGPU, via vgpu): a broad wash in each provider's colour, drifting and breathing while a session runs, stiller and dimmer when it is idle, and red — pulsing, with a burst the moment it happens — rising from wherever a session is waiting on you. Atmosphere, not outline: the same signal as the tray badge, readable at a glance while the workspace is up. It runs only while the workspace is open, at a modest frame rate, and parks itself when there is nothing to draw; a machine without WebGPU simply does not show it. Off switch in the Layout popover (*Session glow*) and the palette. (Removed in 0.4.9.)
 - **Attention over the grid.** When a session flips to waiting, a red burst spreads from the header of the pane it runs in and fades in about a second. Hover a session in the sidebar and a soft beam connects it to its pane, so which pane is which never needs reading. Nothing is drawn between those moments.
 - **Burn rate on the Session bar.** While the app is projecting when your session window hits its limit, streaks of light travel along the bar's fill — more and faster the quicker you are burning through it. A bar shows level; this shows speed. No projection, no streaks.
-- Both shaders are pixel-tested headlessly in `npm test` (red where a waiting session is and nowhere else; streaks only inside the fill), skipped with a reason on a machine with no GPU device. It runs only while the workspace is open, at a modest frame rate, and parks itself when there is nothing to draw; a machine without WebGPU simply does not show it. Off switch in the Layout popover (*Session glow*) and the palette.
+- Both shaders are pixel-tested headlessly in `npm test` (red where a waiting session is and nowhere else; streaks only inside the fill), skipped with a reason on a machine with no GPU device.
 
 ## 0.4.7 — 2026-09-15
 

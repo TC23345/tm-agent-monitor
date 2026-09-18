@@ -1,13 +1,14 @@
 /**
- * The session field: what the WebGPU glow behind the sidebar draws, decided
- * here as data so the renderer only measures rows and uploads a buffer.
+ * What the attention layer (AttentionLayer.tsx) draws, decided here as data
+ * so the renderer only measures elements and uploads a buffer: soft lights
+ * ("glows") for a burst over a pane and a beam from a row to its pane.
  *
- * One glow per session row. Colour is identity or attention — the provider's
- * saturated colour, or `--st-question` red only when the session waits on a
- * person (the app's one meaning for red). Intensity, motion, and pulse come
- * from the state: a running session drifts and breathes, an idle one sits
- * still and dim, a waiting one pulses. A flare is the 0→waiting edge: a burst
- * that decays over `FLARE_MS`, so the eye is pulled to the row that just asked.
+ * Colour is identity or attention — the provider's saturated colour, or
+ * `--st-question` red only for a session waiting on a person (the app's one
+ * meaning for red). A flare is the 0→waiting edge: a burst that decays over
+ * `FLARE_MS`. There was once an always-on wash behind the sidebar built on
+ * this (0.4.8); the user removed it as wrong for this app — ambient,
+ * full-surface effects belong to other projects. Keep this on-demand only.
  *
  * `packField` lays the glows out exactly as `field.wgsl` declares its uniform
  * (`Field { head: vec4f, glows: array<Glow, MAX_GLOWS> }`, each Glow three
@@ -42,21 +43,6 @@ export function seedFor(id) {
   return h / 0x100000000
 }
 
-/** Colour and character of one session's glow, from its state alone. */
-export function glowFor(agent) {
-  const provider = PROVIDER_RGB[agent?.provider] ?? PROVIDER_RGB.claude
-  switch (agent?.state) {
-    // A wash, not a halo: these are low on purpose. The sidebar's background
-    // should read as faintly lit from somewhere, never as a row being outlined.
-    case 'waiting':
-      return { color: ATTENTION_RGB, intensity: 0.22, motion: 0, pulse: 1 }
-    case 'running':
-      return { color: provider, intensity: 0.11, motion: 1, pulse: 0.35 }
-    default:
-      return { color: provider, intensity: 0.05, motion: 0, pulse: 0 }
-  }
-}
-
 /** 1 at the moment of the flare, easing to 0 by `duration`; 0 outside that window. */
 export function flareStrength(now, flareAt, duration = FLARE_MS) {
   if (!Number.isFinite(flareAt) || !Number.isFinite(now)) return 0
@@ -84,48 +70,6 @@ export function trackFlares(prev, agents, now) {
     else if (old.has(a.id) && flareStrength(now, old.get(a.id)) > 0) flares.set(a.id, old.get(a.id))
   }
   return { states, flares }
-}
-
-/**
- * The glows to draw this frame: an ambient wash over the whole sidebar
- * (`size`, in css px), one broad light per session. A session whose row is
- * on screen (`rects`, canvas px) is anchored loosely at that row's height, so
- * a red wash rises from roughly where the waiting session sits; a session
- * with no row — the list scrolled, or the agent list living in a pane —
- * takes an even slot down the sidebar instead, so the wash never depends on
- * the list being visible. Waiting sessions come first so the cap never drops
- * one of them.
- */
-export function fieldGlows(agents, rects, flares, now, size) {
-  const out = []
-  const w = Math.max(size?.w ?? 0, 1)
-  const h = Math.max(size?.h ?? 0, 1)
-  const list = [...(agents ?? [])].filter((a) => a && typeof a.id === 'string')
-  list.sort((a, b) => Number(b.state === 'waiting') - Number(a.state === 'waiting'))
-  const n = Math.min(list.length, MAX_GLOWS)
-  const rx = w * 0.75
-  const ry = Math.max(h * 0.16, 90)
-  for (let i = 0; i < n; i++) {
-    const a = list[i]
-    const r = rects?.get(a.id)
-    const g = glowFor(a)
-    // Off-centre horizontally by seed so two lights never stack into one.
-    const seed = seedFor(a.id)
-    out.push({
-      id: a.id,
-      x: w * (0.35 + 0.3 * seed),
-      y: r ? r.y + r.h / 2 : h * ((i + 0.5) / n),
-      rx,
-      ry,
-      color: g.color,
-      intensity: g.intensity,
-      motion: g.motion,
-      pulse: g.pulse,
-      flare: flareStrength(now, flares?.get(a.id)),
-      seed
-    })
-  }
-  return out
 }
 
 /**

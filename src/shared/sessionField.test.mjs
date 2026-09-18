@@ -2,33 +2,16 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   ATTENTION_RGB, FIELD_FLOATS, FLARE_MS, FLOATS_PER_GLOW, HEADER_FLOATS, MAX_GLOWS, PROVIDER_RGB,
-  beamGlows, fieldGlows, flareGlow, flareStrength, glowFor, layerGlows, packField, rampStrength, seedFor, trackFlares
+  beamGlows, flareGlow, flareStrength, layerGlows, packField, rampStrength, seedFor, trackFlares
 } from './sessionField.mjs'
 
 const agent = (id, state, provider = 'claude') => ({ id, provider, state })
-const rect = (y, h = 40) => ({ x: 8, y, w: 360, h })
 
 test('seedFor is stable, in [0, 1), and differs between ids', () => {
   assert.equal(seedFor('claude:a1'), seedFor('claude:a1'))
   const seeds = ['claude:a1', 'codex:a2', 'cursor:x', ''].map(seedFor)
   for (const s of seeds) assert.ok(s >= 0 && s < 1, String(s))
   assert.equal(new Set(seeds).size, seeds.length)
-})
-
-test('glowFor: red only for waiting, provider colour otherwise, idle dim and still', () => {
-  assert.deepEqual(glowFor(agent('a', 'waiting', 'codex')).color, ATTENTION_RGB)
-  assert.equal(glowFor(agent('a', 'waiting')).pulse, 1)
-  assert.equal(glowFor(agent('a', 'waiting')).motion, 0)
-  const run = glowFor(agent('a', 'running', 'codex'))
-  assert.deepEqual(run.color, PROVIDER_RGB.codex)
-  assert.equal(run.motion, 1)
-  const idle = glowFor(agent('a', 'idle', 'cursor'))
-  assert.deepEqual(idle.color, PROVIDER_RGB.cursor)
-  assert.equal(idle.motion, 0)
-  assert.equal(idle.pulse, 0)
-  assert.ok(idle.intensity < run.intensity && run.intensity < glowFor(agent('a', 'waiting')).intensity)
-  // An unknown provider still draws, in a known colour.
-  assert.deepEqual(glowFor({ provider: 'other', state: 'complete' }).color, PROVIDER_RGB.claude)
 })
 
 test('flareStrength: 1 at the edge, eased to 0 by the end, 0 outside and for no flare', () => {
@@ -61,44 +44,9 @@ test('trackFlares starts a flare on the edge into waiting and drops burnt-out on
   assert.deepEqual([...track.flares], [['a', t0 + 3100]])
 })
 
-const SIZE = { w: 400, h: 1000 }
-
-test('fieldGlows: a broad light per session, anchored at its row when it has one, waiting first', () => {
-  const agents = [agent('a', 'running'), agent('b', 'waiting', 'codex'), agent('c', 'idle')]
-  const rects = new Map([['a', rect(100)], ['b', rect(150)]])
-  const flares = new Map([['b', 5000]])
-  const glows = fieldGlows(agents, rects, flares, 5000, SIZE)
-  assert.deepEqual(glows.map((g) => g.id), ['b', 'a', 'c'])
-  const b = glows[0]
-  assert.equal(b.y, 150 + 20)
-  assert.equal(b.rx, 300, 'most of the sidebar width')
-  assert.equal(b.ry, 160, 'a slice of its height')
-  assert.ok(b.x >= 140 && b.x <= 260, `x stays in the middle band: ${b.x}`)
-  assert.deepEqual(b.color, ATTENTION_RGB)
-  assert.equal(b.flare, 1)
-  assert.equal(glows[1].flare, 0)
-  assert.equal(glows[1].seed, seedFor('a'))
-  // c has no row: it takes the last of three even slots down the sidebar.
-  assert.equal(glows[2].y, 1000 * (2.5 / 3))
-})
-
-test('fieldGlows never depends on the rows being visible', () => {
-  const agents = [agent('a', 'running'), agent('b', 'idle')]
-  const glows = fieldGlows(agents, new Map(), new Map(), 0, SIZE)
-  assert.deepEqual(glows.map((g) => g.y), [250, 750])
-  assert.equal(fieldGlows(agents, undefined, undefined, 0, { w: 0, h: 0 }).length, 2, 'a zero-size canvas still packs cleanly')
-})
-
-test('fieldGlows caps at MAX_GLOWS without losing a waiting session', () => {
-  const agents = []
-  for (let i = 0; i < MAX_GLOWS + 5; i++) agents.push(agent(`s${i}`, i === MAX_GLOWS + 3 ? 'waiting' : 'running'))
-  const glows = fieldGlows(agents, new Map(), new Map(), 0, SIZE)
-  assert.equal(glows.length, MAX_GLOWS)
-  assert.equal(glows[0].id, `s${MAX_GLOWS + 3}`)
-})
-
 test('packField lays the header and each glow out as field.wgsl declares them', () => {
-  const glows = fieldGlows([agent('a', 'waiting'), agent('b', 'running', 'codex')], new Map([['a', rect(0)], ['b', rect(50)]]), new Map([['a', 100]]), 100, SIZE)
+  const glow = (id, x, color, intensity) => ({ id, x, y: 40, rx: 30, ry: 20, color, intensity, motion: 1, pulse: 0.35, flare: 0, seed: seedFor(id) })
+  const glows = [glow('a', 10.5, ATTENTION_RGB, 0.22), glow('b', 248.3, PROVIDER_RGB.codex, 0.11)]
   const data = packField(glows, { time: 2.5, sx: 2, sy: 2 })
   assert.equal(data.length, FIELD_FLOATS)
   assert.equal(FIELD_FLOATS, HEADER_FLOATS + MAX_GLOWS * FLOATS_PER_GLOW)

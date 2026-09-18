@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react'
 
 /**
  * Whether the GPU layers may draw: the workspace is open and the user has
- * not switched the session glow off. App sets it; the session field, the
+ * not switched the attention effects off. App sets it; the
  * attention layer, and the quota streams read it, so a bar deep in the
  * Limits section needs no prop chain to know the window is hidden.
  */

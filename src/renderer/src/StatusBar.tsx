@@ -25,7 +25,7 @@ interface Props {
   onPaneCols: (cols: PaneCols) => void
   canResetSizes: boolean
   onResetSizes: () => void
-  /** The session field — the glow behind the sidebar's session rows. */
+  /** The on-demand GPU effects: pane burst, hover beam, Session-bar streaks. */
   fieldOn: boolean
   onToggleField: () => void
   /** Named layouts: save the current one, apply or forget a saved one. */
@@ -152,8 +152,8 @@ export function StatusBar(props: Props) {
               <div className="menu-sep" />
               <MenuCheckItem
                 icon={<Sparkles strokeWidth={2} />}
-                label="Session glow"
-                hint="A soft glow behind each session in the sidebar — its provider's colour, breathing while it runs, red when it waits on you"
+                label="Attention effects"
+                hint="A burst over a pane when its session starts waiting, a beam from a hovered session to its pane, and pace streaks on the Session bar"
                 checked={fieldOn}
                 onClick={onToggleField}
               />

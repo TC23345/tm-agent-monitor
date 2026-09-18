@@ -1,7 +1,7 @@
 import { Device, bind, createBindGroup, createBindGroupLayout, createPipelineLayout, type Buffer as GpuBuffer } from '@vgpu/core'
 
 /**
- * The one WebGPU device the GPU layers share (the session field, the
+ * The one WebGPU device the GPU layers share (the
  * attention layer, the quota streams), and the per-canvas plumbing each of
  * them needs: a configured context, a pipeline for its fullscreen shader, and
  * one uniform buffer. Every layer draws the same way — one clear, one
