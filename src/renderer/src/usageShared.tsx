@@ -1,4 +1,5 @@
 import { useNow } from './useNow'
+import { QuotaStream } from './QuotaStream'
 import type { ProviderId, Quota, UsageAccount } from '@shared/types'
 import { resetsIn, resetClock } from './format'
 
@@ -43,7 +44,11 @@ export function ProviderDot({ provider }: { provider: ProviderId }) {
   return <span className={`prov-dot prov-dot--${provider}`} aria-hidden="true" />
 }
 
-export function QuotaBar({ q, hint }: { q: Quota; hint?: string }) {
+/**
+ * `pace` is main's projection of when this window hits its limit; given, the
+ * track carries the burn-rate stream (QuotaStream) — speed on top of level.
+ */
+export function QuotaBar({ q, hint, pace }: { q: Quota; hint?: string; pace?: number }) {
   const now = useNow()
   const sev = q.severity ?? 'normal'
   // A spent window is a fact, not a measurement: what matters is when it comes
@@ -59,7 +64,10 @@ export function QuotaBar({ q, hint }: { q: Quota; hint?: string }) {
         </span>
         <span className={`quota-pct sev-${sev}`}>{spent ? 'spent' : `${Math.round(q.usedPct)}%`}</span>
       </div>
-      <div className="quota-track"><div className={`quota-fill quota-fill--${q.tone} sev-${sev}`} style={{ width: `${Math.min(100, q.usedPct)}%` }} /></div>
+      <div className="quota-track">
+        <div className={`quota-fill quota-fill--${q.tone} sev-${sev}`} style={{ width: `${Math.min(100, q.usedPct)}%` }} />
+        {pace !== undefined && !spent && <QuotaStream q={q} projectedLimitAt={pace} />}
+      </div>
     </div>
   )
 }

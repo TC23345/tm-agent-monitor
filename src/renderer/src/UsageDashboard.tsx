@@ -28,7 +28,7 @@ function ProviderLimits({ provider, accounts }: { provider: ProviderId; accounts
       ) : (
         accounts.map((account) => (
           <Fragment key={account.id}>
-            {account.session && <QuotaBar q={account.session} hint="Provider session usage window" />}
+            {account.session && <QuotaBar q={account.session} hint="Provider session usage window" pace={account.projectedLimitAt} />}
             {account.projectedLimitAt !== undefined && (
               <div className={`pace sev-${account.session?.severity === 'critical' ? 'critical' : 'warning'}`}>
                 on pace to hit the limit ~{clockTime(account.projectedLimitAt)}

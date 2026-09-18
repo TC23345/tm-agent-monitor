@@ -12,7 +12,7 @@ struct Glow {
 
 struct Field {
   head: vec4f,
-  glows: array<Glow, 24>,
+  glows: array<Glow, 40>,
 }
 
 @group(0) @binding(0) var<uniform> field: Field;
@@ -53,7 +53,7 @@ fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let p = pos.xy * field.head.yz;
   var rgb = vec3f(0.0);
   var sum = 0.0;
-  for (var i = 0u; i < 24u; i = i + 1u) {
+  for (var i = 0u; i < 40u; i = i + 1u) {
     if (i >= count) { break; }
     let g = field.glows[i];
     let motion = g.c.x;

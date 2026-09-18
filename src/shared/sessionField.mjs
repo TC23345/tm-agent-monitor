@@ -14,7 +14,7 @@
  * vec4f), so the two must move together.
  */
 
-export const MAX_GLOWS = 24
+export const MAX_GLOWS = 40
 export const FLOATS_PER_GLOW = 12
 export const HEADER_FLOATS = 4
 export const FIELD_FLOATS = HEADER_FLOATS + MAX_GLOWS * FLOATS_PER_GLOW
@@ -158,4 +158,86 @@ export function packField(glows, head, out) {
     data[o + 11] = g.seed
   }
   return data
+}
+
+/* ---- The attention layer over the grid (AttentionLayer.tsx) draws with the
+   same shader and the same packing: a burst over the pane whose session just
+   asked, and a beam from a hovered row to its pane. Both are on-demand; the
+   layer parks whenever this returns nothing. ---- */
+
+/** 0→1 over `ms` from `since`: the beam's fade-in. */
+export function rampStrength(now, since, ms = 180) {
+  if (!Number.isFinite(since) || !Number.isFinite(now) || ms <= 0) return 0
+  return Math.max(0, Math.min(1, (now - since) / ms))
+}
+
+/** The burst over a pane whose session just asked: red, wide, gone in FLARE_MS. */
+export function flareGlow({ id, x, y, w, strength }) {
+  if (!(strength > 0)) return null
+  return {
+    id: String(id),
+    x, y,
+    rx: Math.max(w ?? 0, 120) * 0.6,
+    ry: 110,
+    color: ATTENTION_RGB,
+    intensity: 0.35 * strength,
+    motion: 0, pulse: 0,
+    flare: strength,
+    seed: seedFor(id)
+  }
+}
+
+/**
+ * A soft beam from a sidebar row (`from`, its right edge) to the pane that
+ * runs the session (`to`, its header centre; `to.w` the header width): a
+ * quadratic curve that leaves the row horizontally, drawn as a chain of small
+ * lights closer together than their radius, then a wider pool where it lands.
+ */
+export function beamGlows({ from, to, color, strength = 1, points, radius }) {
+  const out = []
+  if (!from || !to || !(strength > 0)) return out
+  // Enough lights that a long beam stays a line: spacing under the radius.
+  const dist = Math.hypot(to.x - from.x, to.y - from.y)
+  const n = points ?? Math.max(8, Math.min(34, Math.round(dist / 28)))
+  const r = radius ?? Math.max(22, (dist / n) * 0.8)
+  const cx = (from.x + to.x) / 2
+  const cy = from.y
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n
+    const a = (1 - t) * (1 - t)
+    const b = 2 * (1 - t) * t
+    const c = t * t
+    out.push({
+      id: `beam:${i}`,
+      x: a * from.x + b * cx + c * to.x,
+      y: a * from.y + b * cy + c * to.y,
+      rx: r, ry: r,
+      color,
+      intensity: 0.15 * strength,
+      motion: 0, pulse: 0, flare: 0,
+      seed: i / n
+    })
+  }
+  out.push({
+    id: 'beam:end',
+    x: to.x, y: to.y,
+    rx: Math.min(280, Math.max(to.w ?? 0, 80) * 0.5),
+    ry: 48,
+    color,
+    intensity: 0.18 * strength,
+    motion: 0, pulse: 0, flare: 0,
+    seed: 0.5
+  })
+  return out
+}
+
+/** Everything the layer draws this frame, capped. Flares first: they are the point. */
+export function layerGlows({ flares = [], beam = null } = {}) {
+  const out = []
+  for (const f of flares) {
+    const g = flareGlow(f)
+    if (g) out.push(g)
+  }
+  if (beam) out.push(...beamGlows(beam))
+  return out.slice(0, MAX_GLOWS)
 }

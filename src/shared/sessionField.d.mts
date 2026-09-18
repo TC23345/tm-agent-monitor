@@ -36,3 +36,11 @@ export function fieldGlows(
   size: { w: number; h: number }
 ): Glow[]
 export function packField(glows: readonly Glow[], head: FieldHead, out?: Float32Array): Float32Array
+
+export interface Point { x: number; y: number; w?: number }
+export interface FlareSpec { id: string; x: number; y: number; w?: number; strength: number }
+export interface BeamSpec { from: Point; to: Point; color: RGB; strength?: number; points?: number; radius?: number }
+export function rampStrength(now: number, since: number | undefined, ms?: number): number
+export function flareGlow(spec: FlareSpec): Glow | null
+export function beamGlows(spec: BeamSpec): Glow[]
+export function layerGlows(spec?: { flares?: readonly FlareSpec[]; beam?: BeamSpec | null }): Glow[]

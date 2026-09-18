@@ -12,6 +12,8 @@ import { HistoryPane, InsightsPane, SpendPane } from './UsagePane'
 import { TopBar, type MenuName } from './TopBar'
 import { EdgeGrip } from './EdgeGrip'
 import { SessionField } from './SessionField'
+import { AttentionLayer } from './AttentionLayer'
+import { setFieldActive } from './fieldActive'
 import { StatusBar, type StatusMenu } from './StatusBar'
 import { Pane } from './Pane'
 import type { TerminalPaneHandle } from './TerminalPane'
@@ -183,6 +185,9 @@ export function App() {
   // Drives the slide-up / slide-down transition. Starts closed so the very first
   // painted frame is already off-screen and the card rises into place.
   const [open, setOpen] = useState(false)
+  // The GPU layers (field, attention layer, quota streams) draw only while the
+  // workspace is open and the glow is on; they read this, not a prop chain.
+  useEffect(() => { setFieldActive(open && fieldOn) }, [open, fieldOn])
   useEffect(() => {
     window.watch.getStatus().then(setSnap)
     const off = window.watch.onStatus(setSnap)
@@ -1076,8 +1081,9 @@ export function App() {
 
 
       <div className="frame" ref={frameRef}>
+        <AttentionLayer agents={agents} panes={panes} />
         <aside className="sidebar" style={{ flexBasis: sidebarWidth }}>
-          <SessionField agents={agents} active={open && fieldOn} />
+          <SessionField agents={agents} />
           <LaunchNav
             context={context}
             projects={launchProjects}

@@ -245,8 +245,22 @@ kbd {
 .frame {
   flex: 1 1 auto;
   min-height: 0;
+  position: relative; /* the attention layer canvas is placed against it */
   display: flex;
   align-items: stretch;
+}
+/* The attention layer (AttentionLayer.tsx): a WebGPU canvas over sidebar and
+   grid, drawing only the moment something happens (a burst over a pane whose
+   session just asked, a beam from a hovered row to its pane). Above the panes
+   and their drop indicators, below every popover (60) and the edge grips (40). */
+.attn-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 30;
+  pointer-events: none;
+  display: block;
 }
 /* Coding-agent details live here, always visible whatever the panes show. */
 .sidebar {
@@ -506,7 +520,9 @@ kbd {
 .quota.is-spent .quota-label { color: var(--text); }
 .quota-pct.sev-warning { color: var(--pressure); }
 .quota-pct.sev-critical { color: var(--pressure-hot); }
-.quota-track { height: 6px; border-radius: 4px; background: var(--track); overflow: hidden; }
+.quota-track { position: relative; height: 6px; border-radius: 4px; background: var(--track); overflow: hidden; }
+/* The burn-rate stream (QuotaStream.tsx) rides on the track, over the fill. */
+.quota-stream { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; display: block; }
 .quota-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
 .quota-fill--amber { background: linear-gradient(90deg, var(--accent-bright), var(--accent)); }
 .quota-fill--blue { background: linear-gradient(90deg, #7fb0ff, var(--st-running)); }

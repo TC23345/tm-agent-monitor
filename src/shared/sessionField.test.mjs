@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   ATTENTION_RGB, FIELD_FLOATS, FLARE_MS, FLOATS_PER_GLOW, HEADER_FLOATS, MAX_GLOWS, PROVIDER_RGB,
-  fieldGlows, flareStrength, glowFor, packField, seedFor, trackFlares
+  beamGlows, fieldGlows, flareGlow, flareStrength, glowFor, layerGlows, packField, rampStrength, seedFor, trackFlares
 } from './sessionField.mjs'
 
 const agent = (id, state, provider = 'claude') => ({ id, provider, state })
@@ -116,4 +116,47 @@ test('packField lays the header and each glow out as field.wgsl declares them', 
   assert.equal(again, data)
   assert.equal(data[3], 0)
   assert.equal(data[o], 0)
+})
+
+test('rampStrength fades in over the ramp and clamps', () => {
+  assert.equal(rampStrength(1000, 1000), 0)
+  assert.equal(rampStrength(1090, 1000), 0.5)
+  assert.equal(rampStrength(2000, 1000), 1)
+  assert.equal(rampStrength(900, 1000), 0)
+  assert.equal(rampStrength(1000, undefined), 0)
+})
+
+test('flareGlow is red, wide as the pane, and gone at zero strength', () => {
+  const g = flareGlow({ id: 'claude:a1', x: 500, y: 40, w: 600, strength: 0.5 })
+  assert.deepEqual(g.color, ATTENTION_RGB)
+  assert.equal(g.rx, 360)
+  assert.equal(g.flare, 0.5)
+  assert.ok(Math.abs(g.intensity - 0.175) < 1e-9)
+  assert.equal(flareGlow({ id: 'x', x: 0, y: 0, w: 0, strength: 0 }), null)
+  assert.equal(flareGlow({ id: 'x', x: 0, y: 0, w: 10, strength: 1 }).rx, 72, 'never narrower than a small pane')
+})
+
+test('beamGlows leaves the row horizontally and lands on the pane', () => {
+  const from = { x: 400, y: 300 }
+  const to = { x: 1000, y: 100, w: 500 }
+  const glows = beamGlows({ from, to, color: PROVIDER_RGB.codex, strength: 1, points: 4 })
+  assert.equal(glows.length, 5)
+  const [first, , , last, end] = glows
+  assert.ok(first.x > from.x && first.y < from.y + 1 && first.y > from.y - 40, 'starts near the row, barely rising')
+  assert.ok(last.x < to.x && last.y > to.y, 'ends short of the pane, still descending toward it')
+  assert.equal(end.id, 'beam:end')
+  assert.deepEqual([end.x, end.y, end.rx], [1000, 100, 250])
+  assert.ok(glows.every((g) => g.color === PROVIDER_RGB.codex && g.flare === 0))
+  assert.deepEqual(beamGlows({ from, to, color: PROVIDER_RGB.codex, strength: 0 }), [])
+  assert.deepEqual(beamGlows({ from: null, to, color: PROVIDER_RGB.codex }), [])
+})
+
+test('layerGlows puts flares first and stays under the cap', () => {
+  const flares = Array.from({ length: 3 }, (_, i) => ({ id: `f${i}`, x: i, y: 0, w: 100, strength: 1 }))
+  const beam = { from: { x: 0, y: 0 }, to: { x: 100, y: 0, w: 100 }, color: PROVIDER_RGB.claude, points: 50 }
+  const glows = layerGlows({ flares, beam })
+  assert.equal(glows.length, MAX_GLOWS)
+  assert.deepEqual(glows.slice(0, 3).map((g) => g.id), ['f0', 'f1', 'f2'])
+  assert.deepEqual(layerGlows(), [])
+  assert.deepEqual(layerGlows({ flares: [{ id: 'z', x: 0, y: 0, w: 1, strength: 0 }] }), [])
 })

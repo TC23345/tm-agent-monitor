@@ -12,3 +12,7 @@ logs
 
 # Claude Code worktrees (local scratch checkouts)
 .claude/worktrees
+
+# Screenshots the electron-debug MCP saves into the repo root
+/*.png
+/*.png.encrypted
