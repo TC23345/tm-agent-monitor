@@ -1,7 +1,8 @@
-import { ChevronUp, Columns3, LayoutGrid, LayoutTemplate, Monitor, PanelLeft, PanelRight, RefreshCw, Ruler, Save, Sparkles, Trash2 } from 'lucide-react'
+import { ChevronUp, Columns3, LayoutGrid, LayoutTemplate, Monitor, Palette, PanelLeft, PanelRight, RefreshCw, Ruler, Save, Sparkles, Trash2 } from 'lucide-react'
 import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
 import { MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, isUniqueKind, type PaneCols, type PaneInstance, type PaneKind, type SidebarView } from './panes'
 import type { SizeMode } from '@shared/types'
+import { TERMINAL_THEMES } from '@shared/terminalThemes.mjs'
 import { tid } from './testid'
 
 /** The status bar's popovers. Held in App's single `openMenu`, like every menu. */
@@ -28,6 +29,9 @@ interface Props {
   /** The on-demand GPU effects: pane burst, hover beam, Session-bar streaks. */
   fieldOn: boolean
   onToggleField: () => void
+  /** The embedded terminals' colour theme; Default is the reset. */
+  termTheme: string
+  onTermTheme: (id: string) => void
   /** Named layouts: save the current one, apply or forget a saved one. */
   layouts: string[]
   onSaveLayout: () => void
@@ -56,7 +60,7 @@ export function StatusBar(props: Props) {
   const {
     rebuild, onRebuild, panes, onAddPane, onClosePane, sidebarViews, onToggleSidebarView,
     sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, fieldOn, onToggleField,
-    layouts, onSaveLayout, onApplyLayout, onDeleteLayout, openMenu, onOpenMenu, version, debugPort
+    termTheme, onTermTheme, layouts, onSaveLayout, onApplyLayout, onDeleteLayout, openMenu, onOpenMenu, version, debugPort
   } = props
   const full = panes.length >= MAX_PANES
   const warn = rebuild.msg ? /failed|no repo|no installer|dev build|could not/.test(rebuild.msg) : false
@@ -157,6 +161,19 @@ export function StatusBar(props: Props) {
                 checked={fieldOn}
                 onClick={onToggleField}
               />
+              <div className="menu-sep" />
+              <div className="menu-label"><Palette className="menu-label-ic" strokeWidth={2} />Terminal theme</div>
+              {TERMINAL_THEMES.map((t) => (
+                <MenuCheckItem
+                  key={t.id}
+                  icon={<span className="theme-swatch" style={{ background: t.theme.background, borderColor: t.theme.blue ?? t.theme.cursor }} />}
+                  label={t.label}
+                  hint={t.hint}
+                  checked={termTheme === t.id}
+                  onClick={() => onTermTheme(t.id)}
+                  testId={tid('term-theme', t.id)}
+                />
+              ))}
               <div className="menu-sep" />
               <div className="menu-label"><LayoutTemplate className="menu-label-ic" strokeWidth={2} />Saved layouts</div>
               <MenuItem icon={<Save strokeWidth={2} />} label="Save current layout…" hint="Panes, sizes, and sidebar views under a name" onClick={run(onSaveLayout)} />

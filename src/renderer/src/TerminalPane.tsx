@@ -3,19 +3,13 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { RotateCcw } from 'lucide-react'
 import type { TerminalPaneConfig } from './panes'
+import { terminalContrast, terminalTheme } from '@shared/terminalThemes.mjs'
 import '@xterm/xterm/css/xterm.css'
-
-/** Matches the pane surface: --card under the pane's 16% black overlay. */
-const TERM_THEME = {
-  background: '#17161b',
-  foreground: '#eceae6',
-  cursor: '#d97757',
-  cursorAccent: '#17161b',
-  selectionBackground: 'rgba(217, 119, 87, 0.32)'
-}
 
 interface Props {
   config: TerminalPaneConfig
+  /** The picked colour theme (`tm.termTheme.v1`); changes apply live. */
+  themeId: string
   /** Persist the live session id so a remounted pane reattaches instead of respawning. */
   onConfig: (patch: Partial<TerminalPaneConfig>) => void
 }
@@ -34,7 +28,7 @@ export interface TerminalPaneHandle {
  * session survives hide/show and pane remounts (scrollback is replayed on
  * reattach); it does not survive an app restart — a stale id starts fresh.
  */
-export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function TerminalPane({ config, onConfig }, ref) {
+export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function TerminalPane({ config, onConfig, themeId }, ref) {
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const [exited, setExited] = useState<number | null>(null)
@@ -45,6 +39,18 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function Termi
   onConfigRef.current = onConfig
   const configRef = useRef(config)
   configRef.current = config
+  const theme = terminalTheme(themeId)
+  const contrast = terminalContrast(themeId)
+  const themeRef = useRef({ theme, contrast })
+  themeRef.current = { theme, contrast }
+
+  // A new pick repaints the running terminal; the session is untouched.
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    term.options.theme = theme
+    term.options.minimumContrastRatio = contrast
+  }, [theme, contrast])
 
   useEffect(() => {
     const host = hostRef.current
@@ -56,7 +62,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function Termi
       fontSize: 13,
       lineHeight: 1.2,
       scrollback: 5000,
-      theme: TERM_THEME
+      theme: themeRef.current.theme,
+      minimumContrastRatio: themeRef.current.contrast
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -212,7 +219,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function Termi
   }), [])
 
   return (
-    <div className="termpane">
+    // The padding around xterm is the pane's, so it takes the theme's background too.
+    <div className="termpane" style={{ background: theme.background }}>
       <div className="termpane-host" ref={hostRef} />
       {(exited !== null || failed) && (
         <div className="termpane-overlay">

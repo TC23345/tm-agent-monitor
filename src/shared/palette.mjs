@@ -89,7 +89,7 @@ export function commandGroup(id) {
   if (/^run:/.test(key)) return 'Run'
   if (/^(cursor|chrome|new-project|projects-dir|collapse|waiting|reset-order)$/.test(key)) return 'Project'
   if (/^(activity|notes|usage|spend|insights|history|add-|zoom:|close:|view:)/.test(key)) return 'Panes'
-  if (/^(size-|cols-|reset-sizes|save-layout|layout:|layout-delete:|field$)/.test(key)) return 'Layout'
+  if (/^(size-|cols-|reset-sizes|save-layout|layout:|layout-delete:|term-theme:|field$)/.test(key)) return 'Layout'
   if (/^(settings|rebuild|hide|quit)$/.test(key)) return 'App'
   return 'Other'
 }

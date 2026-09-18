@@ -50,10 +50,11 @@ import { LaunchNav, type LaunchTarget, type NavMenu } from './LaunchNav'
 import {
   AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Code2 as CursorIcon, Columns3, Copy,
   Eye, EyeOff, FilePlus2, Filter, Folder, FolderOpen, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
-  NotebookPen, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, Rss, Ruler, Save, Shrink, Sparkles, SquareSlash,
+  NotebookPen, Palette, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, Rss, Ruler, Save, Shrink, Sparkles, SquareSlash,
   SquareTerminal, Terminal, Trash2, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
+import { DEFAULT_TERMINAL_THEME, TERMINAL_THEMES, TERMINAL_THEME_KEY, readTerminalTheme } from '@shared/terminalThemes.mjs'
 
 /** Most columns the viewport can hold before panes get crushed — the former
  * CSS breakpoints (styles.css), moved here so an explicit column choice and
@@ -162,6 +163,15 @@ export function App() {
     try { localStorage.setItem('tm.field.v1', v ? '0' : '1') } catch { /* preference only */ }
     return !v
   })
+  /** The embedded terminals' colour theme — Default unless picked; remembered. */
+  const [termTheme, setTermTheme] = useState<string>(() => {
+    try { return readTerminalTheme(localStorage.getItem(TERMINAL_THEME_KEY)) } catch { return DEFAULT_TERMINAL_THEME }
+  })
+  const pickTermTheme = (id: string) => {
+    const next = readTerminalTheme(id)
+    try { localStorage.setItem(TERMINAL_THEME_KEY, next) } catch { /* preference only */ }
+    setTermTheme(next)
+  }
   const [frameW, setFrameW] = useState(() => window.innerWidth)
   const frameRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLElement>(null)
@@ -703,6 +713,7 @@ export function App() {
               }}
               config={pane.term!}
               onConfig={(patch) => updateTerm(pane.id, patch)}
+              themeId={termTheme}
             />
           </Suspense>
         )
@@ -979,6 +990,9 @@ export function App() {
     }
     if (sized) cmd('reset-sizes', 'Reset pane sizes', resetSizes, { icon: <Ruler strokeWidth={2} />, keywords: ['layout', 'splitter'] })
     cmd('field', `Attention effects: ${fieldOn ? 'off' : 'on'}`, toggleField, { icon: <Sparkles strokeWidth={2} />, keywords: ['field', 'glow', 'gpu', 'webgpu', 'beam', 'burst', 'streaks'] })
+    for (const t of TERMINAL_THEMES) {
+      cmd(`term-theme:${t.id}`, `Terminal theme: ${t.label}`, () => pickTermTheme(t.id), { icon: <Palette strokeWidth={2} />, detail: termTheme === t.id ? 'current' : t.hint, keywords: ['color', 'colour', 'scheme', 'appearance', 'reset', 'xterm'] })
+    }
     if (!full) {
       for (const c of projectCommands) {
         cmd(`run:${c.command}`, `Run: ${c.label}`, () => runProjectCommand(c), { icon: <Play strokeWidth={2} />, detail: `${c.command} · ${context.label ?? 'this folder'}`, keywords: ['project', 'script', 'npm', c.command] })
@@ -1250,6 +1264,8 @@ export function App() {
         onResetSizes={resetSizes}
         fieldOn={fieldOn}
         onToggleField={toggleField}
+        termTheme={termTheme}
+        onTermTheme={pickTermTheme}
         layouts={layoutNames}
         onSaveLayout={() => setLayoutDialog(true)}
         onApplyLayout={applyLayout}

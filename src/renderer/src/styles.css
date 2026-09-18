@@ -218,6 +218,8 @@ kbd {
   color: var(--muted);
 }
 .menu-item-ic svg { width: 16px; height: 16px; }
+/* Terminal theme picker: the theme's background, ringed in its blue. */
+.theme-swatch { width: 14px; height: 14px; border-radius: 4px; border: 2px solid; box-sizing: border-box; }
 .menu-item:disabled .menu-item-ic { color: var(--faint); }
 /* Right-aligned check that keeps its slot when unchecked, so rows never reflow. */
 .menu-check { margin-left: auto; display: flex; align-items: center; color: var(--text); }
