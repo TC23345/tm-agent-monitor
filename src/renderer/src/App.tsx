@@ -434,13 +434,21 @@ export function App() {
   }
   const health = { providers: snap?.providers, mock: !!snap?.mock }
   const noHooks = !!snap && !snap.mock && Object.values(snap.providers).every((h) => !h.reporting)
-  // Providers whose hooks are not installed at all — the first-run offer.
-  const hookOffer = (['claude', 'codex'] as const).filter((p) => snap && !snap.providers[p]?.installed)
-  const installHooks = (provider: 'claude' | 'codex') => {
+  // The first-run offer, per provider: `install` when none of our hooks are on
+  // disk, `repair` when ours are there but written for another copy of the app
+  // (a dev checkout's bridge path). Those still report, so they must not read
+  // as "no hooks" — the same rule as the connection chip in health.mjs.
+  const hookOffer = (['claude', 'codex'] as const).flatMap((p) => {
+    const h = snap?.providers[p]
+    if (!snap || h?.installed) return []
+    return [{ provider: p, action: h?.needsRepair ? 'repair' as const : 'install' as const }]
+  })
+  const hooksToRepair = hookOffer.some((o) => o.action === 'repair')
+  const setUpHooks = (provider: 'claude' | 'codex', action: 'install' | 'repair') => {
     if (hookSetup.busy) return
     setHookSetup({ busy: provider, msg: null })
-    window.watch.manageHooks(provider, 'install')
-      .then((result) => setHookSetup({ busy: null, msg: result.ok ? `${provider === 'claude' ? 'Claude Code' : 'Codex'} hooks installed — start a session and it will appear here.` : result.message }))
+    window.watch.manageHooks(provider, action)
+      .then((result) => setHookSetup({ busy: null, msg: result.ok ? `${provider === 'claude' ? 'Claude Code' : 'Codex'} hooks ${action === 'repair' ? 'repaired' : 'installed'} — start a session and it will appear here.` : result.message }))
       .catch((error) => setHookSetup({ busy: null, msg: String(error) }))
   }
 
@@ -452,18 +460,25 @@ export function App() {
         <>
           {/* First run: nothing has ever reported. Offer the hooks right here
               instead of pointing at Settings (4.3-plan.md item 8). */}
-          {hookOffer.length > 0 ? 'Nothing is reporting yet — this app hears about sessions through provider hooks.' : 'Hooks are installed but nothing has reported yet. Start Claude Code or Codex in a project.'}
+          {hooksToRepair
+            ? 'Nothing has reported yet. Hooks are installed but point at another copy of this app — they still report; repair them to point here.'
+            : hookOffer.length > 0
+              ? 'Nothing is reporting yet — this app hears about sessions through provider hooks.'
+              : 'Hooks are installed but nothing has reported yet. Start Claude Code or Codex in a project.'}
           {hookOffer.length > 0 && (
             <div className="empty-actions">
-              {hookOffer.map((p) => (
-                <button key={p} className="hotkey-btn" disabled={hookSetup.busy !== null} onClick={() => installHooks(p)} data-testid={tid('install-hooks', p)}>
-                  {hookSetup.busy === p ? 'Installing…' : `Install ${p === 'claude' ? 'Claude Code' : 'Codex'} hooks`}
+              {hookOffer.map(({ provider: p, action }) => (
+                <button key={p} className="hotkey-btn" disabled={hookSetup.busy !== null} onClick={() => setUpHooks(p, action)} data-testid={tid(`${action}-hooks`, p)}>
+                  {hookSetup.busy === p
+                    ? action === 'repair' ? 'Repairing…' : 'Installing…'
+                    : `${action === 'repair' ? 'Repair' : 'Install'} ${p === 'claude' ? 'Claude Code' : 'Codex'} hooks`}
                 </button>
               ))}
             </div>
           )}
           {hookSetup.msg && <div className="empty-note">{hookSetup.msg}</div>}
-          {hookOffer.includes('codex') && <div className="empty-note">Codex also needs its hooks trusted once: run /hooks inside Codex.</div>}
+          {/* A repaired command is a new command to Codex, so it needs trust again too. */}
+          {hookOffer.some((o) => o.provider === 'codex') && <div className="empty-note">Codex also needs its hooks trusted once: run /hooks inside Codex.</div>}
         </>
       ) : 'No active agents. Start Claude Code, Codex, or Cursor in a project.'}
     </div>

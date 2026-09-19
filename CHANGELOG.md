@@ -18,6 +18,10 @@ Layout customization, on top of the 0.3.0 workspace.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
 
+## 0.4.10 — 2026-09-18
+
+- **Hooks that work no longer read as missing.** When hooks from another copy of the app are in place (a dev checkout's `npm run hooks:install`, say), they still report — but until the first session did, the Agents list said *Nothing is reporting yet* and offered to **install** hooks you already had. It now says they are installed but point at another copy, and offers **Repair** instead, which rewrites them for this build. Install is offered only when none of this app's hooks are on disk.
+
 ## 0.4.9 — 2026-09-18
 
 - **The sidebar glow is gone.** 0.4.8 lit the sidebar's background with a slow wash of colour per session. It read as an animation behind the agent list and did not fit this app, so it is removed: the sidebar is flat again, with no colour and nothing moving behind it. The two effects that only appear when something happens stay — the burst over a pane whose session starts waiting with the hover beam to its pane, and the pace streaks on the Session bar — under one switch, Layout → *Attention effects*.
