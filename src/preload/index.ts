@@ -66,6 +66,10 @@ const api = {
   openChrome: () => ipcRenderer.send('chrome:open'),
   listWindows: (): Promise<DesktopWindow[]> => ipcRenderer.invoke('windows:list'),
   focusWindow: (hwnd: string, pid: number) => ipcRenderer.send('windows:focus', hwnd, pid),
+  /** Dock every editor/terminal/browser window on this display right of the sidebar; resolves to how many moved. */
+  tidyWindows: (): Promise<number> => ipcRenderer.invoke('windows:tidy'),
+  /** Where the grid starts (DIP from the window's left edge), so docked windows leave the sidebar in view. */
+  setDockInset: (inset: number) => ipcRenderer.send('window:dock-inset', inset),
   /** Show/hide animation cue from main, so the workspace can slide in and out. */
   onWindowPhase: (cb: (phase: 'enter' | 'exit') => void) => {
     const listener = (_e: unknown, phase: 'enter' | 'exit') => cb(phase)

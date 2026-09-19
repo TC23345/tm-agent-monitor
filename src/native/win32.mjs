@@ -56,6 +56,17 @@ function load() {
     fns.Process32FirstW = kernel32.func('bool __stdcall Process32FirstW(uintptr_t snap, _Inout_ CW_PROCESSENTRY32W *e)')
     fns.Process32NextW = kernel32.func('bool __stdcall Process32NextW(uintptr_t snap, _Inout_ CW_PROCESSENTRY32W *e)')
 
+    // Window placement (main only). dwmapi is optional: without it a placed
+    // window just keeps its invisible borders.
+    koffi.struct('CW_RECT', { left: 'int32', top: 'int32', right: 'int32', bottom: 'int32' })
+    fns.GetWindowRect = user32.func('int __stdcall GetWindowRect(uintptr_t hwnd, _Out_ CW_RECT *r)')
+    fns.IsZoomed = user32.func('int __stdcall IsZoomed(uintptr_t hwnd)')
+    fns.SetWindowPos = user32.func('int __stdcall SetWindowPos(uintptr_t hwnd, uintptr_t after, int x, int y, int cx, int cy, uint32 flags)')
+    try {
+      const dwmapi = koffi.load('dwmapi.dll')
+      fns.DwmGetWindowAttribute = dwmapi.func('int32 __stdcall DwmGetWindowAttribute(uintptr_t hwnd, uint32 attr, _Out_ CW_RECT *r, uint32 size)')
+    } catch { /* no DWM frame bounds */ }
+
     api = { koffi, EnumProc, fns, sizeofEntry: koffi.sizeof(PROCESSENTRY32W) }
   } catch (err) {
     if (process.env.CLAUDE_WATCH_DEBUG) console.error('[win32] load failed:', err.message)
@@ -361,6 +372,85 @@ export function focusHwnd(hwndStr, expectedPid) {
     return focusHwndWithApi(fns, hwnd)
   } catch (err) {
     if (process.env.CLAUDE_WATCH_DEBUG) console.error('[win32] focus failed:', err.message)
+    return false
+  }
+}
+
+const toRect = (r) => ({ x: r.left, y: r.top, width: r.right - r.left, height: r.bottom - r.top })
+
+/**
+ * A window's outer rect (GetWindowRect, invisible borders included) and the
+ * frame DWM actually draws, both in physical pixels. `frameRect` is null when
+ * DWM cannot say. Null when the window is gone.
+ */
+export function windowFrames(hwndStr) {
+  const a = load()
+  if (!a || !hwndStr) return null
+  try {
+    const hwnd = BigInt(hwndStr)
+    const outer = {}
+    if (!a.fns.GetWindowRect(hwnd, outer)) return null
+    let frameRect = null
+    if (a.fns.DwmGetWindowAttribute) {
+      const frame = {}
+      const DWMWA_EXTENDED_FRAME_BOUNDS = 9
+      if (a.fns.DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, frame, 16) === 0) frameRect = toRect(frame)
+    }
+    return { windowRect: toRect(outer), frameRect, minimized: !!a.fns.IsIconic(hwnd) }
+  } catch {
+    return null
+  }
+}
+
+/** The foreground window with its exe, or null. */
+export function foregroundWindow() {
+  const a = load()
+  if (!a) return null
+  try {
+    const hwnd = a.fns.GetForegroundWindow()
+    if (!hwnd || BigInt(hwnd) === 0n) return null
+    const pidBox = [0]
+    a.fns.GetWindowThreadProcessId(hwnd, pidBox)
+    return { hwnd: BigInt(hwnd).toString(), pid: pidBox[0], exe: processSnapshot().exeOf.get(pidBox[0]) ?? '' }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Un-minimize / un-maximize a window so it can be placed. Call before
+ * windowFrames: a maximized window's invisible borders are not its restored ones.
+ */
+export function restoreWindow(hwndStr, expectedPid) {
+  const a = load()
+  if (!a || !hwndStr) return false
+  try {
+    if (!hwndOwnedByPid(hwndStr, expectedPid)) return false
+    const hwnd = BigInt(hwndStr)
+    const SW_RESTORE = 9
+    if (a.fns.IsIconic(hwnd) || a.fns.IsZoomed(hwnd)) a.fns.ShowWindow(hwnd, SW_RESTORE)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Move and size a window (physical pixels, outer rect) without activating it or
+ * changing its Z-order. Re-checks that the HWND still belongs to `expectedPid`.
+ * Never throws.
+ */
+export function setWindowRect(hwndStr, expectedPid, rect) {
+  const a = load()
+  if (!a || !hwndStr || !rect) return false
+  try {
+    if (!hwndOwnedByPid(hwndStr, expectedPid)) return false
+    const hwnd = BigInt(hwndStr)
+    const SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010, SWP_NOOWNERZORDER = 0x0200
+    return !!a.fns.SetWindowPos(hwnd, 0, Math.round(rect.x), Math.round(rect.y), Math.round(rect.width), Math.round(rect.height),
+      SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER)
+  } catch (err) {
+    if (process.env.CLAUDE_WATCH_DEBUG) console.error('[win32] place failed:', err.message)
     return false
   }
 }

@@ -24,7 +24,8 @@ import type { scanCodexUsage, CodexRateLimits } from './codexUsage.mjs'
 import { PendingCalls, WORKER_TIMEOUT_MS, type WorkerKind } from '../shared/usageWorkerProtocol.mjs'
 import { mockSnapshot, mockHistory, mockUsageInsights, mockWindows, mockEvents } from './mock.js'
 import { parseWorkspaceArgs } from '../shared/workspaceCommand.mjs'
-import { focusHwnd, focusByPid, listDesktopWindows, available as winAvailable } from '../native/win32.mjs'
+import { focusHwnd, focusByPid, foregroundWindow, listDesktopWindows, restoreWindow, setWindowRect, windowFrames, available as winAvailable } from '../native/win32.mjs'
+import { DEFAULT_DOCK_INSET, LAUNCH_EXES, LAUNCH_WATCH_MS, TIDY_KINDS, centreInside, dockRect, outerRectFor, pickLaunchedWindow } from '../shared/placement.mjs'
 import { buildWindowList } from '../shared/windows.mjs'
 import { parseProjectCommands } from '../shared/projectCommands.mjs'
 import { parseGitStatus, type GitStatus } from '../shared/gitStatus.mjs'
@@ -70,6 +71,7 @@ interface Settings {
   mock?: boolean
   sizeMode?: SizeMode
   windowMaterial?: WindowMaterial
+  arrangeWindows?: boolean
   pushUrl?: string
   pushAfterMin?: number
   /** Set only after a real Codex hook event reaches this app installation. */
@@ -602,6 +604,7 @@ function openTerminal(cwd?: string, provider: TerminalTarget = 'claude', purpose
     return
   }
   const opts = { detached: true, stdio: 'ignore' as const, windowsHide: false }
+  watchLaunch(LAUNCH_EXES.terminal)
   const shellExe = resolveShell()
   const command = provider === 'codex' ? 'codex' : provider === 'shell' ? null : 'claude'
   const script = purpose === 'hook-trust'
@@ -641,6 +644,7 @@ function openTerminal(cwd?: string, provider: TerminalTarget = 'claude', purpose
  */
 function openInCursor(dir?: string): void {
   const opts = { detached: true, stdio: 'ignore' as const }
+  watchLaunch(LAUNCH_EXES.cursor)
   const local = process.env.LOCALAPPDATA || join(app.getPath('home'), 'AppData', 'Local')
   const exe = join(local, 'Programs', 'cursor', 'Cursor.exe')
   // With a dir, open it as a workspace. With none, force a fresh window
@@ -679,6 +683,7 @@ function openChrome(): void {
     join(local, 'Google', 'Chrome', 'Application', 'chrome.exe')
   ]
   const exe = candidates.find((p) => existsSync(p))
+  watchLaunch(LAUNCH_EXES.chrome)
   if (exe) {
     const c = spawn(exe, ['--new-window'], opts)
     c.on('error', () => chromeViaShell())
@@ -695,6 +700,73 @@ function chromeViaShell(): void {
   } catch (e) {
     console.error(`[chrome] open failed: ${e}`)
   }
+}
+
+// Outside windows land in one place: the work area right of the sidebar
+// (placement.mjs). Only windows we launch are placed automatically — raising an
+// existing window never moves it — and "Tidy windows" gathers the rest on demand.
+let arrangeWindows = true
+/** Where the grid starts, in DIP from the window's left edge, as the renderer last reported it in the full view. */
+let dockInset = DEFAULT_DOCK_INSET
+
+function placementDisplay(): Electron.Display {
+  return win?.isVisible() && !win.isMinimized()
+    ? screen.getDisplayMatching(win.getBounds())
+    : screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+}
+
+/** Dock the window at its visible frame, in physical pixels. */
+function placeHwnd(hwnd: string, pid: number, target: Electron.Rectangle): boolean {
+  if (!restoreWindow(hwnd, pid)) return false
+  const frames = windowFrames(hwnd)
+  const outer = outerRectFor(target, frames?.windowRect ?? null, frames?.frameRect ?? null)
+  return !!outer && setWindowRect(hwnd, pid, outer)
+}
+
+function dockTarget(display: Electron.Display): Electron.Rectangle | null {
+  const dip = dockRect(display.workArea, dockInset)
+  return dip ? screen.dipToScreenRect(null, dip) : null
+}
+
+/**
+ * Call just before spawning: snapshot the windows that exist, then watch for
+ * the one the launch produces and dock it. Apps restore their saved bounds as
+ * they open, so the placement is applied once more a moment later.
+ */
+function watchLaunch(exes: string[]): void {
+  if (!arrangeWindows || !winAvailable()) return
+  const before = new Set(listDesktopWindows().map((row) => row.hwnd))
+  const display = placementDisplay()
+  const started = Date.now()
+  const tick = (): void => {
+    const elapsedMs = Date.now() - started
+    const hit = pickLaunchedWindow({ rows: listDesktopWindows(), before, exes, foreground: foregroundWindow(), elapsedMs })
+    if (hit) {
+      const place = (): void => { const target = dockTarget(display); if (target) placeHwnd(hit.hwnd, hit.pid, target) }
+      place()
+      setTimeout(place, 800)
+      return
+    }
+    if (elapsedMs < LAUNCH_WATCH_MS) setTimeout(tick, 250)
+  }
+  setTimeout(tick, 250)
+}
+
+/** Dock every switcher-known window on the workspace's display. Minimized ones stay minimized. */
+function tidyWindows(): number {
+  if (!winAvailable()) return 0
+  const display = placementDisplay()
+  const target = dockTarget(display)
+  if (!target) return 0
+  const area = screen.dipToScreenRect(null, display.workArea)
+  let placed = 0
+  for (const w of buildWindowList(listDesktopWindows(), { excludePids: [process.pid] })) {
+    if (!TIDY_KINDS.has(w.kind)) continue
+    const frames = windowFrames(w.hwnd)
+    if (!frames || frames.minimized || !centreInside(frames.frameRect ?? frames.windowRect, area)) continue
+    if (placeHwnd(w.hwnd, w.pid, target)) placed++
+  }
+  return placed
 }
 
 /** Strip characters Windows forbids in folder names; trim to a sane length. */
@@ -1289,6 +1361,7 @@ function settingsView() {
     mock: mockMode,
     sizeMode: sizeModePref,
     windowMaterial: materialPref,
+    arrangeWindows,
     hasAdminKey: !!ADMIN_KEY,
     port: PORT,
     version: app.getVersion(),
@@ -1459,6 +1532,7 @@ function registerIpc(): void {
       settings.windowMaterial = patch.windowMaterial
       applyWindowMaterial()
     }
+    if (typeof patch.arrangeWindows === 'boolean') { arrangeWindows = patch.arrangeWindows; settings.arrangeWindows = patch.arrangeWindows }
     if (typeof patch.mock === 'boolean' && !mockForced) { mockMode = patch.mock; settings.mock = patch.mock; pushStatus() }
     if (typeof patch.launchAtLogin === 'boolean') app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin, args: ['--hidden'] })
     if (typeof patch.pushUrl === 'string') { pushUrl = patch.pushUrl; settings.pushUrl = patch.pushUrl; pushed.clear() }
@@ -1636,6 +1710,13 @@ function registerIpc(): void {
     if (!Number.isInteger(pid) || pid <= 0 || pid > 0xffffffff) return
     // focusHwnd re-checks that the HWND still belongs to this pid before it acts.
     focusHwnd(hwnd, pid)
+  })
+  ipcMain.handle('windows:tidy', (): number => tidyWindows())
+  // Where the grid starts, so docked windows leave the sidebar in view. Only the
+  // full view's layout says where that is on the work area.
+  ipcMain.on('window:dock-inset', (_e, inset: unknown) => {
+    if (typeof inset !== 'number' || !Number.isFinite(inset) || inset < 0 || inset > 8000) return
+    if (viewMode === 'full') dockInset = inset
   })
   ipcMain.handle('project:create', (_e, rawName: string) => {
     const name = sanitizeProjectName(rawName)
@@ -1847,6 +1928,7 @@ if (!gotLock) {
     if (!process.env.CLAUDE_WATCH_CAPTURE_HALF && (settings.sizeMode === 'full' || settings.sizeMode === 'left' || settings.sizeMode === 'right')) applySizeMode(settings.sizeMode)
     if (settings.windowMaterial === 'none' || settings.windowMaterial === 'mica' || settings.windowMaterial === 'acrylic') materialPref = settings.windowMaterial
     if (typeof settings.notifications === 'boolean') notify = settings.notifications
+    if (typeof settings.arrangeWindows === 'boolean') arrangeWindows = settings.arrangeWindows
     if (typeof settings.mock === 'boolean' && !mockForced) mockMode = settings.mock
 
     if (app.isPackaged) {

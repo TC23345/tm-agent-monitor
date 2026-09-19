@@ -67,6 +67,8 @@ test('commandGroup files ids under the browse headings', () => {
   assert.equal(commandGroup('cmd:zoom:pane-1'), 'Panes')
   assert.equal(commandGroup('cmd:view:limits'), 'Panes')
   assert.equal(commandGroup('cmd:cols-2'), 'Layout')
+  assert.equal(commandGroup('cmd:arrange'), 'Layout')
+  assert.equal(commandGroup('cmd:tidy-windows'), 'Layout')
   assert.equal(commandGroup('cmd:layout-delete:Build'), 'Layout')
   assert.equal(commandGroup('cmd:field'), 'Layout')
   assert.equal(commandGroup('cmd:quit'), 'App')

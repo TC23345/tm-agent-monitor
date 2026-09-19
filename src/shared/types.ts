@@ -327,6 +327,8 @@ export interface AppSettingsPatch {
   mock?: boolean
   sizeMode?: SizeMode
   windowMaterial?: WindowMaterial
+  /** Dock windows the workspace launches (Cursor, Chrome, external terminals) right of the sidebar. */
+  arrangeWindows?: boolean
   /** ntfy / Pushover-style POST target for long waits; '' clears it. */
   pushUrl?: string
   /** Minutes a session must have waited before it is pushed (1–240). */
@@ -340,6 +342,7 @@ export interface AppSettings {
   mock: boolean
   sizeMode: SizeMode
   windowMaterial: WindowMaterial
+  arrangeWindows: boolean
   hasAdminKey: boolean
   port: number
   version: string

@@ -8,3 +8,8 @@ export function focusHwndWithApi(fns: Record<string, (...args: any[]) => any>, h
 export function focusHwnd(hwnd: string, expectedPid?: number): boolean
 export function focusByPid(pid: number): boolean
 export function available(): boolean
+export interface WinRect { x: number; y: number; width: number; height: number }
+export function windowFrames(hwnd: string): { windowRect: WinRect; frameRect: WinRect | null; minimized: boolean } | null
+export function foregroundWindow(): { hwnd: string; pid: number; exe: string } | null
+export function setWindowRect(hwnd: string, expectedPid: number, rect: WinRect): boolean
+export function restoreWindow(hwnd: string, expectedPid: number): boolean

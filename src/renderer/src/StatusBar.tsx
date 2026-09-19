@@ -1,4 +1,4 @@
-import { ChevronUp, Columns3, LayoutGrid, LayoutTemplate, Monitor, PanelLeft, PanelRight, RefreshCw, Ruler, Save, Sparkles, Trash2 } from 'lucide-react'
+import { AppWindow, ChevronUp, Columns3, LayoutGrid, LayoutTemplate, Magnet, Monitor, PanelLeft, PanelRight, RefreshCw, Ruler, Save, Sparkles, Trash2 } from 'lucide-react'
 import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
 import { MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, isUniqueKind, type PaneCols, type PaneInstance, type PaneKind, type SidebarView } from './panes'
 import type { SizeMode } from '@shared/types'
@@ -28,6 +28,10 @@ interface Props {
   /** The on-demand GPU effects: pane burst, hover beam, Session-bar streaks. */
   fieldOn: boolean
   onToggleField: () => void
+  /** Outside windows: dock the ones we launch, and gather the rest on demand. */
+  arrangeWindows: boolean
+  onToggleArrange: () => void
+  onTidyWindows: () => void
   /** Named layouts: save the current one, apply or forget a saved one. */
   layouts: string[]
   onSaveLayout: () => void
@@ -56,6 +60,7 @@ export function StatusBar(props: Props) {
   const {
     rebuild, onRebuild, panes, onAddPane, onClosePane, sidebarViews, onToggleSidebarView,
     sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, fieldOn, onToggleField,
+    arrangeWindows, onToggleArrange, onTidyWindows,
     layouts, onSaveLayout, onApplyLayout, onDeleteLayout, openMenu, onOpenMenu, version, debugPort
   } = props
   const full = panes.length >= MAX_PANES
@@ -149,6 +154,16 @@ export function StatusBar(props: Props) {
               <MenuCheckItem label="1 column" checked={paneCols === 1} onClick={() => onPaneCols(1)} />
               <MenuCheckItem label="2 columns" checked={paneCols === 2} onClick={() => onPaneCols(2)} />
               <MenuCheckItem label="3 columns" checked={paneCols === 3} onClick={() => onPaneCols(3)} />
+              <div className="menu-sep" />
+              <div className="menu-label"><AppWindow className="menu-label-ic" strokeWidth={2} />Outside windows</div>
+              <MenuCheckItem
+                icon={<Magnet strokeWidth={2} />}
+                label="Arrange launched windows"
+                hint="Cursor, Chrome, and external terminals open docked right of the sidebar, the same size every time"
+                checked={arrangeWindows}
+                onClick={onToggleArrange}
+              />
+              <MenuItem icon={<AppWindow strokeWidth={2} />} label="Tidy windows" hint="Dock every editor, terminal, and browser window on this display right of the sidebar" onClick={run(onTidyWindows)} />
               <div className="menu-sep" />
               <MenuCheckItem
                 icon={<Sparkles strokeWidth={2} />}

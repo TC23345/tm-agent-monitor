@@ -50,7 +50,7 @@ import { LaunchNav, type LaunchTarget, type NavMenu } from './LaunchNav'
 import {
   AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Code2 as CursorIcon, Columns3, Copy,
   Eye, EyeOff, FilePlus2, Filter, Folder, FolderOpen, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
-  NotebookPen, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, Rss, Ruler, Save, Shrink, Sparkles, SquareSlash,
+  NotebookPen, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, Rss, Ruler, Save, Shrink, Sparkles, SquareSlash, Magnet,
   SquareTerminal, Terminal, Trash2, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
@@ -173,6 +173,8 @@ export function App() {
   // truth; the View menu radio reflects the configured default, not a transient
   // Alt+Q flip.
   const [sizeMode, setSizeMode] = useState<SizeMode>('full')
+  // Main docks the windows it launches right of the sidebar (placement.mjs).
+  const [arrangeWindows, setArrangeWindows] = useState(true)
   // Data views stacked in the sidebar, toggled from the sidebar menu. Each
   // section can also roll up to just its header.
   const [sidebarViews, setSidebarViews] = useState<SidebarView[]>(loadSidebarViews)
@@ -243,6 +245,7 @@ export function App() {
   useEffect(() => {
     window.watch.getSettings().then((s) => {
       setSizeMode(s.sizeMode)
+      setArrangeWindows(s.arrangeWindows)
       setAppInfo({ version: s.version, debugPort: s.debugPort })
       // The system backdrop (Windows 11) shows through a translucent card;
       // styles.css keys off this attribute, main pushes changes live.
@@ -251,6 +254,12 @@ export function App() {
     // An edge drag flips the mode in main; the radio and chip follow.
     return window.watch.onSizeMode((mode) => setSizeMode(mode))
   }, [])
+  const toggleArrange = () => {
+    const next = !arrangeWindows
+    setArrangeWindows(next)
+    window.watch.setSettings({ arrangeWindows: next }).then((s) => setArrangeWindows(s.arrangeWindows)).catch(() => {})
+  }
+  const tidyWindows = () => { void window.watch.tidyWindows().catch(() => 0) }
   const applySizeMode = (mode: SizeMode) => {
     setSizeMode(mode) // optimistic — the window re-sizes in the same beat
     window.watch.setSettings({ sizeMode: mode }).then((s) => setSizeMode(s.sizeMode)).catch(() => {})
@@ -864,6 +873,13 @@ export function App() {
   // count and the viewport cap; the fractions only re-split what that leaves.
   const sizes = allSizes[bucket]
   const sidebarWidth = clampSidebarWidth(sizes.sidebar, frameW)
+  // Tell main where the grid starts so the windows it docks leave the sidebar in
+  // view. Only the full view's geometry maps onto the work area; main ignores the rest.
+  useEffect(() => {
+    if (bucket !== 'full') return
+    const left = gridRef.current?.getBoundingClientRect().left
+    if (left !== undefined) window.watch.setDockInset(Math.round(left))
+  }, [sidebarWidth, frameW, bucket])
   const cols = Math.max(1, Math.min(paneCols === 'auto' ? 3 : paneCols, panes.length, viewportCap))
   // At least one row even with an empty grid, so the templates stay valid CSS.
   const rows = Math.max(1, Math.ceil(panes.length / cols))
@@ -993,6 +1009,8 @@ export function App() {
       cmd(`cols-${c}`, `Columns: ${c === 'auto' ? 'Auto' : c}`, () => setPaneCols(c), { icon: <Columns3 strokeWidth={2} />, detail: paneCols === c ? 'current' : undefined, keywords: ['grid', 'layout'] })
     }
     if (sized) cmd('reset-sizes', 'Reset pane sizes', resetSizes, { icon: <Ruler strokeWidth={2} />, keywords: ['layout', 'splitter'] })
+    cmd('arrange', `Arrange launched windows: ${arrangeWindows ? 'off' : 'on'}`, toggleArrange, { icon: <Magnet strokeWidth={2} />, keywords: ['dock', 'snap', 'cursor', 'chrome', 'windows', 'placement'] })
+    cmd('tidy-windows', 'Tidy windows', tidyWindows, { icon: <AppWindow strokeWidth={2} />, detail: 'dock editors, terminals, browsers beside the sidebar', keywords: ['arrange', 'snap', 'dock', 'organize', 'cursor', 'chrome'] })
     cmd('field', `Attention effects: ${fieldOn ? 'off' : 'on'}`, toggleField, { icon: <Sparkles strokeWidth={2} />, keywords: ['field', 'glow', 'gpu', 'webgpu', 'beam', 'burst', 'streaks'] })
     if (!full) {
       for (const c of projectCommands) {
@@ -1265,6 +1283,9 @@ export function App() {
         onResetSizes={resetSizes}
         fieldOn={fieldOn}
         onToggleField={toggleField}
+        arrangeWindows={arrangeWindows}
+        onToggleArrange={toggleArrange}
+        onTidyWindows={tidyWindows}
         layouts={layoutNames}
         onSaveLayout={() => setLayoutDialog(true)}
         onApplyLayout={applyLayout}
