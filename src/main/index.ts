@@ -4,6 +4,7 @@ import { edgeDragTarget } from '../shared/edgeDrag.mjs'
 import { blankBitmap, drawBadge } from '../shared/trayBadge.mjs'
 import { isWake, tickAllowed, type PowerState } from '../shared/pauses.mjs'
 import { reloadBudget } from '../shared/crashPolicy.mjs'
+import { shellArgs } from '../shared/wtArgs.mjs'
 import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
 import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, promises as fsp, watch as fsWatch, type FSWatcher } from 'node:fs'
@@ -614,17 +615,16 @@ function openTerminal(cwd?: string, provider: TerminalTarget = 'claude', purpose
         command
       ].join('; ')
     : command
-  // A bare shell gets no -Command at all, so it lands on a normal prompt.
-  const wtArgs = script
-    ? ['-d', dir, shellExe, '-NoExit', '-Command', script]
-    : ['-d', dir, shellExe, '-NoExit']
-  const wt = spawn('wt.exe', wtArgs, opts)
+  // A bare shell gets no command at all, so it lands on a normal prompt. A
+  // script travels base64-encoded: the hook-trust one is several `;`-joined
+  // statements, and wt splits its argv on `;` into one tab each (wtArgs.mjs).
+  const wt = spawn('wt.exe', ['-d', dir, shellExe, ...shellArgs(script)], opts)
   wt.on('error', () => {
     // wt.exe unavailable — open a plain PowerShell console window via `start`.
     const cd = `Set-Location -LiteralPath '${dir.replace(/'/g, "''")}'`
     const fallbackScript = script ? `${cd}; ${script}` : cd
     try {
-      const fb = spawn('cmd.exe', ['/c', 'start', '""', shellExe, '-NoExit', '-Command', fallbackScript], opts)
+      const fb = spawn('cmd.exe', ['/c', 'start', '""', shellExe, ...shellArgs(fallbackScript)], opts)
       fb.on('error', (e) => console.error(`[terminal] open failed: ${e?.message ?? e}`))
       fb.unref()
     } catch (e) {
