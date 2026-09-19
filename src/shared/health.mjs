@@ -48,7 +48,9 @@ export function providerStatus(health, now, options = {}) {
   // dead code and a working-but-stale install reads as "not installed".
   if (h.needsRepair) return { tone: 'warn', reason: 'hooks need repair' }
   if (!h.installed) return { tone: 'off', reason: 'not installed' }
-  if (h.awaitingTrust) return { tone: 'warn', reason: 'awaiting trust review in /hooks' }
+  // Codex has no trust query, so trust is only ever confirmed by a report
+  // arriving — say so, or a user who already trusted keeps re-trusting.
+  if (h.awaitingTrust) return { tone: 'warn', reason: 'not confirmed yet — trust them in /hooks, then send any Codex prompt' }
   if (typeof h.error === 'string' && h.error.trim()) return { tone: 'warn', reason: `hook error: ${h.error.trim()}` }
   if (h.bridgeVersion && h.bridgeVersion !== expected) {
     return { tone: 'warn', reason: `hook bridge v${h.bridgeVersion} — this app expects v${expected}, repair the hooks` }

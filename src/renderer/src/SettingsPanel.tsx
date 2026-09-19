@@ -43,6 +43,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     window.watch.getSettings().then(setS)
   }, [])
 
+  // Provider health moves while the panel is open (Codex trust is confirmed by
+  // its first report), so follow the status stream instead of the open-time copy.
+  useEffect(() => window.watch.onStatus((snap) => {
+    setS((current) => current && { ...current, providers: snap.providers })
+  }), [])
+
   const checkUpdates = () => {
     setUpdateMsg('checking…')
     window.watch.checkUpdates().then(setUpdateMsg).catch(() => setUpdateMsg('check failed'))
@@ -271,13 +277,17 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 const health = s.providers[provider]
                 const action = health.needsRepair ? 'repair' : health.installed ? 'remove' : 'install'
                 const result = diagnostics[`${provider}-hooks`]
+                // The live status leads; a retest's text is a snapshot, so it
+                // only shows while it reports a problem — otherwise a passing
+                // retest froze "last event 10:18 PM" over a live provider.
+                const hint = result && result.state !== 'success' ? result.detail : providerStatus(health, Date.now()).reason
                 return <div className="hook-block" key={provider}>
                   <div className="srow">
-                    <span className="slabel"><ProviderBadge provider={provider} />{provider === 'claude' ? 'Claude Code hooks' : provider === 'codex' ? 'Codex hooks' : 'Cursor hooks'}<span className="shint">{result?.detail ?? providerStatus(health, Date.now()).reason}</span></span>
+                    <span className="slabel"><ProviderBadge provider={provider} />{provider === 'claude' ? 'Claude Code hooks' : provider === 'codex' ? 'Codex hooks' : 'Cursor hooks'}<span className="shint">{hint}</span></span>
                     <span className="sactions">
-                      {provider === 'codex' && health.awaitingTrust && !health.needsRepair && <button className="hotkey-btn is-primary" disabled={hookBusy !== null} onClick={reviewCodexTrust}>Review trust</button>}
+                      {provider === 'codex' && health.awaitingTrust && !health.needsRepair && <button className="hotkey-btn is-primary" disabled={hookBusy !== null} onClick={reviewCodexTrust} title="Opens Codex with /hooks on the clipboard. This clears on the first Codex event after you trust them.">Review trust</button>}
                       <button className="hotkey-btn is-compact" disabled={hookBusy !== null} onClick={() => manageHooks(provider, action)}>{hookBusy === provider ? 'Working…' : action === 'repair' ? 'Repair' : action === 'remove' ? 'Remove' : 'Install'}</button>
-                      <button className="diag-retest" title="Retest hook connection" onClick={() => diagnose(`${provider}-hooks`)} disabled={diagnosticBusy !== null}><RefreshCw className={diagnosticBusy === `${provider}-hooks` ? 'is-spinning' : ''} /></button>
+                      <button className="diag-retest" title="Re-check the hook configuration on disk (does not contact the provider)" onClick={() => diagnose(`${provider}-hooks`)} disabled={diagnosticBusy !== null}><RefreshCw className={diagnosticBusy === `${provider}-hooks` ? 'is-spinning' : ''} /></button>
                     </span>
                   </div>
                 </div>

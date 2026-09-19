@@ -18,6 +18,11 @@ Layout customization, on top of the 0.3.0 workspace.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
 
+## 0.4.12 — 2026-09-18
+
+- **Settings → Provider hooks says what Codex trust is waiting for.** Codex offers no way to ask whether its hooks are trusted, so the app confirms trust when the first Codex event arrives. The row used to say only *Installed; no event received yet* beside a **Review trust** button that stayed after you had trusted, and nothing said a Codex prompt was what finished it. It now reads *not confirmed yet — trust them in /hooks, then send any Codex prompt*, and the review message says the same.
+- **The hook rows follow live status.** The panel read provider health once, when it opened, so the button stayed until you reopened Settings. It now updates the moment Codex reports, and **Review trust** disappears on its own. The status line also shows live state, like *reporting · last 3s ago*, instead of freezing the last ↻ result (*last event 10:18 PM*). A retest's text shows only when it finds a problem. The ↻ tooltip now says what it does: re-check the hook config on disk.
+
 ## 0.4.11 — 2026-09-18
 
 - **Codex hook trust opens one terminal, not a stack of broken tabs.** Repairing Codex hooks opens Codex in Windows Terminal with a short script that copies `/hooks` and explains the trust step. Windows Terminal reads `;` in its arguments as "start another tab", so each statement of that script became its own tab trying to run a fragment as a program — `error 0x80070002 when launching " codex"`. The script now reaches PowerShell base64-encoded (`-EncodedCommand`), where there is nothing for the terminal to split.

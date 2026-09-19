@@ -1440,7 +1440,7 @@ function registerIpc(): void {
     openTerminal(undefined, 'codex', 'hook-trust')
     return {
       ok: true,
-      message: 'Opened Codex and copied /hooks. Paste it, then trust the TaylorMade Agent Monitor hooks.'
+      message: 'Opened Codex and copied /hooks. Paste it and trust the TaylorMade Agent Monitor hooks, then send Codex any prompt — the first event it reports confirms trust and clears this.'
     }
   })
   ipcMain.handle('settings:set', (_e, rawPatch: AppSettingsPatch) => {
