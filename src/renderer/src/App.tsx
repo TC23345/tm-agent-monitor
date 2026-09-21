@@ -11,7 +11,6 @@ import { COLLAPSE_ALL_EVENT } from './useCollapse'
 import { HistoryPane, InsightsPane, SpendPane } from './UsagePane'
 import { TopBar, type MenuName } from './TopBar'
 import { EdgeGrip } from './EdgeGrip'
-import { AttentionLayer } from './AttentionLayer'
 import { setFieldActive } from './fieldActive'
 import { StatusBar, type StatusMenu } from './StatusBar'
 import { Pane } from './Pane'
@@ -154,7 +153,7 @@ export function App() {
     try { localStorage.setItem('tm.notes.preview', v ? '0' : '1') } catch { /* preference only */ }
     return !v
   })
-  /** The on-demand GPU effects (pane burst, hover beam, Session-bar streaks) — on unless switched off; remembered. */
+  /** The Session bar's pace streaks (the one GPU layer) — on unless switched off; remembered. */
   const [fieldOn, setFieldOn] = useState<boolean>(() => {
     try { return localStorage.getItem('tm.field.v1') !== '0' } catch { return true }
   })
@@ -184,8 +183,8 @@ export function App() {
   // Drives the slide-up / slide-down transition. Starts closed so the very first
   // painted frame is already off-screen and the card rises into place.
   const [open, setOpen] = useState(false)
-  // The GPU layers (attention layer, quota streams) draw only while the
-  // workspace is open and the glow is on; they read this, not a prop chain.
+  // The GPU layer (the quota streams) draws only while the workspace is open
+  // and the streaks are on; it reads this, not a prop chain.
   useEffect(() => { setFieldActive(open && fieldOn) }, [open, fieldOn])
   useEffect(() => {
     window.watch.getStatus().then(setSnap)
@@ -993,7 +992,7 @@ export function App() {
       cmd(`cols-${c}`, `Columns: ${c === 'auto' ? 'Auto' : c}`, () => setPaneCols(c), { icon: <Columns3 strokeWidth={2} />, detail: paneCols === c ? 'current' : undefined, keywords: ['grid', 'layout'] })
     }
     if (sized) cmd('reset-sizes', 'Reset pane sizes', resetSizes, { icon: <Ruler strokeWidth={2} />, keywords: ['layout', 'splitter'] })
-    cmd('field', `Attention effects: ${fieldOn ? 'off' : 'on'}`, toggleField, { icon: <Sparkles strokeWidth={2} />, keywords: ['field', 'glow', 'gpu', 'webgpu', 'beam', 'burst', 'streaks'] })
+    cmd('field', `Pace streaks: ${fieldOn ? 'off' : 'on'}`, toggleField, { icon: <Sparkles strokeWidth={2} />, keywords: ['field', 'gpu', 'webgpu', 'streaks', 'burn', 'session', 'effects'] })
     if (!full) {
       for (const c of projectCommands) {
         cmd(`run:${c.command}`, `Run: ${c.label}`, () => runProjectCommand(c), { icon: <Play strokeWidth={2} />, detail: `${c.command} · ${context.label ?? 'this folder'}`, keywords: ['project', 'script', 'npm', c.command] })
@@ -1095,7 +1094,6 @@ export function App() {
 
 
       <div className="frame" ref={frameRef}>
-        <AttentionLayer agents={agents} panes={panes} />
         <aside className="sidebar" style={{ flexBasis: sidebarWidth }}>
           <LaunchNav
             context={context}

@@ -152,8 +152,8 @@ export function StatusBar(props: Props) {
               <div className="menu-sep" />
               <MenuCheckItem
                 icon={<Sparkles strokeWidth={2} />}
-                label="Attention effects"
-                hint="A burst over a pane when its session starts waiting, a beam from a hovered session to its pane, and pace streaks on the Session bar"
+                label="Pace streaks"
+                hint="Streaks along the Session bar's fill while the app projects when you will hit the limit — faster the quicker you burn"
                 checked={fieldOn}
                 onClick={onToggleField}
               />

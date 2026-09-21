@@ -245,22 +245,9 @@ kbd {
 .frame {
   flex: 1 1 auto;
   min-height: 0;
-  position: relative; /* the attention layer canvas is placed against it */
+  position: relative;
   display: flex;
   align-items: stretch;
-}
-/* The attention layer (AttentionLayer.tsx): a WebGPU canvas over sidebar and
-   grid, drawing only the moment something happens (a burst over a pane whose
-   session just asked, a beam from a hovered row to its pane). Above the panes
-   and their drop indicators, below every popover (60) and the edge grips (40). */
-.attn-layer {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 30;
-  pointer-events: none;
-  display: block;
 }
 /* Coding-agent details live here, always visible whatever the panes show. */
 .sidebar {

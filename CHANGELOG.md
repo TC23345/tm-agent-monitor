@@ -18,6 +18,11 @@ Layout customization, on top of the 0.3.0 workspace.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
 
+## 0.4.13 — 2026-09-21
+
+- **The red flash over panes is gone.** When a session started waiting, a red burst spread from its pane's header, and hovering a session in the sidebar drew a beam to its pane. Both were one GPU overlay across the whole workspace, and both are removed. A waiting session is still flagged by the tray badge, the taskbar count and flash, the pane's bell badge, and the waiting chip in the title bar.
+- **The switch is now *Pace streaks*.** The Session bar's burn-rate streaks are the only drawn effect left, so the Layout popover and palette name it for what it does. Your on/off choice carries over.
+
 ## 0.4.12 — 2026-09-18
 
 - **Settings → Provider hooks says what Codex trust is waiting for.** Codex offers no way to ask whether its hooks are trusted, so the app confirms trust when the first Codex event arrives. The row used to say only *Installed; no event received yet* beside a **Review trust** button that stayed after you had trusted, and nothing said a Codex prompt was what finished it. It now reads *not confirmed yet — trust them in /hooks, then send any Codex prompt*, and the review message says the same.
