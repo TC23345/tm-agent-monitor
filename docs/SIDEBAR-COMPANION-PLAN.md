@@ -1,257 +1,289 @@
-# Sidebar companion — a pixel character at the foot of the sidebar
+# Sidebar companion — a painted character at the foot of the sidebar
 
-> Written 2026-09-21 against 0.4.12. Goal: a small animated pixel-art character
-> in the empty space under the Agents list (the blue box in the request's
-> screenshot), in the spirit of the Codex desktop app's **Pets**, with three
-> launch characters drawn from the hooded-robe / cracked-mask / glowing-coin
-> references. Effort: **S** ≈ ½–1 day · **M** ≈ 2–4 days.
-> [V] = verified in a source or in this repo this session; [I] = inferred.
-
-## What the reference actually is
-
-- [V] The `>_` blue blob is a **Codex Pet**: an animated companion in the
-  Codex/ChatGPT desktop app (`/pet`, Settings → Appearance → Pets; custom pets
-  via `/hatch`, the `hatch-pet` skill). Windows 26.908 (2026-09-11) added the
-  floating Pets controls. <https://learn.chatgpt.com/docs/changelog>
-- [V] A pet is **one sprite atlas plus a manifest**, not Lottie/Rive/SVG:
-  `spritesheet.webp` (or PNG) at **1536×1872**, an **8×9 grid of 192×208
-  cells**, unused cells fully transparent, next to `pet.json`
-  (`id`, `displayName`, `description`, `spritesheetPath`) in
-  `~/.codex/pets/<name>/`. Source of truth:
-  <https://github.com/openai/skills/blob/main/skills/.curated/hatch-pet/SKILL.md>
-- [V] Rows are states with **per-frame timings** (`references/animation-rows.md`
-  in that skill), so playback is JS-driven, not a uniform CSS `steps()`:
-
-  | Row | State | Frames | Timing (ms) |
-  |---|---|---|---|
-  | 0 | idle | 6 | 280, 110, 110, 140, 140, 320 |
-  | 1 | running-right | 8 | 120 ×7, 220 |
-  | 2 | running-left | 8 | 120 ×7, 220 |
-  | 3 | waving | 4 | 140 ×3, 280 |
-  | 4 | jumping | 5 | 140 ×4, 280 |
-  | 5 | failed | 8 | 140 ×7, 240 |
-  | 6 | waiting | 6 | 150 ×5, 260 |
-  | 7 | running (task work) | 6 | 120 ×5, 220 |
-  | 8 | review | 6 | 150 ×5, 280 |
-
-- [V] Codex draws it as a CSS background (`background-size: 800% 900%`,
-  `image-rendering: pixelated`) at ~113×122 CSS px — a **non-integer**
-  downscale of the 192×208 cell, which is exactly what makes custom pets
-  jagged (openai/codex#20808). We must not copy that.
-- [V] Claude Code's `/buddy` (April 2026) is the ASCII cousin: 5×12-character
-  sprites, 3 frames, species hashed from the account id. Not a format to adopt.
+> Written 2026-09-21 against 0.4.12. Revised the same day: the characters
+> stay **high-fidelity painted stills from GPT-image**, animated as short
+> image-to-video clips, instead of the first draft's pixel-art route
+> (see *Routes not taken*). Goal: a small animated character in the empty
+> space under the Agents list, in the spirit of the Codex desktop app's
+> **Pets**, with three launch characters from the hooded-robe /
+> cracked-mask / glowing-coin concepts.
+> Effort: **S** ≈ ½–1 day · **M** ≈ 2–4 days.
+> [V] = verified in a source or on this machine this session; [I] = inferred.
 
 ## Decisions
 
-1. **Adopt the Codex Pet atlas as our on-disk format.** Same grid, same rows,
-   same `pet.json`. We get a documented spec with timings for free, our three
-   characters can also be installed into Codex (`~/.codex/pets/`), and a pet
-   the user already hatched in Codex can be shown here later (phase 4).
-2. **Draw true pixel art at 48×52 and store it ×4.** Each 192×208 cell is a
-   48×52 logical sprite upscaled 4× nearest-neighbour. That keeps Codex
-   compatibility and gives us a real pixel grid to scale by integers.
-3. **Render on a `<canvas>` at an integer device-pixel scale.** Pick
-   `k = max(1, round(targetCss × devicePixelRatio / 48))`, draw the cell into a
-   `48k × 52k` device-pixel canvas with `imageSmoothingEnabled = false`, and set
-   CSS size `48k / dpr`. At 150% Windows scaling a 96-CSS-px target gives
-   k = 3, so each art pixel is exactly 3 device pixels. Re-fit on `resize`,
-   which also fires on DPR change. This is the #20808 bug avoided on purpose.
-4. **Event-driven, never ambient.** The 0.4.9 rule stands (no always-on
-   motion; memory `claude-watch-no-ambient-effects`). The character **rests on
-   a still frame**. It plays a row **once** when something happens, then goes
-   back to its still frame. Zero timers while resting. The idle row plays only
-   on hover. Reduced motion shows the still frames only.
-5. **Original characters, not the franchise ones.** The references are a
-   hooded Yoshi, a hooded Eevee and a Shy Guy, which are Nintendo / Pokémon
-   Company IP. This app ships public installers through GitHub releases, so
-   we keep the *look* (black robe, purple + teal trim, a cracked white mask
-   charm, the glowing coin) and design original bodies (below). The coin keeps
-   the three-bar Solana face from the references. It is a single layer, so
-   swapping it for the app mark is one edit if we ever want that.
-6. **Renderer-only.** No IPC and no main-process setting: main never needs
-   the value, same as `tm.field.v1`. Persistence is `tm.companion.v1` in
-   localStorage.
+1. **One master still per character, and every clip starts and ends on it.**
+   Several image-to-video models accept a **first and a last frame**. Passing
+   the same rest still as both gives a clip that leaves the pose, acts, and
+   lands back on it, so the swap back to the still is invisible.
+   - Kling 3.0 Pro: `image` + `end_image` [V]
+   - Seedance 2.0: `first_frame_url` / `last_frame_url` [V]
+   - Veo 3.1: `lastFrame` [V]
+   - MiniMax Hailuo: `last_image_url` [V]
+   - Luma Ray 2: `keyframes` + `loop` [V]
+   - Wan 2.2 FLF2V, open weights [V]
+
+   Runway Gen-4 and Sora 2 take only a first frame, so they're out [V].
+2. **Kling 3.0 Pro is the default generator; Wan 2.2 FLF2V is the fallback.**
+   - Kling: strong character consistency, API through fal/Segmind, about
+     $0.42 per 5 s [V].
+   - Wan 2.2 FLF2V: local ComfyUI, free, unlimited retries [V].
+   - Seedance 2.0 is the second opinion if Kling drifts the face.
+3. **Transparency comes from matting, not from the model.** No commercial
+   image-to-video model outputs alpha today [I: none found]. Wan-Alpha
+   outputs RGBA video but has no image-to-video weights yet [V]; revisit
+   when it does.
+   - Generate on a **flat mid-grey plate (`#7f7f7f`)**. Green screen would
+     eat Gulp, and black would eat the robes.
+   - Matte with **MatAnyone 2** [V].
+   - Recover clean edge and glow colour with foreground estimation
+     (`pymatting.estimate_foreground_ml`) [I].
+   - We need real alpha because the app card is translucent under the
+     default Mica material (`rgba(28,27,32,0.78)`, `styles.css:1768`) [V].
+     A clip baked onto a solid colour would show as a box.
+4. **Ship VP9 WebM with alpha.** Chromium decodes it [V], and the CSP's
+   `default-src 'self'` already admits a bundled media file [V].
+   - Encoded on this machine with
+     `ffmpeg -framerate 24 -i f_%04d.png -c:v libvpx-vp9 -pix_fmt yuva420p -b:v 0 -crf 30 -auto-alt-ref 0 -an clip.webm`
+     [V]: a 2 s, 256 px test clip came to 12 KB, and its first frame
+     decoded back as `rgba`.
+   - Gotcha [V]: `ffprobe` reports such a file as `pix_fmt=yuv420p`. Alpha
+     shows only as the stream tag `alpha_mode=1`, and it survives decode
+     only through `-c:v libvpx-vp9`. The build check reads the tag.
+5. **Event-driven, never ambient.** This is unchanged from the first
+   draft, and it is the 0.4.9 rule (memory `claude-watch-no-ambient-effects`).
+   - The sidebar shows the **still**. A clip plays **once** on an event, then
+     hides; nothing loops, not even on hover.
+   - No clip is decoded while resting.
+   - Reduced motion shows the still only.
+6. **Original characters.** The concept references are a hooded Yoshi, a
+   hooded Eevee and a Shy Guy, which are Nintendo / Pokémon Company IP, and
+   this app ships public installers. So the master stills are re-generated
+   as the original designs below. They keep the shared costume and the coin
+   (three-bar Solana face).
+7. **Renderer-only.** No IPC and no main-process setting, like
+   `tm.field.v1`. Persistence is `tm.companion.v1` in localStorage.
 
 ## How it behaves
 
-The character is a readout of **root sessions**, fed from the same pure
-helpers as the chip and Ctrl+Shift+W (`waitingAgents`, `nextWaiting` in
+The character reads **root sessions** through the same pure helpers as the
+chip and Ctrl+Shift+W (`waitingAgents`, `nextWaiting` in
 `src/shared/attention.mjs`), so it can never disagree with them.
 
-| Moment (edge, not level) | One-shot row | Rests on |
+| Moment (an edge, not a level) | Clip, played once | Afterwards |
 |---|---|---|
-| Nothing live / all idle | none | idle frame 0 |
-| 0 → ≥1 running | 7 running (task work) | row 7, frame 0 (work pose) |
-| A root turn completes (running → complete) | 4 jumping | idle 0, or the work pose if others still run |
-| 0 → ≥1 waiting | 3 waving | row 6, frame 0, plus a red `!` bubble |
-| Compaction (`ActivityEvent.kind === 'compacted'`) | 8 review | previous rest |
-| Hover | 0 idle, loops only while hovered | previous rest |
-| Click, something waiting | none; focuses the next waiting session (`routeToWaiting`) | none |
-| Click, nothing waiting | 3 waving | previous rest |
+| 0 → ≥1 running | `work` | still |
+| A root turn completes (running → complete) | `celebrate` | still |
+| 0 → ≥1 waiting | `alert` | still, plus a red bubble |
+| Compaction (`ActivityEvent.kind === 'compacted'`) | `ponder` | still |
+| Click, nothing waiting / first hover after 10 min | `wave` | still |
+| Click, something waiting | none; focuses it (`routeToWaiting`, `App.tsx:554`) | — |
 
-- **Bubble.** While anything waits, a small static bubble over the
-  character shows the first waiting session's `question`, or "needs
-  permission", truncated to two lines. Red is `--st-question` only, keeping
-  the colour rule. This is the one piece of information the character adds,
-  and it earns the space.
-- **Tooltip.** Summarises the state, e.g. "2 working · 1 waiting on you".
-- Rows 1, 2 and 5 (running left/right, failed) are drawn for Codex
-  compatibility. We use none of them in v1: there is no failure state in
-  `AgentState`, and walking across the sidebar would be ambient.
-- Edges come from diffing the previous and next agent lists, the same shape as
-  `attentionTransition` / `trackFlares`. A burst of edges in one snapshot
-  plays only the highest-priority cue: waiting > complete > started >
-  compacted.
+- **Bubble.** While anything waits, a small static bubble shows the first
+  waiting session's `question`, or "needs permission", in two lines. Red is
+  `--st-question` only, keeping the colour rule. It is the one piece of
+  information the character adds.
+- **Priority.** A burst of edges in one snapshot plays one clip, in this
+  order: `alert` > `celebrate` > `work` > `ponder`.
+- **No re-trigger.** A clip already playing is not restarted by the same
+  edge.
+- **Tooltip.** "2 working · 1 waiting on you".
 
 ## Architecture
 
 ```text
-snap.agents + recentEvents ─▶ companionCue(prev, next)  (pure, tested)
-                                  │  {row, then: restRow/restFrame}
-                                  ▼
-                        Companion.tsx  ── canvas, one setTimeout chain per one-shot
-                                  ▲
-         assets/companions/<id>/{spritesheet.webp, pet.json}  (Vite imports)
+snap.agents + recentEvents ─▶ companionCue(prev, next, events)   (pure, tested)
+                                   │ 'alert' | 'celebrate' | … | null
+                                   ▼
+Companion.tsx:  <img rest> + <video clip> stacked, video shown only while playing
+                                   ▲
+      assets/companions/<id>/{rest.webp, work.webm, celebrate.webm, alert.webm,
+                              ponder.webm, wave.webm, companion.json}
 ```
 
 - **`src/shared/companion.mjs` + `.d.mts` + `companion.test.mjs`** (pure):
-  - `PET_ROWS`: the table above, as data;
-  - `companionRest(agents)`: which still frame to show;
-  - `companionCue(prev, next, events)`: the one-shot row or null, with priority;
-  - `deviceScale(targetCss, dpr, logicalW)`: the integer `k`;
-  - `cellRect(row, frame)`: source rectangle in the atlas;
-  - `parsePetManifest(json)`: validates `pet.json`, drops anything malformed.
+  - `CLIPS`;
+  - `companionCue(prev, next, events)`, with priority and no re-trigger;
+  - `parseCompanionManifest(json)`, which drops malformed entries;
+  - `sanitizeCompanionPrefs`: default `{ on: true, id: 'gulp' }`.
 - **`src/renderer/src/Companion.tsx`**:
-  - loads the atlas once as an `ImageBitmap`;
-  - a one-shot is a `setTimeout` chain over the row's timings and ends on the
-    rest frame;
-  - redraws only on cue, hover, DPR/resize or character change;
-  - parks when `document.hidden` or when the workspace phase is `exit`;
-  - `data-state="rest|playing|hover"` on the root, testid `tid('companion', id)`.
-- **Placement** (`App.tsx`, `<aside className="sidebar">`): a `<footer
-  className="sidebar-companion">` after `activeViews.map(sideSection)`. The
-  Agents section is already `sideview--fill`, so the footer takes the space it
-  leaves. When Agents is collapsed, `margin-top: auto` keeps the footer
-  pinned to the bottom.
-- **Never crowd the list.** `.sidebar { container-type: size }` plus
-  `@container (max-height: 560px) { .sidebar-companion { display: none } }`.
-  This is pure CSS: no `ResizeObserver`, no content-driven sizing. The aside's
-  height comes from the frame, so a size container is safe. Check that the
-  `.sideview--fill` `min-height: 120px` still holds with the footer present.
+  - **The rest still is always rendered.** The `<video>` sits on top,
+    muted, `playsInline`, and hidden by default.
+  - **Loading:** clips `preload="auto"` for the current character only,
+    lazy-imported, so the other two cost nothing.
+  - **Playing a cue:** `currentTime = 0` → `play()` → reveal on the first
+    `requestVideoFrameCallback`, never before, so there is no blank frame.
+  - **Ending:** on `ended`, hide the video. Its last frame *is* the still,
+    so the swap doesn't show.
+  - **Parking:** pause and hide on `document.hidden` and on the window's
+    `exit` phase.
+  - **Size:** a CSS box of about 112–128 px. Painted art scales smoothly,
+    so the pixel route's integer-scaling rules no longer apply.
+  - **Hooks for automation:** `data-state="rest|playing"` and
+    `tid('companion', id)`.
+- **Placement** (`App.tsx`, `<aside className="sidebar">`, around line 1099):
+  - A `<footer className="sidebar-companion">` goes after
+    `activeViews.map(sideSection)`.
+  - Agents is `sideview--fill`, so the footer takes the space it leaves.
+    `margin-top: auto` pins it when Agents is collapsed.
+  - **Never crowd the list:** `.sidebar { container-type: size }` +
+    `@container (max-height: 560px) { .sidebar-companion { display: none } }`.
+    That is pure CSS, with no `ResizeObserver`.
 - **Toggle and picker.**
-  - Layout popover: *Companion* check item plus the three characters.
-  - Palette: `cmd:companion` (on/off) and `cmd:companion:<id>`. Add `companion` to
+  - Layout popover: a *Companion* check item plus the three characters.
+  - Palette: `cmd:companion` and `cmd:companion:<id>`. Add `companion` to
     the Layout regex in `commandGroup` (`src/shared/palette.mjs:92`, today
-    `…|field$`) plus a test case, or both commands land under "Other".
-  - `tm.companion.v1 = { on: true, id: 'gulp' }`, parsed by a sanitizer in
-    `companion.mjs`, defaulting to on.
-- **Assets:** `src/renderer/src/assets/companions/<id>/spritesheet.webp` +
-  `pet.json`. Vite fingerprints them, and each is about 20–60 KB of lossless
-  WebP, since flat blocks compress well. Sources live in
-  `art/companions/<id>/<id>.aseprite` (tracked) and `<id>.png` + `<id>.json`
-  (Aseprite export, tracked).
-- **`scripts/build-companions.mjs`** (offline and deterministic, like
-  `build-icon.mjs`). It reads each Aseprite export (48×52 cells, tags named
-  after the rows) and validates it:
-  - frame counts per tag match `PET_ROWS`;
-  - palette ≤ 16 colours;
-  - no semi-transparent pixels;
-  - unused cells empty.
-
-  It then writes the ×4 atlas and `pet.json`. `--codex` also copies the
-  result into `~/.codex/pets/<id>/`. Wire it as `npm run companions`.
+    `…|field$`) with a test case, or both commands land under "Other".
+- **Assets and budget.**
+  - Per clip: 256×256, 24 fps, 2–3 s, **≤ 400 KB**; per rest still:
+    ≤ 60 KB WebP.
+  - Five clips × three characters is about 3–5 MB in the installer, of which
+    one character (~1–1.5 MB) is ever loaded. Vite fingerprints them.
 
 ## The three launch characters
 
-A shared costume makes the three characters read as one set. Each keeps
-exactly one body silhouette, borrowed loosely from its reference.
+Shared costume, so the set reads as one:
+- black hooded robe;
+- purple `#7c4dff` / `#a98bff` and teal `#22c7b0` / `#7ff0de` trim glow;
+- cracked cream mask charm (`#efe6cf`);
+- a glowing purple-to-teal coin with a white glint.
 
-**Shared palette (lock this in Aseprite; ≤16 colours per character):**
+Each character keeps one body silhouette borrowed loosely from its concept.
 
-- outline `#0b0a10`;
-- robe `#15131c` / `#252131` / `#35304a`;
-- purple trim `#7c4dff` / `#a98bff`;
-- teal trim `#22c7b0` / `#7ff0de`;
-- mask `#efe6cf` / `#bfb293`, crack `#5b5140`;
-- coin `#a98bff` → `#7ff0de` with a white glint `#ffffff`.
-
-| | **Gulp** (from the dino reference) | **Vesper** (from the fox-kit reference) | **Hush** (from the masked-wanderer reference) |
+| | **Gulp** (dino concept) | **Vesper** (fox-kit concept) | **Hush** (masked-wanderer concept) |
 |---|---|---|---|
-| Body | round green lizard, big rounded snout, stubby tail with a teal tip, one small horn poking through the hood | brown fox-kit, tall ears through hood slits with dark tips, cream-tipped brush tail | no visible body: a peaked purple hood over a cream mask, short cape, glove hands |
-| Own colours | `#3fae4a` `#2a7d33` belly `#f4f1e6`, tongue `#e46a86` | `#b0703a` `#7a4a24` cream `#f1dcb4` | hood `#6b3fa0` `#8f63c9`, glove `#5a3a2a` |
-| Mask charm | cracked mask on the belt | cracked mask on the shoulder strap | the mask *is* the face: two tall oval eyes and a small "o" mouth, a crack over one eye |
-| Signature one-shot | **jumping** = tongue snaps out and snags the coin (turn complete) | **jumping** = pounce onto the coin, tail flick | **jumping** = coin tossed up and caught, glow flares |
-| Waiting (`!`) | stares at the viewer, tongue half out | ears up, head tilt | mask tilts, coin held up to "show" you |
-| Work pose (row 7) | hunched over the coin, tapping it | paw on the coin, tail curled | coin floating above the palm, faint teal wisps (2 px) |
+| Body | round green lizard, big rounded snout, stubby teal-tipped tail, one small horn through the hood | brown fox-kit, tall dark-tipped ears through hood slits, cream-tipped brush tail | peaked purple hood over a cream mask, short cape, leather gloves; no visible body |
+| Mask charm | on the belt | on the shoulder strap | the mask *is* the face: two tall oval eyes, small "o" mouth, a crack over one eye |
+| `celebrate` | tongue snaps out, snags the coin, reels it back | pounces on the coin, tail flick, sits back | tosses the coin, catches it, glow flares |
+| `alert` | looks straight at you, tongue half out, blinks | ears up, head tilt toward you | mask tilts, coin raised to show you |
+| `work` | hunched over the coin, taps it with a claw | paw on the coin, tail curls and uncurls | coin floats above the palm, teal wisps |
+| `ponder` | eyes roll up, tail thumps once | scratches behind an ear | hood droops, hand to chin |
+| `wave` | small wave, grin | paw wave, ear flick | slow gloved wave |
 
 ## Making the art: the pipeline
 
-General image models (GPT-image, Midjourney, Gemini) give "pixel-*style*"
-pictures: an off-grid layout, 200+ colours, and frames that don't match. They
-are fine for concept work and never shippable as-is [V: freegamesprites.com
-2026 survey]. So:
-
-1. **Concept, one still per character (hi-res).** Use GPT-image or
-   Nano Banana with the three reference images as *style* reference. Prompt
-   skeleton:
-
-   > Original chibi mascot, full body, facing three-quarter left, black
-   > hooded robe with purple and teal glowing trim, cracked white mask charm
-   > on the belt, holding a glowing purple-to-teal coin, dark background,
-   > clean outline. Character: [Gulp / Vesper / Hush description from the
-   > table]. Not Yoshi, not Eevee, not Shy Guy.
-
-   Pick one still per character. It is the reference for everything after.
-2. **Base sprite at 48×52.**
-   - **PixelLab** is the primary tool. It produces true grid-aligned output,
-     takes a reference image for consistency, and has skeleton- or
-     text-prompted animation. It also has an API and MCP if we want to script
-     it later. <https://www.pixellab.ai/>
-   - **Retro Diffusion** is the fallback for the base pose (palette-limited,
-     trained on licensed pixel art). <https://retrodiffusion.ai/>
-3. **Snap and quantise.**
-   - Run every generated frame through **Pixel Snapper** with the locked
-     palette: `--palette` with the hex list above.
-     <https://github.com/Hugo-Dz/spritefusion-pixel-snapper>
-   - Use `proper-pixel-art` if a model output lost its true resolution.
-4. **Finish by hand in Aseprite** (LibreSprite works too).
-   - One layer for the coin, so its face can change.
-   - Tags `idle`, `running-right`, `running-left`, `waving`, `jumping`,
-     `failed`, `waiting`, `running`, `review`, with the frame counts and
-     durations from the table.
-   - Derive most frames from the rest pose: 1–2 px shifts, a blink, trim
-     glints. This is how Codex's own pets move, and it keeps the three
-     characters consistent.
-5. **Export and build:**
-   `aseprite -b <id>.aseprite --sheet-type rows --list-tags --format json-array --sheet <id>.png --data <id>.json`,
-   then `npm run companions`. The build validates and emits the atlas.
-6. **Shortcut for unblocking code early (throwaway).** Run `/hatch` in the
-   Codex app with one reference image. It writes a Codex-format atlas to
-   `~/.codex/pets/`, which is enough to build and test `Companion.tsx`
-   against while the real art is made. Don't ship it: it is image-model
-   output at 192×208, not a 48×52 grid.
+1. **Master still (GPT-image, per character).**
+   - Setup: full body, centred, three-quarter view facing left, the whole
+     silhouette inside the frame with ~15% margin, feet on an implied floor,
+     a **flat uniform mid-grey (#7f7f7f) background, no shadow, no
+     vignette, no smoke**. Smoke and background glow are what matting
+     can't separate. The coin's own glow stays.
+   - Render at 1024×1024 and keep the seed/prompt in the manifest.
+   - Prompt skeleton:
+     > Original chibi mascot character, painted 3D-render look, soft rim
+     > light. Black hooded robe with glowing purple and teal trim, a cracked
+     > cream mask charm on the belt, holding a glowing purple-to-teal coin.
+     > Full body, centred, three-quarter view facing left, flat plain
+     > mid-grey #7f7f7f background, no shadow, no smoke. Character: [row
+     > from the table]. Not Yoshi, not Eevee, not Shy Guy.
+2. **Clips (Kling 3.0 Pro, image + end_image = the master still).**
+   - 5 s generations at 720p, trimmed to 2–3 s. Prompt the action from the
+     table plus a fixed suffix: *"static locked camera, no zoom, no camera
+     move, plain grey background stays flat, character returns to the
+     exact starting pose."*
+   - Budget 3–4 tries per clip: about 15 clips × 3.5 × $0.42 ≈ **$20–25 for
+     all three characters** [I from the $0.42 per 5 s price].
+3. **Matte.**
+   - MatAnyone 2 on each clip, with a SAM 2 first-frame mask as the prompt.
+   - Then foreground estimation to de-grey the soft edges and the coin glow.
+   - Run the **master still through the same pass**, so its edges match the
+     clips' first and last frames exactly.
+   - If the coin glow comes out dull, split it into its own additive layer
+     (a second `<video>` with `mix-blend-mode: plus-lighter`). Don't do this
+     by default.
+4. **Seal the return.** Models drift a little in the last frames [I].
+   Crossfade the final 6 frames into the matted master still, so the last
+   frame *is* the still, pixel for pixel.
+5. **Encode:** scale to 256×256, then run the VP9-alpha command from
+   decision 4. The still becomes `rest.webp`, with alpha.
+6. **Build:** `scripts/build-companions.mjs` (`npm run companions`) turns
+   `art/companions/<id>/` into the assets.
+   - **Inputs:** `master.png`, the raw clip MP4s, and `prompts.json`
+     (prompts, seeds, model, cost).
+   - **Steps 3–5** run through a uv Python script, `scripts/companions/matte.py`.
+     It needs a GPU and is optional: the committed outputs are the product.
+   - **Validation:**
+     - `alpha_mode=1`;
+     - 256×256;
+     - duration ≤ 3.5 s;
+     - size budget;
+     - first and last frames within a small mean-difference tolerance of
+       `rest.webp`.
+   - **Writes:** `companion.json`.
+   - **Git:** raw MP4s are git-ignored (regenerable from `prompts.json`);
+     the master still and the outputs are tracked.
 
 ## Work order
 
 | Step | What | Effort | Gate |
 |---|---|---|---|
-| 1 | `companion.mjs` + tests (rows, rest, cue priority, `deviceScale`, manifest, prefs sanitizer) | S | `npm test` |
-| 2 | `Companion.tsx` + footer + container query, running on a `/hatch` placeholder | S | electron-debug screenshots at 100% and 150% scaling: crisp edges, hidden under 560 px |
-| 3 | Toggle and picker (Layout popover, palette, `tm.companion.v1`) | S | palette `>` browse shows the commands under Layout |
-| 4 | Art: Gulp first (to prove the pipeline), then Vesper and Hush | M per character, the long pole | `npm run companions` validates, contact sheet reviewed |
-| 5 | `scripts/build-companions.mjs` + `--codex` install | S | installs and animates in the Codex Pets overlay |
-| 6 | (later) import any pet from `~/.codex/pets/` through a validated `pets:list` IPC, drawn with smoothing on when its cell isn't a clean ×4 grid | S | follows the four-file IPC shape in the `electron` skill |
+| 1 | Gulp's master still + one `celebrate` clip through the whole pipeline. This proves matting quality over the Mica card before any code depends on it. | S | clip composited over a screenshot of the real sidebar looks clean, with no grey halo and a readable coin glow |
+| 2 | `companion.mjs` + tests (cues, priority, no re-trigger, manifest, prefs) | S | `npm test` |
+| 3 | `Companion.tsx` + footer + container query | S | electron-debug: `data-state` flips to `playing` on a mock waiting edge and back to `rest`; hidden under 560 px |
+| 4 | Toggle and picker (Layout popover, palette, `tm.companion.v1`) | S | palette `>` browse shows the commands under Layout |
+| 5 | Remaining clips for Gulp, then Vesper and Hush | M per character, the long pole | `npm run companions` validates all 15 |
+| 6 | `build-companions.mjs` + `matte.py` hardened for re-runs | S | re-running on committed inputs is byte-stable for the outputs |
 
 Each code step: `npm run typecheck && npm test && npm run build && git diff
 --check`. Bump `package.json` so the version chip moves, add a CHANGELOG line,
-and add a CLAUDE.md architecture bullet (the companion is on-demand only,
-rests on a still frame, uses integer device-pixel scaling, and the atlas is
-the Codex Pet format).
+and add a CLAUDE.md architecture bullet (still-first and event-only, clips
+start and end on the master still, alpha is VP9 WebM checked by the
+`alpha_mode` tag).
 
 **Done means:**
-
-- no timer runs while the character is resting (a performance trace with
-  nothing happening shows no companion frames);
-- art pixels are exact at 100%, 125% and 150% Windows scaling;
-- the character is hidden rather than crowding the list on short screens;
+- a performance trace with nothing happening shows no video decode;
+- every clip's last frame is indistinguishable from the still;
+- the character hides rather than crowding the list on short screens;
 - clicking it while a session waits lands on that session's pane.
+
+## Routes not taken
+
+- **Pixel-art sprite atlas** (the first draft of this plan: PixelLab +
+  Aseprite, 48×52 cells in the Codex Pet atlas format). Superseded: the
+  concepts are painted, and the pixel route discards that look.
+  - What it had going for it: Codex compatibility (a Codex Pet is a
+    1536×1872 atlas of 8×9 cells, 192×208 each, plus `pet.json` [V]) and a
+    few-KB footprint.
+  - A Codex export can still be made later by sampling frames from the
+    clips into that atlas.
+- **Real-time 2D rig (Rive, Live2D, Spine).**
+  - Rive meshes and bones work on raster art and its state machine fits
+    events [V].
+  - But a flat painting must first be cut into occlusion-safe layers, and
+    a mesh warp never turns a head or moves cloth, so it never reads as CGI
+    [I].
+  - Live2D is heavy manual rigging.
+  - Revisit only if we want interaction the clips can't give, like eyes
+    following the cursor.
+- **Image-to-3D (Tripo, Meshy) + auto-rig.** Auto-rigging chibi quadrupeds
+  works [V], but textures flatten and the face and glow drift from the
+  painting, and robes and hoods weight badly. High effort, and further from
+  the concept than video [I].
+
+## Sources
+
+Codex Pets spec:
+<https://github.com/openai/skills/blob/main/skills/.curated/hatch-pet/SKILL.md>
+
+Image-to-video models:
+- <https://www.segmind.com/models/kling-3-pro-image2video>
+- <https://kling.ai/quickstart/ai-video-start-end-frames>
+- <https://renderful.ai/blog/kling-api-pricing>
+- <https://openrouter.ai/bytedance/seedance-2.0>
+- <https://openrouter.ai/google/veo-3.1>
+- <https://platform.minimax.io/docs/guides/video-generation>
+- <https://docs.lumalabs.ai/docs/video-generation>
+- <https://blog.comfy.org/p/wan22-flf2v-comfyui-native-support>
+- <https://github.com/WeChatCV/Wan-Alpha>
+
+Matting:
+- <https://github.com/pq-yang/MatAnyone2>
+- <https://huggingface.co/briaai/RMBG-2.0> (non-commercial weights; not used)
+
+Transparent video on the web:
+<https://jakearchibald.com/2024/video-with-transparency/>
+
+Rigging and 3D:
+- <https://help.rive.app/editor/manipulating-shapes/meshes>
+- <https://www.live2d.com/en/sdk/license/>
+- <https://www.tripo3d.ai/features/ai-auto-rigging>
