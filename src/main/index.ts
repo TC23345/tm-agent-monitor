@@ -8,7 +8,7 @@ import { shellArgs } from '../shared/wtArgs.mjs'
 import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
 import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, promises as fsp, watch as fsWatch, type FSWatcher } from 'node:fs'
-import { isNoteName, nextNoteName, notePreview, MAX_NOTES, MAX_NOTE_BYTES, type NoteMeta } from '../shared/notes.mjs'
+import { isNoteName, planNewNote, notePreview, MAX_NOTES, MAX_NOTE_BYTES, type NoteMeta } from '../shared/notes.mjs'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { statSync } from 'node:fs'
@@ -1745,13 +1745,16 @@ function registerIpc(): void {
       return false
     }
   })
-  ipcMain.handle('notes:create', async (): Promise<string | null> => {
+  // `template` is a NOTE_TEMPLATES id; anything else is a blank note. A
+  // once-a-day template whose note for today exists answers with that name.
+  ipcMain.handle('notes:create', async (_e, template: unknown): Promise<string | null> => {
     const dir = ensureNotesDir()
     const existing = (await fsp.readdir(dir).catch(() => [] as string[])).filter(isNoteName)
-    const name = nextNoteName(existing)
+    const plan = planNewNote(existing, typeof template === 'string' ? template : undefined)
+    if (plan.exists) return plan.name
     try {
-      await fsp.writeFile(join(dir, name), '', { encoding: 'utf8', flag: 'wx' })
-      return name
+      await fsp.writeFile(join(dir, plan.name), plan.body, { encoding: 'utf8', flag: 'wx' })
+      return plan.name
     } catch { return null }
   })
   ipcMain.handle('notes:delete', async (_e, name: unknown): Promise<boolean> => {

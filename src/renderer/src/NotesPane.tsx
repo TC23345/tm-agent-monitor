@@ -1,10 +1,18 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import { FilePlus2, Trash2 } from 'lucide-react'
-import { noteTitle, notePreview, sortNotes, type NoteMeta } from '@shared/notes.mjs'
+import { ChevronRight, Plus, Trash2 } from 'lucide-react'
+import { groupNotes, noteTemplate, noteTitle, notePreview, sortNotes, type NoteMeta } from '@shared/notes.mjs'
 import { MarkdownView } from './MarkdownView'
 import { tid } from './testid'
 
 const SAVE_AFTER_MS = 600
+const COLLAPSED_KEY = 'tm.notes.groups.v1'
+
+function readCollapsed(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]')
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+  } catch { return [] }
+}
 
 export interface NotesPaneHandle {
   newNote: () => void
@@ -35,6 +43,12 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
   const [dirty, setDirty] = useState(false)
   const [status, setStatus] = useState<'saved' | 'saving' | 'error' | null>(null)
   const [now, setNow] = useState(Date.now())
+  const [collapsed, setCollapsed] = useState<string[]>(readCollapsed)
+  const toggleGroup = (id: string) => setCollapsed((prev) => {
+    const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next)) } catch { /* layout nicety only */ }
+    return next
+  })
   const saveTimer = useRef<number | null>(null)
   const textRef = useRef(text)
   textRef.current = text
@@ -98,9 +112,9 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
     }, SAVE_AFTER_MS)
   }
 
-  const newNote = useCallback(async () => {
+  const newNote = useCallback(async (template?: string) => {
     await flush()
-    const name = await window.watch.createNote()
+    const name = await window.watch.createNote(template)
     if (!name) return
     await refresh()
     await open(name)
@@ -131,24 +145,37 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
   return (
     <div className="notes" data-testid="notes">
       <div className="notes-list">
-        {notes.length === 0 && (
-          <div className="notes-empty">
-            No notes yet.
-            <button className="notes-newbtn" onClick={() => void newNote()} data-testid="notes-new-empty"><FilePlus2 strokeWidth={2} /> New note</button>
-          </div>
-        )}
-        {notes.map((n) => (
-          <div key={n.name} className={`notes-row ${selected === n.name ? 'is-active' : ''}`}>
-            <button className="notes-open" onClick={() => void open(n.name)} title={n.name} data-testid={tid('note', n.name)}>
-              <span className="notes-title">{noteTitle(n.name)}</span>
-              <span className="notes-meta">{n.preview ? notePreview(n.preview) : ''}</span>
-              <span className="notes-when">{ago(n.mtime, now)}</span>
-            </button>
-            <button className="notes-del" onClick={() => void remove(n.name)} title={`Delete ${noteTitle(n.name)}`} aria-label={`Delete ${noteTitle(n.name)}`} data-testid={tid('note-delete', n.name)}>
-              <Trash2 strokeWidth={2} />
-            </button>
-          </div>
-        ))}
+        {groupNotes(notes).map((g) => {
+          const shut = collapsed.includes(g.id)
+          const template = noteTemplate(g.id)
+          const addLabel = template ? (template.once ? `Today's ${template.label.toLowerCase()} note` : `New ${template.prefix.toLowerCase()} note`) : 'New note'
+          return (
+            <section key={g.id} className="notes-group" data-testid={tid('notes-group', g.id)}>
+              <div className="notes-ghead">
+                <button className="notes-gtoggle" onClick={() => toggleGroup(g.id)} aria-expanded={!shut} data-testid={tid('notes-group-toggle', g.id)}>
+                  <ChevronRight strokeWidth={2} className={shut ? '' : 'is-open'} />
+                  <span>{g.label}</span>
+                  <span className="notes-gcount">{g.notes.length || ''}</span>
+                </button>
+                <button className="notes-gadd" onClick={() => void newNote(template?.id)} title={addLabel} aria-label={addLabel} data-testid={tid('notes-group-new', g.id)}>
+                  <Plus strokeWidth={2} />
+                </button>
+              </div>
+              {!shut && g.notes.map((n) => (
+                <div key={n.name} className={`notes-row ${selected === n.name ? 'is-active' : ''}`}>
+                  <button className="notes-open" onClick={() => void open(n.name)} title={n.name} data-testid={tid('note', n.name)}>
+                    <span className="notes-title">{template ? noteTitle(n.name).slice(template.prefix.length + 1) || noteTitle(n.name) : noteTitle(n.name)}</span>
+                    <span className="notes-meta">{n.preview ? notePreview(n.preview) : ''}</span>
+                    <span className="notes-when">{ago(n.mtime, now)}</span>
+                  </button>
+                  <button className="notes-del" onClick={() => void remove(n.name)} title={`Delete ${noteTitle(n.name)}`} aria-label={`Delete ${noteTitle(n.name)}`} data-testid={tid('note-delete', n.name)}>
+                    <Trash2 strokeWidth={2} />
+                  </button>
+                </div>
+              ))}
+            </section>
+          )
+        })}
       </div>
       <div className="notes-editor">
         {selected && preview ? (

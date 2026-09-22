@@ -33,7 +33,9 @@ your row in `GET /v1/terminals`.
 the user edits in the app's **Notes** pane. Read it when the user says "my
 notes", "the notepad", or points you at a note by name; write there when they
 ask you to leave them something. One file per note, `<name>.md`, no
-subfolders. The pane picks up your edits on its own — do not tell the user to
+subfolders. The list groups notes by name prefix — `Daily <date>.md`,
+`Meeting …`, `Plan …`, `Prompt …`; anything else sits under Notes — so to
+file a note in a group, start its name with that word and a space. The pane picks up your edits on its own — do not tell the user to
 refresh. Do not delete or rewrite a note they did not ask you to touch.
 
 ## Routes

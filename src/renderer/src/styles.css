@@ -915,6 +915,17 @@ kbd {
    can run edge to edge. ---- */
 .notes { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 0; height: 100%; margin: -12px; min-height: 0; }
 .notes-list { overflow-y: auto; border-right: 1px solid var(--hairline); padding: 8px 6px; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+.notes-group + .notes-group { margin-top: 6px; }
+.notes-ghead { display: grid; grid-template-columns: 1fr auto; align-items: center; }
+.notes-gtoggle { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 4px 4px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; text-align: left; cursor: pointer; }
+.notes-gtoggle:hover { color: var(--text); }
+.notes-gtoggle svg { width: 12px; height: 12px; flex: 0 0 auto; transition: transform 120ms ease; }
+.notes-gtoggle svg.is-open { transform: rotate(90deg); }
+.notes-gcount { margin-left: 2px; font-weight: 500; opacity: 0.8; }
+.notes-gadd { width: 22px; height: 22px; display: grid; place-items: center; margin-right: 4px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0.45; }
+.notes-gadd svg { width: 13px; height: 13px; }
+.notes-ghead:hover .notes-gadd, .notes-gadd:focus-visible { opacity: 1; }
+.notes-gadd:hover { color: var(--text); background: var(--elev); }
 .notes-row { display: grid; grid-template-columns: 1fr auto; align-items: center; border-radius: 7px; }
 .notes-row:hover, .notes-row.is-active { background: var(--elev); }
 .notes-row.is-active { box-shadow: inset 2px 0 0 var(--accent); }
@@ -926,10 +937,6 @@ kbd {
 .notes-del svg { width: 13px; height: 13px; }
 .notes-row:hover .notes-del, .notes-row.is-active .notes-del { opacity: 1; }
 .notes-del:hover { color: var(--st-question); background: rgba(255, 255, 255, 0.06); }
-.notes-empty { padding: 20px 8px; font-size: 12.5px; color: var(--muted); text-align: center; line-height: 1.6; }
-.notes-newbtn { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 5px 10px; border: 1px solid var(--hairline); border-radius: 7px; background: transparent; color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
-.notes-newbtn svg { width: 14px; height: 14px; }
-.notes-newbtn:hover { background: var(--elev); }
 .notes-editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .notes-text { flex: 1 1 auto; min-height: 0; width: 100%; padding: 14px 16px; border: 0; outline: none; resize: none; background: transparent; color: var(--text); font: 13.5px/1.55 ui-monospace, "Cascadia Code", Consolas, monospace; tab-size: 2; }
 .notes-text::placeholder { color: var(--muted); }

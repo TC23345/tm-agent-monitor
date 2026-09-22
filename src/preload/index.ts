@@ -112,7 +112,7 @@ const api = {
   listNotes: (): Promise<{ dir: string; notes: NoteMeta[] }> => ipcRenderer.invoke('notes:list'),
   readNote: (name: string): Promise<string | null> => ipcRenderer.invoke('notes:read', name),
   writeNote: (name: string, text: string): Promise<boolean> => ipcRenderer.invoke('notes:write', name, text),
-  createNote: (): Promise<string | null> => ipcRenderer.invoke('notes:create'),
+  createNote: (template?: string): Promise<string | null> => ipcRenderer.invoke('notes:create', template),
   deleteNote: (name: string): Promise<boolean> => ipcRenderer.invoke('notes:delete', name),
   openNotesFolder: (): Promise<string> => ipcRenderer.invoke('notes:open-folder'),
   /** Open a web or mail link in the default app (a note preview's links). */
