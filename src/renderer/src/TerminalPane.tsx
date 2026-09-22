@@ -146,15 +146,42 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function Termi
       if (sessionId && ready) window.watch.termInput(sessionId, data)
     })
 
-    // Ctrl+V. xterm turns Ctrl+<letter> into the raw control byte and cancels
-    // the event, so the browser never pastes and the shell receives ^V. Codex
-    // binds ^V to "attach an image from the clipboard" and Claude Code ignores
-    // it on Windows (Alt+V is its image key), which is why pasted text vanished
-    // while a copied screenshot worked. Paste text ourselves through xterm — a
-    // CLI with bracketed paste on receives one paste, not keystrokes — and hand
-    // an image-only clipboard to the CLI as the key it expects.
+    // Copy on select, like Windows Terminal's copyOnSelect: whatever you
+    // highlight (drag, double-click a word, triple-click a line) lands on the
+    // clipboard. Debounced so a drag writes once when it settles, not per
+    // mousemove; an emptied selection leaves the clipboard alone.
+    let copyTimer = 0
+    const copySelection = () => {
+      if (!disposed && term.hasSelection()) window.watch.copyText(term.getSelection())
+    }
+    const offSelection = term.onSelectionChange(() => {
+      window.clearTimeout(copyTimer)
+      copyTimer = window.setTimeout(copySelection, 120)
+    })
+
     term.attachCustomKeyEventHandler((e) => {
-      if (e.type !== 'keydown' || !e.ctrlKey || e.altKey || e.metaKey || (e.key !== 'v' && e.key !== 'V')) return true
+      if (e.type !== 'keydown' || !e.ctrlKey || e.altKey || e.metaKey) return true
+      // Ctrl+C with text highlighted copies instead of interrupting, as in
+      // Windows Terminal. xterm otherwise sends ^C regardless, which kills
+      // the Claude Code or Codex session you were only trying to copy from.
+      // With nothing highlighted, Ctrl+C is still the interrupt. Ctrl+Shift+C
+      // always copies.
+      if (e.key === 'c' || e.key === 'C') {
+        if (!term.hasSelection()) return !e.shiftKey
+        e.preventDefault()
+        window.clearTimeout(copyTimer)
+        copySelection()
+        term.clearSelection()
+        return false
+      }
+      // Ctrl+V. xterm turns Ctrl+<letter> into the raw control byte and cancels
+      // the event, so the browser never pastes and the shell receives ^V. Codex
+      // binds ^V to "attach an image from the clipboard" and Claude Code ignores
+      // it on Windows (Alt+V is its image key), which is why pasted text vanished
+      // while a copied screenshot worked. Paste text ourselves through xterm — a
+      // CLI with bracketed paste on receives one paste, not keystrokes — and hand
+      // an image-only clipboard to the CLI as the key it expects.
+      if (e.key !== 'v' && e.key !== 'V') return true
       e.preventDefault() // no native paste on top of ours
       void window.watch.readClipboard().then(({ text, hasImage }) => {
         if (disposed || !sessionId || !ready) return
@@ -176,6 +203,11 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function Termi
       raf = requestAnimationFrame(() => {
         if (disposed || !host.clientWidth || !host.clientHeight) return
         fit.fit()
+        // xterm 6's DOM renderer redraws the last selection's highlight on
+        // resize even after it was cleared (probed: Ctrl+C-to-copy, then the
+        // sidebar toggle brought it back while hasSelection() was false). A
+        // clear with nothing selected just repaints it away.
+        if (!term.hasSelection()) term.clearSelection()
         if (sessionId && ready) window.watch.termResize(sessionId, Math.max(term.cols, 2), Math.max(term.rows, 2))
       })
     })
@@ -183,6 +215,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function Termi
 
     return () => {
       disposed = true
+      window.clearTimeout(copyTimer)
+      offSelection.dispose()
       cancelAnimationFrame(raf)
       observer.disconnect()
       offInput.dispose()

@@ -1496,6 +1496,8 @@ kbd {
 /* The sidebar edge already has the frame hairline; the splitter straddles it. */
 .splitter--frame { width: 7px; margin: 0 -3px; }
 .splitter--frame .splitter-grip { height: calc(100% - 20px); }
+/* Ctrl+B: the sidebar and its splitter leave the flow; the grid takes the frame. */
+.sidebar.is-hidden, .splitter--frame.is-hidden { display: none; }
 /* A grid splitter fills its gutter track. */
 .splitter--grid { justify-self: stretch; align-self: stretch; }
 

@@ -161,6 +161,14 @@ export function App() {
     try { localStorage.setItem('tm.field.v1', v ? '0' : '1') } catch { /* preference only */ }
     return !v
   })
+  /** Ctrl+B (Ctrl+Shift+B inside a terminal): the grid takes the whole frame. Remembered. */
+  const [sidebarHidden, setSidebarHidden] = useState<boolean>(() => {
+    try { return localStorage.getItem('tm.sidebar.hidden.v1') === '1' } catch { return false }
+  })
+  const toggleSidebar = () => setSidebarHidden((v) => {
+    try { localStorage.setItem('tm.sidebar.hidden.v1', v ? '0' : '1') } catch { /* preference only */ }
+    return !v
+  })
   const [frameW, setFrameW] = useState(() => window.innerWidth)
   const frameRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLElement>(null)
@@ -294,6 +302,13 @@ export function App() {
       if (ctrl && e.shiftKey && (e.key === 'W' || e.key === 'w')) {
         e.preventDefault()
         routeToWaiting()
+        return
+      }
+      // Ctrl+B belongs to the CLI inside a terminal (Claude Code backgrounds
+      // a running command with it), so there the sidebar is Ctrl+Shift+B.
+      if (ctrl && (e.key === 'b' || e.key === 'B') && (e.shiftKey || !inTerminal)) {
+        e.preventDefault()
+        toggleSidebar()
         return
       }
       if (ctrl && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
@@ -992,6 +1007,7 @@ export function App() {
       cmd(`cols-${c}`, `Columns: ${c === 'auto' ? 'Auto' : c}`, () => setPaneCols(c), { icon: <Columns3 strokeWidth={2} />, detail: paneCols === c ? 'current' : undefined, keywords: ['grid', 'layout'] })
     }
     if (sized) cmd('reset-sizes', 'Reset pane sizes', resetSizes, { icon: <Ruler strokeWidth={2} />, keywords: ['layout', 'splitter'] })
+    cmd('sidebar', `${sidebarHidden ? 'Show' : 'Hide'} sidebar`, toggleSidebar, { icon: <PanelLeft strokeWidth={2} />, keys: ['Ctrl', 'B'], keywords: ['sidebar', 'fullscreen', 'full screen', 'focus', 'hide', 'show', 'toggle', 'agents', 'limits'] })
     cmd('field', `Pace streaks: ${fieldOn ? 'off' : 'on'}`, toggleField, { icon: <Sparkles strokeWidth={2} />, keywords: ['field', 'gpu', 'webgpu', 'streaks', 'burn', 'session', 'effects'] })
     if (!full) {
       for (const c of projectCommands) {
@@ -1094,7 +1110,9 @@ export function App() {
 
 
       <div className="frame" ref={frameRef}>
-        <aside className="sidebar" style={{ flexBasis: sidebarWidth }}>
+        {/* Hidden, not unmounted: the sections keep their state and the
+            launch nav its popover wiring, like a zoomed grid's other panes. */}
+        <aside className={`sidebar ${sidebarHidden ? 'is-hidden' : ''}`} style={{ flexBasis: sidebarWidth }} data-testid="sidebar">
           <LaunchNav
             context={context}
             projects={launchProjects}
@@ -1113,7 +1131,7 @@ export function App() {
         </aside>
 
         <Splitter
-          className="splitter--frame"
+          className={`splitter--frame ${sidebarHidden ? 'is-hidden' : ''}`}
           testId="splitter-sidebar"
           label="Sidebar width"
           onStart={() => { sidebarDrag.current = sidebarWidth }}
@@ -1262,6 +1280,8 @@ export function App() {
         canResetSizes={sized}
         onResetSizes={resetSizes}
         fieldOn={fieldOn}
+        sidebarHidden={sidebarHidden}
+        onToggleSidebar={toggleSidebar}
         onToggleField={toggleField}
         layouts={layoutNames}
         onSaveLayout={() => setLayoutDialog(true)}

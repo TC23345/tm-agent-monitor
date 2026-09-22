@@ -25,9 +25,12 @@ interface Props {
   onPaneCols: (cols: PaneCols) => void
   canResetSizes: boolean
   onResetSizes: () => void
-  /** The on-demand GPU effects: pane burst, hover beam, Session-bar streaks. */
+  /** The one GPU layer left: the Session bar's pace streaks. */
   fieldOn: boolean
   onToggleField: () => void
+  /** Ctrl+B: hide the sidebar so the grid takes the whole frame. */
+  sidebarHidden: boolean
+  onToggleSidebar: () => void
   /** Named layouts: save the current one, apply or forget a saved one. */
   layouts: string[]
   onSaveLayout: () => void
@@ -55,7 +58,7 @@ const SIZE_LABEL: Record<SizeMode, string> = { full: 'Full', left: 'Left half', 
 export function StatusBar(props: Props) {
   const {
     rebuild, onRebuild, panes, onAddPane, onClosePane, sidebarViews, onToggleSidebarView,
-    sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, fieldOn, onToggleField,
+    sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, fieldOn, onToggleField, sidebarHidden, onToggleSidebar,
     layouts, onSaveLayout, onApplyLayout, onDeleteLayout, openMenu, onOpenMenu, version, debugPort
   } = props
   const full = panes.length >= MAX_PANES
@@ -150,6 +153,14 @@ export function StatusBar(props: Props) {
               <MenuCheckItem label="2 columns" checked={paneCols === 2} onClick={() => onPaneCols(2)} />
               <MenuCheckItem label="3 columns" checked={paneCols === 3} onClick={() => onPaneCols(3)} />
               <div className="menu-sep" />
+              <MenuCheckItem
+                icon={<PanelLeft strokeWidth={2} />}
+                label="Sidebar"
+                hint="Ctrl+B (Ctrl+Shift+B inside a terminal): hide it and let the panes fill the frame"
+                checked={!sidebarHidden}
+                onClick={onToggleSidebar}
+                testId="sidebar-toggle"
+              />
               <MenuCheckItem
                 icon={<Sparkles strokeWidth={2} />}
                 label="Pace streaks"
