@@ -307,6 +307,8 @@ kbd {
   text-transform: uppercase;
   color: var(--muted);
 }
+/* A title written as given (no icon before it), e.g. the notepad's "TC's NOTES". */
+.gpane-title--plain { text-transform: none; margin-left: 2px; }
 .gpane-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 /* Per-kind tool buttons, separated from zoom/close by a hairline. */
 .gpane-tools {
@@ -1720,7 +1722,9 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 /* The pane's full folder, after the chip. Ellipsised from the *left* so the
    tail — the part that changes — stays readable; one click copies it. */
 .gpane-path {
-  flex: 1 1 auto;
+  /* Sized to the path itself, so the hover highlight hugs the text; it still
+     shrinks (ellipsising from the left) when the header runs out of room. */
+  flex: 0 1 auto;
   min-width: 0;
   max-width: 60%;
   display: inline-flex;
@@ -1741,6 +1745,8 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .gpane-path:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
 .gpane-path:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .gpane-path.is-copied { color: var(--st-complete); cursor: default; }
+/* A hairline closing off the path from whatever follows it in the header. */
+.gpane-sep { flex: 0 0 auto; width: 1px; height: 14px; margin: 0 2px 0 4px; background: var(--border); }
 .gpane-path-ic { width: 12px; height: 12px; }
 .gpane-path-text { direction: rtl; unicode-bidi: plaintext; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gpane-ctxwrap { display: contents; }

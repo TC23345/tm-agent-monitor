@@ -762,7 +762,8 @@ export function App() {
 
   /** What a terminal pane runs, as its header title. */
   const paneTitle = (pane: PaneInstance) =>
-    pane.kind === 'terminal' && pane.term ? (pane.term.launch === 'claude' ? 'Claude Code' : pane.term.launch === 'codex' ? 'Codex' : 'Terminal') : undefined
+    pane.kind === 'terminal' && pane.term ? (pane.term.launch === 'claude' ? 'Claude Code' : pane.term.launch === 'codex' ? 'Codex' : 'Terminal')
+      : pane.kind === 'notes' ? "TC's NOTES" : undefined
 
   const tool = (title: string, icon: ReactNode, onClick: () => void, disabled = false, active = false) => (
     <button className={`iconbtn iconbtn--sm ${active ? 'is-on' : ''}`} onClick={onClick} title={title} aria-label={title} aria-pressed={active || undefined} disabled={disabled} data-testid={tid('pane-tool', title)}>
@@ -1219,6 +1220,7 @@ export function App() {
                 kind={pane.kind}
                 onClose={() => closePane(pane.id)}
                 title={paneTitle(pane)}
+                plainTitle={pane.kind === 'notes'}
                 context={paneContext(pane)}
                 path={pane.kind === 'terminal' ? pane.term?.cwd : pane.kind === 'notes' ? notesDir : undefined}
                 onCopyPath={

@@ -7,6 +7,9 @@ interface Props {
   /** Overrides the kind's label — a terminal pane says what it runs
    * (Claude Code / Codex / Terminal) instead of wearing a chip. */
   title?: string
+  /** The title stands alone: no kind icon, and written as given rather than
+   * uppercased (the notepad's "TC's NOTES" keeps its lowercase s). */
+  plainTitle?: boolean
   onClose: () => void
   /** Rendered right after the title — the launch-context chip, a cwd label. */
   context?: ReactNode
@@ -41,7 +44,7 @@ interface Props {
  * whose header carries its kind's tools. The kind itself is fixed for the
  * pane's life — swapping one kind for another would kill a running shell, so
  * a different kind is a new pane (View → Add pane, or the palette). */
-export function Pane({ kind, title, onClose, context, path, onCopyPath, tools, attention, zoomed, onZoom, dragHandle, children }: Props) {
+export function Pane({ kind, title, plainTitle, onClose, context, path, onCopyPath, tools, attention, zoomed, onZoom, dragHandle, children }: Props) {
   const meta = PANE_KINDS.find((p) => p.id === kind)!
   const Icon = meta.icon
   const [copied, setCopied] = useState(false)
@@ -73,8 +76,8 @@ export function Pane({ kind, title, onClose, context, path, onCopyPath, tools, a
           onZoom?.()
         }}
       >
-        <Icon className="gpane-ic" strokeWidth={2} />
-        <span className="gpane-title" title={meta.hint}>{title ?? meta.label}</span>
+        {!plainTitle && <Icon className="gpane-ic" strokeWidth={2} />}
+        <span className={`gpane-title ${plainTitle ? 'gpane-title--plain' : ''}`} title={meta.hint}>{title ?? meta.label}</span>
         {/* The chip shares the path's click: both copy, both flash. */}
         {context && onCopyPath ? <span className="gpane-ctxwrap" onClick={copy}>{context}</span> : context}
         {path && (
@@ -87,6 +90,7 @@ export function Pane({ kind, title, onClose, context, path, onCopyPath, tools, a
             {copied ? <><Check className="gpane-path-ic" strokeWidth={2.5} />Copied</> : <span className="gpane-path-text">{path}</span>}
           </button>
         )}
+        {path && <span className="gpane-sep" aria-hidden="true" />}
         {attention && (
           <span className="gpane-attn" title={`Waiting for your input: ${attention}`} data-testid="pane-attention">
             <BellRing strokeWidth={2} />
