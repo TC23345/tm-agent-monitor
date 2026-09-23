@@ -48,7 +48,7 @@ import { launchFor, launchKey, withLaunch, type LaunchPrefs } from '@shared/pane
 import { LaunchNav, type LaunchTarget, type NavMenu } from './LaunchNav'
 import {
   AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Code2 as CursorIcon, Columns3, Copy,
-  Eye, EyeOff, FilePlus2, Filter, Folder, FolderOpen, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
+  Eye, EyeOff, Filter, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
   NotebookPen, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, Rss, Ruler, Save, Shrink, Sparkles, SquareSlash,
   SquareTerminal, Terminal, Trash2, X
 } from 'lucide-react'
@@ -776,10 +776,8 @@ export function App() {
     if (pane.kind === 'notes') {
       return (
         <>
+          {/* New note / New folder / Open folder live in the tree's own toolbar. */}
           {tool(notesPreview ? 'Edit' : 'Preview', ic(notesPreview ? PenLine : Eye), toggleNotesPreview, false, notesPreview)}
-          {tool('New note', ic(FilePlus2), () => notesRef.current?.newNote())}
-          {tool('New folder', ic(FolderPlus), () => notesRef.current?.newFolder())}
-          {tool('Open the notes folder', ic(FolderOpen), () => { void window.watch.openNotesFolder() })}
         </>
       )
     }

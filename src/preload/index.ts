@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { NoteMeta } from '../shared/notes.mjs'
+import type { NoteMeta, NoteOrder } from '../shared/notes.mjs'
 import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, DailyUsageDay, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SizeMode, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights, WorkspaceCommand } from '../shared/types.js'
 
 const api = {
@@ -110,7 +110,10 @@ const api = {
   getEvents: (): Promise<ActivityEvent[]> => ipcRenderer.invoke('agent:events'),
   /** The shared notepad (Notes pane): Markdown files in the notes folder. */
   /** Notes carry their path relative to the notes folder ('/'-separated); folders are listed even when empty. */
-  listNotes: (): Promise<{ dir: string; notes: NoteMeta[]; folders: string[] }> => ipcRenderer.invoke('notes:list'),
+  listNotes: (): Promise<{ dir: string; notes: NoteMeta[]; folders: string[]; order: NoteOrder }> => ipcRenderer.invoke('notes:list'),
+  /** Drag and drop: into `toFolder` ('' = top level), placed at `index` among `visible` when given. */
+  moveNoteEntry: (from: string, toFolder: string, index?: number, visible?: string[]): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('notes:move', from, toFolder, index, visible),
   readNote: (name: string): Promise<string | null> => ipcRenderer.invoke('notes:read', name),
   writeNote: (name: string, text: string): Promise<boolean> => ipcRenderer.invoke('notes:write', name, text),
   createNote: (template?: string, folder?: string): Promise<string | null> => ipcRenderer.invoke('notes:create', template, folder),

@@ -909,56 +909,78 @@ kbd {
 
 /* ---- connection pill (top bar) ---- */
 .conn { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
-/* ---- notes pane: a list of Markdown files and a plain editor. The body
-   scrolls per column; the pane's own body padding is reclaimed so the editor
-   can run edge to edge. ---- */
-.notes { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 0; height: 100%; margin: -12px; min-height: 0; }
-.notes-list { overflow-y: auto; border-right: 1px solid var(--hairline); padding: 8px 6px; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
-.notes-group + .notes-group { margin-top: 6px; }
-/* Expand/collapse without measuring: a one-row grid track eases 0fr → 1fr,
-   the content fades with it. Used by folders and the template groups alike. */
+/* ---- notes pane: a file tree of Markdown notes and a plain editor. Each
+   column scrolls on its own; the pane's body padding is reclaimed so the
+   editor runs edge to edge. ---- */
+.notes { display: grid; grid-template-columns: minmax(170px, 240px) 1fr; gap: 0; height: 100%; margin: -12px; min-height: 0; }
+.notes-side { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-right: 1px solid var(--hairline); }
+/* The tree's own menu bar: new note / folder / template on the left, where they
+   will land in the middle, collapse-all and open-in-Explorer on the right. */
+.notes-toolbar { flex: 0 0 auto; display: flex; align-items: center; gap: 1px; padding: 5px 6px; border-bottom: 1px solid var(--hairline); }
+.notes-tool { width: 26px; height: 24px; display: grid; place-items: center; flex: 0 0 auto; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; transition: background 0.12s ease, color 0.12s ease; }
+.notes-tool svg { width: 15px; height: 15px; }
+.notes-tool:hover, .notes-tool:focus-visible { background: var(--elev); color: var(--text); outline: none; }
+.notes-toolbar-where { flex: 1 1 auto; min-width: 0; padding: 0 6px; font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.notes-list { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 5px 24px; scrollbar-width: thin; scrollbar-color: var(--track) transparent; border-radius: 0 0 0 8px; transition: box-shadow 0.12s ease; }
+.notes-list.is-drop-into { box-shadow: inset 0 0 0 1px var(--accent); }
+.notes-list.is-drop-bad { box-shadow: inset 0 0 0 1px var(--st-permission); }
+/* Expand/collapse without measuring: a one-row grid track eases 0fr → 1fr, the content fading with it. */
 .notes-collapse { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease; }
 .notes-collapse.is-open { grid-template-rows: 1fr; opacity: 1; }
 .notes-collapse-inner { overflow: hidden; min-height: 0; }
 .notes-collapse:not(.is-open) .notes-collapse-inner { visibility: hidden; transition: visibility 0s 220ms; }
-.notes-chev { width: 12px; height: 12px; flex: 0 0 auto; transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1); }
-.notes-chev.is-open, .notes-folder-row.is-open .notes-chev { transform: rotate(90deg); }
-.notes-folder-row { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 6px 8px 6px 4px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; font-weight: 500; text-align: left; cursor: pointer; }
+.notes-chev { width: 12px; height: 12px; flex: 0 0 auto; color: var(--muted); transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+.notes-folder-row.is-open .notes-chev { transform: rotate(90deg); }
+/* Folder rows: the toggle fills the row; a + to start a note there shows on hover. */
+.notes-folder-row { display: flex; align-items: center; border-radius: 6px; touch-action: none; transition: background 0.12s ease, box-shadow 0.12s ease; }
 .notes-folder-row:hover { background: var(--elev); }
-.notes-folder-row .notes-chev { color: var(--muted); }
+.notes-folder-row.is-selected { background: var(--elev); box-shadow: inset 2px 0 0 var(--muted); }
+.notes-folder-row.is-drop-into { background: rgba(217, 119, 87, 0.14); box-shadow: inset 0 0 0 1px var(--accent); }
+.notes-folder-row.is-drop-bad { box-shadow: inset 0 0 0 1px var(--st-permission); }
+.notes-folder-toggle { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; padding: 5px 6px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; font-weight: 500; text-align: left; cursor: pointer; }
 .notes-folder-ic { width: 14px; height: 14px; flex: 0 0 auto; color: var(--muted); }
-.notes-folder-row.is-open .notes-folder-ic { color: var(--accent); }
+.notes-folder-ic.is-template { color: var(--accent); }
+.notes-folder-row.is-open .notes-folder-ic:not(.is-template) { color: var(--accent-bright, var(--accent)); }
 .notes-folder-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.notes-folder-row .notes-gcount { font-size: 11px; color: var(--muted); }
-.notes-folder-empty { padding: 5px 8px; font-size: 11.5px; color: var(--faint); }
-/* Inline rename: the row becomes a field in place. Amber (a warning) when the name will not work. */
+.notes-gcount { flex: 0 0 auto; font-size: 11px; font-weight: 500; color: var(--faint); font-variant-numeric: tabular-nums; }
+.notes-rowact { width: 22px; height: 22px; display: grid; place-items: center; flex: 0 0 auto; margin-right: 3px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0; transition: opacity 0.12s ease; }
+.notes-rowact svg { width: 13px; height: 13px; }
+.notes-folder-row:hover .notes-rowact, .notes-rowact:focus-visible { opacity: 1; }
+.notes-rowact:hover { color: var(--text); background: var(--card); }
+.notes-folder-empty { padding: 4px 8px; font-size: 11.5px; color: var(--faint); }
+/* Note rows: file icon, the note's H1, how long ago; a second line only when there is real text. */
+.notes-row { border-radius: 6px; touch-action: none; transition: background 0.12s ease; }
+.notes-row:hover, .notes-row.is-active { background: var(--elev); }
+.notes-row.is-active { box-shadow: inset 2px 0 0 var(--accent); }
+.notes-open { display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "icon title when" ". meta meta"; align-items: center; gap: 1px 7px; width: 100%; padding: 5px 8px 5px 6px; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.notes-file-ic { grid-area: icon; width: 13px; height: 13px; color: var(--faint); }
+.notes-row.is-active .notes-file-ic { color: var(--accent); }
+.notes-title { grid-area: title; min-width: 0; font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notes-meta { grid-area: meta; min-width: 0; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notes-when { grid-area: when; font-size: 10.5px; color: var(--faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Drag and drop: the source dims, a line marks the slot, a small ghost follows the pointer. */
+.notes-row.is-dragging, .notes-folder-row.is-dragging { opacity: 0.4; }
+.notes-dropline { position: absolute; right: 8px; height: 2px; border-radius: 1px; background: var(--accent); pointer-events: none; box-shadow: 0 0 0 1px rgba(217, 119, 87, 0.25); }
+.notes-dropline::before { content: ''; position: absolute; left: -3px; top: -2px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.notes-dropline.is-bad, .notes-dropline.is-bad::before { background: var(--st-permission); }
+.notes-ghost { position: fixed; z-index: 70; display: flex; align-items: center; gap: 6px; max-width: 260px; padding: 5px 9px; border-radius: 7px; background: var(--elev); border: 1px solid var(--border); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); color: var(--text); font-size: 12px; pointer-events: none; white-space: nowrap; }
+.notes-ghost svg { width: 13px; height: 13px; flex: 0 0 auto; color: var(--muted); }
+.notes-ghost span { overflow: hidden; text-overflow: ellipsis; }
+.notes-ghost em { font-style: normal; color: var(--st-permission); font-size: 11px; }
+.notes-ghost.is-bad { border-color: var(--st-permission); }
+body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-select: none !important; }
+/* A move or create that did not happen says why, briefly, in amber (a warning, not "needs you"). */
+.notes-notice { flex: 0 0 auto; padding: 6px 10px; font-size: 11.5px; color: var(--st-permission); border-top: 1px solid var(--hairline); animation: fade-in 140ms ease; }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+/* Inline rename: the row becomes a field in place. Amber when the name will not work. */
 .notes-rename { display: flex; align-items: center; gap: 6px; padding: 3px 6px 3px 8px; }
 .notes-rename-ic { width: 14px; height: 14px; flex: 0 0 auto; color: var(--muted); }
 .notes-rename-input { flex: 1 1 auto; min-width: 0; padding: 4px 7px; border: 1px solid var(--accent); border-radius: 6px; background: var(--bg, var(--card)); color: var(--text); font: inherit; font-size: 12.5px; outline: none; }
 .notes-rename-input.is-invalid { border-color: var(--st-permission); }
 .ctxmenu-head-ic { width: 14px; height: 14px; flex: 0 0 auto; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) {
-  .notes-collapse, .notes-chev, .notes-collapse:not(.is-open) .notes-collapse-inner { transition: none; }
+  .notes-collapse, .notes-chev, .notes-collapse:not(.is-open) .notes-collapse-inner, .notes-notice { transition: none; animation: none; }
 }
-.notes-ghead { display: grid; grid-template-columns: 1fr auto; align-items: center; }
-.notes-gtoggle { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 4px 4px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; text-align: left; cursor: pointer; }
-.notes-gtoggle:hover { color: var(--text); }
-.notes-gcount { margin-left: 2px; font-weight: 500; opacity: 0.8; }
-.notes-gadd { width: 22px; height: 22px; display: grid; place-items: center; margin-right: 4px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0.45; }
-.notes-gadd svg { width: 13px; height: 13px; }
-.notes-ghead:hover .notes-gadd, .notes-gadd:focus-visible { opacity: 1; }
-.notes-gadd:hover { color: var(--text); background: var(--elev); }
-.notes-row { display: grid; grid-template-columns: 1fr auto; align-items: center; border-radius: 7px; }
-.notes-row:hover, .notes-row.is-active { background: var(--elev); }
-.notes-row.is-active { box-shadow: inset 2px 0 0 var(--accent); }
-.notes-open { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "title when" "meta meta"; gap: 1px 8px; width: 100%; padding: 7px 8px; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
-.notes-title { grid-area: title; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.notes-meta { grid-area: meta; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.notes-when { grid-area: when; font-size: 11px; color: var(--muted); white-space: nowrap; }
-.notes-del { width: 26px; height: 26px; display: grid; place-items: center; margin-right: 4px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0; }
-.notes-del svg { width: 13px; height: 13px; }
-.notes-row:hover .notes-del, .notes-row.is-active .notes-del { opacity: 1; }
-.notes-del:hover { color: var(--st-question); background: rgba(255, 255, 255, 0.06); }
 .notes-editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .notes-text { flex: 1 1 auto; min-height: 0; width: 100%; padding: 14px 16px; border: 0; outline: none; resize: none; background: transparent; color: var(--text); font: 13.5px/1.55 ui-monospace, "Cascadia Code", Consolas, monospace; tab-size: 2; }
 .notes-text::placeholder { color: var(--muted); }
@@ -1141,8 +1163,8 @@ kbd {
 }
 .ctxmenu {
   position: absolute;
-  min-width: 190px;
-  padding: 5px;
+  min-width: 172px;
+  padding: 4px;
   background: var(--elev);
   border: 1px solid var(--border);
   border-radius: 11px;
@@ -1151,15 +1173,15 @@ kbd {
 .ctxmenu-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 6px 9px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
   background: transparent;
   color: var(--text);
   font-family: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   text-align: left;
   cursor: pointer;
   transition: background 0.12s ease;
@@ -1168,18 +1190,24 @@ kbd {
 .ctxmenu-item:disabled { color: var(--faint); cursor: default; }
 .ctxmenu-item:disabled:hover { background: transparent; }
 .ctxmenu-item:disabled .ctxmenu-ic { opacity: 0.5; }
-.ctxmenu-ic { width: 16px; height: 16px; flex: 0 0 16px; color: var(--muted); display: grid; place-items: center; }
-.ctxmenu-ic svg { width: 16px; height: 16px; }
+.ctxmenu-ic { width: 15px; height: 15px; flex: 0 0 15px; color: var(--muted); display: grid; place-items: center; }
+.ctxmenu-ic svg { width: 15px; height: 15px; }
 .ctxmenu-text { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ctxmenu-keys { display: flex; gap: 3px; margin-left: 14px; }
+/* A row with a flyout: chevron at the right, held highlighted while open. */
+.ctxmenu-subchev { width: 13px; height: 13px; flex: 0 0 auto; margin-left: 10px; color: var(--faint); }
+.ctxmenu-item--sub.is-open { background: var(--card); }
+.ctxmenu-item--sub.is-open .ctxmenu-subchev { color: var(--muted); }
+.ctxmenu--flyout { animation-duration: 110ms; }
+.ctxmenu--flyout.is-left { transform-origin: top right; }
 .ctxmenu-keys kbd { font: 500 10.5px/1 inherit; padding: 3px 5px; border-radius: 5px; background: var(--card); color: var(--muted); border: 1px solid var(--hairline); }
 /* Titled sections instead of nested expanders: one flat, scannable list. */
-.ctxmenu-label { padding: 8px 10px 3px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--faint); }
-.ctxmenu-sep { height: 1px; margin: 5px 6px; background: var(--hairline); }
+.ctxmenu-label { padding: 6px 9px 2px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--faint); }
+.ctxmenu-sep { height: 1px; margin: 4px 6px; background: var(--hairline); }
 /* What the menu is about: the session or the note, one line + one detail. */
-.ctxmenu-head { padding: 7px 10px 8px; margin-bottom: 3px; border-bottom: 1px solid var(--hairline); max-width: 280px; }
-.ctxmenu-head-title { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 7px; }
-.ctxmenu-head-detail { margin-top: 2px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.ctxmenu-head { padding: 5px 9px 6px; margin-bottom: 3px; border-bottom: 1px solid var(--hairline); max-width: 280px; }
+.ctxmenu-head-title { font-size: 12.5px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 7px; }
+.ctxmenu-head-detail { margin-top: 1px; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
 .ctxmenu-head-detail > bdi { direction: ltr; unicode-bidi: plaintext; }
 /* Opens from the click point: a quick settle, not a slide. */
 .ctxmenu { animation: ctxmenu-pop 140ms cubic-bezier(0.23, 1, 0.32, 1); transform-origin: top left; outline: none; }

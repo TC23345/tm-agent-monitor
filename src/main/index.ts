@@ -8,7 +8,10 @@ import { shellArgs } from '../shared/wtArgs.mjs'
 import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
 import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, promises as fsp, watch as fsWatch, type FSWatcher } from 'node:fs'
-import { isNoteName, isNotePath, isFolderName, isFolderPath, nextFolderName, planNewNote, notePreview, MAX_FOLDERS, MAX_NOTES, MAX_NOTE_BYTES, type NoteMeta } from '../shared/notes.mjs'
+import {
+  isNoteName, isNotePath, isFolderName, isFolderPath, joinNotePath, migrationPlan, moveProblem, nextFolderName, noteHeading,
+  noteTemplate, orderAfterMove, orderAfterRemove, planNewNote, notePreview, sanitizeOrder, MAX_FOLDERS, MAX_FOLDER_DEPTH, NOTE_TEMPLATES,
+  type NoteOrder, MAX_NOTES, MAX_NOTE_BYTES, type NoteMeta } from '../shared/notes.mjs'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { statSync } from 'node:fs'
@@ -1718,7 +1721,60 @@ function registerIpc(): void {
   // the folder is watched so an agent's edit from a shell shows up in the pane.
   /** A validated relative path ('/'-separated) → an absolute one under the notes folder. */
   const notePathAbs = (rel: string) => join(ensureNotesDir(), ...rel.split('/').filter(Boolean))
-  ipcMain.handle('notes:list', async (): Promise<{ dir: string; notes: NoteMeta[]; folders: string[] }> => {
+
+  // Heading + preview per file, re-read only when mtime or size moves: an
+  // agent writing one note no longer costs a re-read of every note.
+  const noteInfoCache = new Map<string, { mtime: number; size: number; heading: string; preview: string }>()
+
+  // The saved manual order (drag and drop) lives next to the notes, so it
+  // travels with the folder. Writes are chained so two quick drops cannot
+  // interleave a read-modify-write.
+  const ORDER_FILE = '.tm-order.json'
+  let orderChain: Promise<unknown> = Promise.resolve()
+  const readNoteOrder = async (): Promise<NoteOrder> => {
+    try { return sanitizeOrder(JSON.parse(await fsp.readFile(join(ensureNotesDir(), ORDER_FILE), 'utf8'))) } catch { return {} }
+  }
+  const updateNoteOrder = (change: (order: NoteOrder) => NoteOrder) => {
+    const run = orderChain.then(async () => {
+      const next = change(await readNoteOrder())
+      const file = join(ensureNotesDir(), ORDER_FILE)
+      const tmp = `${file}.${process.pid}.tmp`
+      await fsp.writeFile(tmp, JSON.stringify(next, null, 2), 'utf8')
+      await fsp.rename(tmp, file)
+    }).catch((error) => console.warn(`[notes] order write failed: ${error instanceof Error ? error.message : String(error)}`))
+    orderChain = run
+    return run
+  }
+
+  // One-time layout change: before template folders, a plan was a top-level
+  // "Plan <name>.md". Move those into Plans/ (and Daily/, Meetings/,
+  // Prompts/), create the four template folders, and leave a marker so it
+  // never runs again for this notes folder — an agent that later writes a
+  // "Plan x.md" at the top level keeps it where it put it.
+  const MIGRATED_MARKER = '.tm-notes-v2'
+  let migration: Promise<void> | null = null
+  const migrateNotesLayout = () => {
+    migration ??= (async () => {
+      const dir = ensureNotesDir()
+      if (existsSync(join(dir, MIGRATED_MARKER))) return
+      const root = (await fsp.readdir(dir).catch(() => [] as string[])).filter(isNoteName)
+      const inFolder: Record<string, string[]> = {}
+      for (const t of NOTE_TEMPLATES) {
+        await fsp.mkdir(join(dir, t.label), { recursive: true }).catch(() => {})
+        inFolder[t.label] = await fsp.readdir(join(dir, t.label)).catch(() => [] as string[])
+      }
+      for (const m of migrationPlan(root, inFolder)) {
+        const target = notePathAbs(m.to)
+        if (existsSync(target)) continue
+        await fsp.rename(notePathAbs(m.from), target).catch((error) => console.warn(`[notes] migrate ${m.from}: ${error instanceof Error ? error.message : String(error)}`))
+      }
+      await fsp.writeFile(join(dir, MIGRATED_MARKER), `Notes layout v2 (template folders) since ${new Date().toISOString()}\n`, 'utf8').catch(() => {})
+    })()
+    return migration
+  }
+
+  ipcMain.handle('notes:list', async (): Promise<{ dir: string; notes: NoteMeta[]; folders: string[]; order: NoteOrder }> => {
+    await migrateNotesLayout()
     const dir = ensureNotesDir()
     const files: string[] = []
     const folders: string[] = []
@@ -1739,11 +1795,18 @@ function registerIpc(): void {
         const abs = notePathAbs(name)
         const st = await fsp.stat(abs)
         if (!st.isFile()) return null
-        const preview = st.size <= 64 * 1024 ? notePreview(await fsp.readFile(abs, 'utf8')) : ''
-        return { name, mtime: st.mtimeMs, size: st.size, preview }
+        let info = noteInfoCache.get(abs)
+        if (!info || info.mtime !== st.mtimeMs || info.size !== st.size) {
+          const text = st.size <= 64 * 1024 ? await fsp.readFile(abs, 'utf8') : ''
+          info = { mtime: st.mtimeMs, size: st.size, heading: noteHeading(text), preview: notePreview(text) }
+          noteInfoCache.set(abs, info)
+        }
+        return { name, mtime: st.mtimeMs, size: st.size, heading: info.heading, preview: info.preview }
       } catch { return null }
     }))
-    return { dir, notes: notes.filter((n): n is NoteMeta => n !== null), folders }
+    const present = new Set(files.map(notePathAbs))
+    for (const key of noteInfoCache.keys()) if (!present.has(key)) noteInfoCache.delete(key)
+    return { dir, notes: notes.filter((n): n is NoteMeta => n !== null), folders, order: await readNoteOrder() }
   })
   ipcMain.handle('notes:read', async (_e, name: unknown): Promise<string | null> => {
     if (!isNotePath(name)) return null
@@ -1763,15 +1826,18 @@ function registerIpc(): void {
       return false
     }
   })
-  // `template` is a NOTE_TEMPLATES id; anything else is a blank note. A
+  // `template` is a NOTE_TEMPLATES id; anything else is a blank note (or the
+  // folder's own template inside a template folder). With no folder a
+  // template note goes to its template folder, created if it was removed. A
   // once-a-day template whose note for today exists answers with that name.
-  // `folder` ('' or a folder path) is where it goes; it must already exist.
   ipcMain.handle('notes:create', async (_e, template: unknown, folder: unknown): Promise<string | null> => {
-    const where = folder === undefined || folder === '' ? '' : isFolderPath(folder) ? folder : null
-    if (where === null) return null
-    const base = where ? notePathAbs(where) : ensureNotesDir()
-    const existing = (await fsp.readdir(base).catch(() => [] as string[])).filter(isNoteName)
-    const plan = planNewNote(existing, typeof template === 'string' ? template : undefined, Date.now(), where)
+    const given = folder === undefined || folder === '' ? '' : isFolderPath(folder) ? folder : null
+    if (given === null) return null
+    const templateId = typeof template === 'string' ? template : undefined
+    const where = given || (noteTemplate(templateId)?.label ?? '')
+    if (where) await fsp.mkdir(notePathAbs(where), { recursive: true }).catch(() => {})
+    const existing = (await fsp.readdir(where ? notePathAbs(where) : ensureNotesDir()).catch(() => [] as string[])).filter(isNoteName)
+    const plan = planNewNote(existing, templateId, Date.now(), where)
     if (plan.exists) return plan.name
     try {
       await fsp.writeFile(notePathAbs(plan.name), plan.body, { encoding: 'utf8', flag: 'wx' })
@@ -1780,7 +1846,47 @@ function registerIpc(): void {
   })
   ipcMain.handle('notes:delete', async (_e, name: unknown): Promise<boolean> => {
     if (!isNotePath(name)) return false
-    try { await fsp.unlink(notePathAbs(name)); return true } catch { return false }
+    try {
+      await fsp.unlink(notePathAbs(name))
+      await updateNoteOrder((order) => orderAfterRemove(order, name))
+      return true
+    } catch { return false }
+  })
+  /** How many folder levels are under `folder` on disk (bounded by MAX_FOLDER_DEPTH). */
+  const diskSubtreeDepth = async (folder: string, level = 0): Promise<number> => {
+    if (level >= MAX_FOLDER_DEPTH) return level
+    const entries = await fsp.readdir(notePathAbs(folder), { withFileTypes: true }).catch(() => [])
+    let deepest = level
+    for (const e of entries) if (e.isDirectory() && isFolderName(e.name)) deepest = Math.max(deepest, await diskSubtreeDepth(`${folder}/${e.name}`, level + 1))
+    return deepest
+  }
+  /**
+   * Drag and drop: move a note or folder into `toFolder` ('' = top level)
+   * and, with `index`, place it there among `visible` (the folder's children
+   * as shown). Dropping in its own folder with an index is a reorder. A name
+   * already used in the target is refused, never overwritten.
+   */
+  ipcMain.handle('notes:move', async (_e, from: unknown, toFolder: unknown, index: unknown, visible: unknown): Promise<{ ok: boolean; path?: string; error?: string }> => {
+    const isFolder = isFolderPath(from)
+    if (!isFolder && !isNotePath(from)) return { ok: false, error: 'Not a note or folder' }
+    const to = toFolder === undefined || toFolder === '' ? '' : toFolder
+    if (to !== '' && !isFolderPath(to)) return { ok: false, error: 'Not a folder' }
+    const src = from as string
+    const problem = moveProblem(src, to as string, isFolder, isFolder ? await diskSubtreeDepth(src) : 0)
+    if (problem) return { ok: false, error: problem }
+    const at = typeof index === 'number' && Number.isInteger(index) && index >= 0 && index < 10_000 ? index : undefined
+    const shown = Array.isArray(visible) ? visible.filter((n): n is string => typeof n === 'string' && (isNoteName(n) || isFolderName(n))).slice(0, 1000) : undefined
+    const target = joinNotePath(to as string, basename(notePathAbs(src)))
+    if (target !== src) {
+      if (existsSync(notePathAbs(target))) return { ok: false, error: `“${basename(notePathAbs(src))}” is already in ${to || 'Notes'}` }
+      try { await fsp.rename(notePathAbs(src), notePathAbs(target)) } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : 'Could not move it' }
+      }
+    } else if (at === undefined) {
+      return { ok: true, path: src }
+    }
+    await updateNoteOrder((order) => orderAfterMove(order, src, target, at, shown))
+    return { ok: true, path: target }
   })
   /** A new, free "New folder" inside `parent` ('' = the top level); answers its path. */
   ipcMain.handle('notes:mkdir', async (_e, parent: unknown): Promise<string | null> => {
@@ -1807,12 +1913,20 @@ function registerIpc(): void {
     if (target === src) return src
     const caseOnly = target.toLowerCase() === src.toLowerCase()
     if (!caseOnly && existsSync(notePathAbs(target))) return null
-    try { await fsp.rename(notePathAbs(src), notePathAbs(target)); return target } catch { return null }
+    try {
+      await fsp.rename(notePathAbs(src), notePathAbs(target))
+      await updateNoteOrder((order) => orderAfterMove(order, src, target))
+      return target
+    } catch { return null }
   })
   /** Remove an empty folder. A folder with anything in it is refused, never emptied. */
   ipcMain.handle('notes:rmdir', async (_e, path: unknown): Promise<boolean> => {
     if (!isFolderPath(path)) return false
-    try { await fsp.rmdir(notePathAbs(path)); return true } catch { return false }
+    try {
+      await fsp.rmdir(notePathAbs(path))
+      await updateNoteOrder((order) => orderAfterRemove(order, path))
+      return true
+    } catch { return false }
   })
   /** Show a folder (or the notes folder) in Explorer. */
   ipcMain.handle('notes:reveal', async (_e, path: unknown): Promise<boolean> => {

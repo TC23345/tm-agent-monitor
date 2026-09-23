@@ -76,7 +76,7 @@ export function AgentContextMenu({ menu, onClose, replySession, inPane, onGoTo, 
     window.setTimeout(onClose, 550)
   }
 
-  const questions = (menu.recentQuestions ?? []).slice(0, 3)
+  const questions = (menu.recentQuestions ?? []).slice(0, 5)
   const entries: ContextEntry[] = tidyEntries([
     {
       kind: 'item', id: 'goto',
@@ -86,8 +86,6 @@ export function AgentContextMenu({ menu, onClose, replySession, inPane, onGoTo, 
       disabled: !canGo,
       onSelect: () => onGoTo(menu.id),
     },
-    { kind: 'sep' },
-    { kind: 'label', label: 'Session' },
     {
       kind: 'item', id: 'rename',
       label: menu.name ? 'Rename…' : 'Name this session…',
@@ -104,31 +102,37 @@ export function AgentContextMenu({ menu, onClose, replySession, inPane, onGoTo, 
       keepOpen: true,
       onSelect: () => resume && copy('resume', resume),
     },
-    ...questions.map((q, i): ContextEntry => ({
-      kind: 'item', id: `question-${i}`,
-      label: copied === `question-${i}` ? 'Copied' : q.text,
+    questions.length > 0 && {
+      kind: 'submenu', id: 'questions', label: 'Recent questions',
       icon: <MessageSquareText strokeWidth={2} />,
-      hint: `${q.text}\n\nClick to copy`,
-      keepOpen: true,
-      onSelect: () => copy(`question-${i}`, q.text),
-    })),
+      entries: questions.map((q, i): ContextEntry => ({
+        kind: 'item', id: `question-${i}`,
+        label: copied === `question-${i}` ? 'Copied' : q.text,
+        hint: `${q.text}\n\nClick to copy`,
+        keepOpen: true,
+        onSelect: () => copy(`question-${i}`, q.text),
+      })),
+    },
     { kind: 'sep' },
-    { kind: 'label', label: `Start in ${where}` },
-    { kind: 'item', id: 'launch-claude', label: 'Claude Code', icon: <ProviderBadge provider="claude" />, hint: hasCwd ? `A new Claude Code pane in ${menu.cwd}` : noCwd, disabled: !hasCwd, onSelect: () => onLaunch('claude', menu.cwd) },
-    { kind: 'item', id: 'launch-codex', label: 'Codex', icon: <ProviderBadge provider="codex" />, hint: hasCwd ? `A new Codex pane in ${menu.cwd}` : noCwd, disabled: !hasCwd, onSelect: () => onLaunch('codex', menu.cwd) },
-    { kind: 'item', id: 'launch-shell', label: 'Terminal', icon: <SquareTerminal strokeWidth={2} />, hint: hasCwd ? `A shell pane in ${menu.cwd}` : noCwd, disabled: !hasCwd, onSelect: () => onLaunch('shell', menu.cwd) },
-    { kind: 'sep' },
-    { kind: 'label', label: 'Folder' },
-    { kind: 'item', id: 'cursor', label: 'Open in Cursor', icon: <Code2 strokeWidth={2} />, disabled: !hasCwd, hint: hasCwd ? undefined : noCwd, onSelect: () => window.watch.openCursor(menu.cwd) },
-    { kind: 'item', id: 'reveal', label: 'Reveal in File Explorer', icon: <FolderOpen strokeWidth={2} />, disabled: !hasCwd, hint: hasCwd ? undefined : noCwd, onSelect: () => window.watch.openPath(menu.cwd) },
     {
-      kind: 'item', id: 'copy-path',
-      label: copied === 'path' ? 'Copied' : 'Copy path',
-      icon: <Copy strokeWidth={2} />,
-      disabled: !hasCwd,
-      hint: hasCwd ? menu.cwd : noCwd,
-      keepOpen: true,
-      onSelect: () => copy('path', menu.cwd),
+      kind: 'submenu', id: 'start', label: `Start in ${where}`,
+      icon: <SquareTerminal strokeWidth={2} />,
+      disabled: !hasCwd, hint: hasCwd ? `A new pane in ${menu.cwd}` : noCwd,
+      entries: [
+        { kind: 'item', id: 'launch-claude', label: 'Claude Code', icon: <ProviderBadge provider="claude" />, onSelect: () => onLaunch('claude', menu.cwd) },
+        { kind: 'item', id: 'launch-codex', label: 'Codex', icon: <ProviderBadge provider="codex" />, onSelect: () => onLaunch('codex', menu.cwd) },
+        { kind: 'item', id: 'launch-shell', label: 'Terminal', icon: <SquareTerminal strokeWidth={2} />, onSelect: () => onLaunch('shell', menu.cwd) },
+      ],
+    },
+    {
+      kind: 'submenu', id: 'folder', label: 'Folder',
+      icon: <FolderOpen strokeWidth={2} />,
+      disabled: !hasCwd, hint: hasCwd ? menu.cwd : noCwd,
+      entries: [
+        { kind: 'item', id: 'cursor', label: 'Open in Cursor', icon: <Code2 strokeWidth={2} />, onSelect: () => window.watch.openCursor(menu.cwd) },
+        { kind: 'item', id: 'reveal', label: 'Reveal in File Explorer', icon: <FolderOpen strokeWidth={2} />, onSelect: () => window.watch.openPath(menu.cwd) },
+        { kind: 'item', id: 'copy-path', label: copied === 'path' ? 'Copied' : 'Copy path', icon: <Copy strokeWidth={2} />, hint: menu.cwd, keepOpen: true, onSelect: () => copy('path', menu.cwd) },
+      ],
     },
   ])
 
