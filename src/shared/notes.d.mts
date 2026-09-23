@@ -47,6 +47,9 @@ export const NOTE_TEMPLATES: NoteTemplate[]
 export function noteTemplate(id: unknown): NoteTemplate | undefined
 export function templateForFolder(folder: string): NoteTemplate | undefined
 export function planNewNote(existing: string[], templateId: unknown, now?: number, folder?: string): { name: string; body: string; exists: boolean; folder: string }
+export function isPlaceholderName(name: string): boolean
+export function titleFileName(name: string, heading?: string): string | undefined
+export function freeName(base: string, taken: Iterable<string>): string
 export function noteHeading(text: string): string
 export function displayTitle(name: string, heading?: string): string
 export function migrationPlan(rootNames: string[], inFolder?: Record<string, string[]>): { from: string; to: string }[]

@@ -112,8 +112,10 @@ const api = {
   /** Notes carry their path relative to the notes folder ('/'-separated); folders are listed even when empty. */
   listNotes: (): Promise<{ dir: string; notes: NoteMeta[]; folders: string[]; order: NoteOrder }> => ipcRenderer.invoke('notes:list'),
   /** Drag and drop: into `toFolder` ('' = top level), placed at `index` among `visible` when given. */
-  moveNoteEntry: (from: string, toFolder: string, index?: number, visible?: string[]): Promise<{ ok: boolean; path?: string; error?: string }> =>
+  moveNoteEntry: (from: string, toFolder: string, index?: number, visible?: string[]): Promise<{ ok: boolean; path?: string; error?: string; renamed?: string }> =>
     ipcRenderer.invoke('notes:move', from, toFolder, index, visible),
+  /** Naming convention: a placeholder date name takes the note's title. Answers the (possibly new) path. */
+  retitleNote: (path: string): Promise<string | null> => ipcRenderer.invoke('notes:retitle', path),
   readNote: (name: string): Promise<string | null> => ipcRenderer.invoke('notes:read', name),
   writeNote: (name: string, text: string): Promise<boolean> => ipcRenderer.invoke('notes:write', name, text),
   createNote: (template?: string, folder?: string): Promise<string | null> => ipcRenderer.invoke('notes:create', template, folder),

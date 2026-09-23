@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
 import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, promises as fsp, watch as fsWatch, type FSWatcher } from 'node:fs'
 import {
-  isNoteName, isNotePath, isFolderName, isFolderPath, joinNotePath, migrationPlan, moveProblem, nextFolderName, noteHeading,
+  freeName, isNoteName, isNotePath, isFolderName, isFolderPath, joinNotePath, migrationPlan, moveProblem, nextFolderName, noteHeading,
+  parentOf, titleFileName,
   noteTemplate, orderAfterMove, orderAfterRemove, planNewNote, notePreview, sanitizeOrder, MAX_FOLDERS, MAX_FOLDER_DEPTH, NOTE_TEMPLATES,
   type NoteOrder, MAX_NOTES, MAX_NOTE_BYTES, type NoteMeta } from '../shared/notes.mjs'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -1866,9 +1867,13 @@ function registerIpc(): void {
    * as shown). Dropping in its own folder with an index is a reorder. A name
    * already used in the target is refused, never overwritten.
    */
-  ipcMain.handle('notes:move', async (_e, from: unknown, toFolder: unknown, index: unknown, visible: unknown): Promise<{ ok: boolean; path?: string; error?: string }> => {
-    const isFolder = isFolderPath(from)
-    if (!isFolder && !isNotePath(from)) return { ok: false, error: 'Not a note or folder' }
+  ipcMain.handle('notes:move', async (_e, from: unknown, toFolder: unknown, index: unknown, visible: unknown): Promise<{ ok: boolean; path?: string; error?: string; renamed?: string }> => {
+    if (!isNotePath(from) && !isFolderPath(from)) return { ok: false, error: 'Not a note or folder' }
+    // Ask the disk what it is: `2026-09-22.md` is a valid folder name too.
+    const st = await fsp.stat(notePathAbs(from as string)).catch(() => null)
+    if (!st) return { ok: false, error: 'It is no longer there' }
+    const isFolder = st.isDirectory()
+    if (isFolder ? !isFolderPath(from) : !isNotePath(from)) return { ok: false, error: 'Not a note or folder' }
     const to = toFolder === undefined || toFolder === '' ? '' : toFolder
     if (to !== '' && !isFolderPath(to)) return { ok: false, error: 'Not a folder' }
     const src = from as string
@@ -1876,17 +1881,49 @@ function registerIpc(): void {
     if (problem) return { ok: false, error: problem }
     const at = typeof index === 'number' && Number.isInteger(index) && index >= 0 && index < 10_000 ? index : undefined
     const shown = Array.isArray(visible) ? visible.filter((n): n is string => typeof n === 'string' && (isNoteName(n) || isFolderName(n))).slice(0, 1000) : undefined
-    const target = joinNotePath(to as string, basename(notePathAbs(src)))
-    if (target !== src) {
-      if (existsSync(notePathAbs(target))) return { ok: false, error: `“${basename(notePathAbs(src))}” is already in ${to || 'Notes'}` }
+    const srcName = basename(notePathAbs(src))
+    let target = joinNotePath(to as string, srcName)
+    let renamed: string | undefined
+    if (parentOf(src) !== (to as string)) {
+      // A name already used in the target is never overwritten: a note still
+      // on its placeholder date name moves in under its title, and anything
+      // else that clashes gets " (2)" — the pane says what it did.
+      const taken = await fsp.readdir(to ? notePathAbs(to as string) : ensureNotesDir()).catch(() => [] as string[])
+      if (taken.some((n) => n.toLowerCase() === srcName.toLowerCase())) {
+        const titled = isFolder ? undefined : titleFileName(src, noteHeading(await fsp.readFile(notePathAbs(src), 'utf8').catch(() => '')))
+        renamed = freeName(titled ?? srcName, taken)
+        target = joinNotePath(to as string, renamed)
+      }
       try { await fsp.rename(notePathAbs(src), notePathAbs(target)) } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : 'Could not move it' }
       }
     } else if (at === undefined) {
       return { ok: true, path: src }
     }
-    await updateNoteOrder((order) => orderAfterMove(order, src, target, at, shown))
-    return { ok: true, path: target }
+    const placedVisible = renamed && shown ? shown.map((n) => (n.toLowerCase() === srcName.toLowerCase() ? renamed! : n)) : shown
+    await updateNoteOrder((order) => orderAfterMove(order, src, target, at, placedVisible))
+    return { ok: true, path: target, renamed }
+  })
+  /**
+   * The naming convention: a note still on its placeholder date name
+   * (2026-09-22.md) takes its title's name once it has one — the pane calls
+   * this when you leave a note. A free name is picked in the same folder; a
+   * name you chose yourself is never changed. Answers the (possibly new) path.
+   */
+  ipcMain.handle('notes:retitle', async (_e, path: unknown): Promise<string | null> => {
+    if (!isNotePath(path)) return null
+    const heading = noteHeading(await fsp.readFile(notePathAbs(path), 'utf8').catch(() => ''))
+    const wanted = titleFileName(path, heading)
+    if (!wanted) return path
+    const folder = parentOf(path)
+    const siblings = (await fsp.readdir(folder ? notePathAbs(folder) : ensureNotesDir()).catch(() => [] as string[]))
+      .filter((n) => n.toLowerCase() !== basename(notePathAbs(path)).toLowerCase())
+    const target = joinNotePath(folder, freeName(wanted, siblings))
+    try {
+      await fsp.rename(notePathAbs(path), notePathAbs(target))
+      await updateNoteOrder((order) => orderAfterMove(order, path, target))
+      return target
+    } catch { return path }
   })
   /** A new, free "New folder" inside `parent` ('' = the top level); answers its path. */
   ipcMain.handle('notes:mkdir', async (_e, parent: unknown): Promise<string | null> => {
@@ -1904,8 +1941,12 @@ function registerIpc(): void {
    * case-only change is allowed; any other clash with an existing name is not.
    */
   ipcMain.handle('notes:rename', async (_e, from: unknown, to: unknown): Promise<string | null> => {
-    const isNote = isNotePath(from)
-    if (!isNote && !isFolderPath(from)) return null
+    if (!isNotePath(from) && !isFolderPath(from)) return null
+    // Ask the disk what it is: a folder may be named like a note (`x.md`).
+    const st = await fsp.stat(notePathAbs(from as string)).catch(() => null)
+    if (!st) return null
+    const isNote = st.isFile()
+    if (isNote ? !isNotePath(from) : !isFolderPath(from)) return null
     if (isNote ? !isNoteName(to) : !isFolderName(to)) return null
     const src = from as string
     const i = src.lastIndexOf('/')

@@ -36,8 +36,10 @@ ask you to leave them something. One file per note, `<name>.md`, in a
 file tree of real folders (up to four deep, e.g. `Work\Q3\launch.md`).
 `Daily\`, `Meetings\`, `Plans\` and `Prompts\` are the template folders:
 a plan goes in `Plans\` (or a folder inside it), a prompt in `Prompts\`,
-and so on — no `Plan ` prefix in the file name. Start the note with a
-`# Heading`; the pane shows the H1 as the title. Put a note in the folder
+and so on — no `Plan ` prefix in the file name. Name the file after its
+title (`Plans\Q4 roadmap.md`, not a date) and start it with the same
+`# Heading`; the pane shows the H1 as the title, and renames a date-named
+note to its title when the user leaves it. Put a note in the folder
 the user names. Leave `.tm-order.json` and `.tm-notes-v2` alone (the
 pane's own order and layout marker). The pane picks up your edits on its
 own — do not tell the user to refresh. Do not delete, move or rewrite a

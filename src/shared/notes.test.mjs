@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  applyOrder, buildTree, displayTitle, folderNameFor, isFolderName, isFolderPath, isNoteName, isNotePath, migrationPlan,
+  applyOrder, buildTree, displayTitle, folderNameFor, freeName, isPlaceholderName, titleFileName, isFolderName, isFolderPath, isNoteName, isNotePath, migrationPlan,
   moveProblem, nextFolderName, nextNoteName, noteHeading, noteNameFor, notePreview, noteTitle, orderAfterMove,
   orderAfterRemove, parentOf, planNewNote, sanitizeOrder, sortNotes, subtreeDepth, templateForFolder, NOTE_TEMPLATES
 } from './notes.mjs'
@@ -127,6 +127,27 @@ test('the row title is the H1 without the template lead-in, else the file name',
   assert.equal(displayTitle('Work/ideas.md', 'Ideas for Q4'), 'Ideas for Q4')
   assert.equal(displayTitle('Work/ideas.md', ''), 'ideas')
   assert.equal(displayTitle('Work/ideas.md', 'Plan —  '), 'ideas')
+})
+
+test('a placeholder date name gives way to the title; a chosen name never does', () => {
+  assert.ok(isPlaceholderName('2026-09-22.md'))
+  assert.ok(isPlaceholderName('Prompts/2026-09-22-3.md'))
+  assert.ok(!isPlaceholderName('solana-points.md'))
+  assert.ok(!isPlaceholderName('2026-09-22 notes.md'))
+  assert.equal(titleFileName('2026-09-22.md', 'solana-points'), 'solana-points.md')
+  assert.equal(titleFileName('Plans/2026-09-23.md', 'Plan — Launch checklist'), 'Launch checklist.md')
+  assert.equal(titleFileName('2026-09-20.md', "TC's Notesheet"), "TC's Notesheet.md")
+  assert.equal(titleFileName('2026-09-22.md', 'What: next? / Q3'), 'What next Q3.md', 'unsafe characters are cleaned')
+  assert.equal(titleFileName('Prompts/2026-09-22.md', 'Prompt — 2026-09-22'), undefined, 'an untouched template keeps its date')
+  assert.equal(titleFileName('2026-09-22.md', ''), undefined)
+  assert.equal(titleFileName('ideas.md', 'Something else'), undefined, 'a name you chose is kept')
+})
+
+test('a clash gets (2), (3) …, case-insensitively, for notes and folders', () => {
+  assert.equal(freeName('solana-points.md', ['other.md']), 'solana-points.md')
+  assert.equal(freeName('2026-09-22.md', ['2026-09-22.md']), '2026-09-22 (2).md')
+  assert.equal(freeName('a.md', ['A.md', 'a (2).md']), 'a (3).md')
+  assert.equal(freeName('Q3', ['q3']), 'Q3 (2)')
 })
 
 test('the preview skips headings and a template\'s empty bullets, so a fresh note is one line', () => {

@@ -249,7 +249,11 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
   }, [save])
 
   const open = useCallback(async (name: string) => {
+    const leaving = selectedRef.current
     await flush()
+    // Naming convention: the note you leave gives up its placeholder date
+    // name for its title (main renames only 2026-09-22-style names).
+    if (leaving && leaving !== name) void window.watch.retitleNote(leaving)
     setSelected(name)
     setSelectedFolder(null)
     setDirty(false)
@@ -349,6 +353,7 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
     if (kind === 'note' ? selectedRef.current === from : selectedRef.current?.startsWith(`${from}/`)) await flush()
     const res = await window.watch.moveNoteEntry(from, target.folder, target.index, target.visible)
     if (!res.ok || !res.path) { say(res.error ?? 'Could not move it'); return }
+    if (res.renamed) say(`“${baseName(from)}” was taken in ${target.folder || 'Notes'} — moved in as “${res.renamed}”`)
     followMove(from, res.path, kind)
     if (target.folder) reveal(target.folder)
     await refresh()
@@ -375,7 +380,9 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
       off()
       window.clearInterval(tick)
       window.clearTimeout(noticeTimer.current)
-      void flush()
+      // Closing the pane leaves the open note too: save it, then let it take its title's name.
+      const leaving = selectedRef.current
+      void flush().then(() => { if (leaving) void window.watch.retitleNote(leaving) })
     }
   }, [refresh, flush])
 
