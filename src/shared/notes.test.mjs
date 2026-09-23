@@ -1,6 +1,85 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { groupNotes, isNoteName, nextNoteName, noteGroup, noteNameFor, notePreview, noteTitle, planNewNote, sortNotes, NOTE_TEMPLATES, NOTES_GROUP } from './notes.mjs'
+import {
+  buildTree, folderNameFor, groupNotes, isFolderName, isFolderPath, isNoteName, isNotePath, nextFolderName, nextNoteName,
+  noteGroup, noteNameFor, notePreview, noteTitle, parentOf, planNewNote, sortNotes, NOTE_TEMPLATES, NOTES_GROUP
+} from './notes.mjs'
+
+test('a note path is folders then a note name, every segment checked', () => {
+  assert.ok(isNotePath('todo.md'))
+  assert.ok(isNotePath('Work/todo.md'))
+  assert.ok(isNotePath('A/B/C/D/todo.md'))
+  assert.ok(!isNotePath('A/B/C/D/E/todo.md'), 'deeper than MAX_FOLDER_DEPTH')
+  assert.ok(!isNotePath('../todo.md'))
+  assert.ok(!isNotePath('Work/../todo.md'))
+  assert.ok(!isNotePath('Work\\todo.md'))
+  assert.ok(!isNotePath('/todo.md'))
+  assert.ok(!isNotePath('Work//todo.md'))
+  assert.ok(!isNotePath('.git/todo.md'))
+  assert.ok(!isNotePath('Work/'))
+  assert.ok(!isNotePath('C:/todo.md'))
+  assert.ok(!isNotePath(null))
+})
+
+test('folder names follow Windows rules: no trailing dot or space, no device names', () => {
+  assert.ok(isFolderName('Work'))
+  assert.ok(isFolderName('Q3 (draft), v2'))
+  for (const bad of ['', '.hidden', ' lead', 'trail ', 'trail.', 'a..b', 'CON', 'nul', 'com1', 'LPT9.txt', 'a/b', 'a\\b', 'x'.repeat(61)]) {
+    assert.ok(!isFolderName(bad), bad)
+  }
+  assert.ok(!isNoteName('CON.md'), 'device names are reserved for files too')
+  assert.ok(isFolderPath('Work/Plans'))
+  assert.ok(!isFolderPath('Work/Plans/'))
+  assert.equal(parentOf('Work/Plans/todo.md'), 'Work/Plans')
+  assert.equal(parentOf('todo.md'), '')
+})
+
+test('a typed folder name is cleaned the way a note name is', () => {
+  assert.equal(folderNameFor('  Client: GS / Q3  '), 'Client GS Q3')
+  assert.equal(folderNameFor('ends with dots...'), 'ends with dots')
+  assert.equal(folderNameFor('   '), undefined)
+  assert.equal(folderNameFor('con'), undefined)
+})
+
+test('new folders are "New folder", then numbered, case-insensitively', () => {
+  assert.equal(nextFolderName([]), 'New folder')
+  assert.equal(nextFolderName(['new folder']), 'New folder 2')
+  assert.equal(nextFolderName(['New folder', 'New folder 2']), 'New folder 3')
+})
+
+test('the tree nests folders (listed or implied), sorts them by name, and counts notes', () => {
+  const tree = buildTree(
+    [
+      { name: 'root.md', mtime: 1 },
+      { name: 'Work/b.md', mtime: 1 },
+      { name: 'Work/a.md', mtime: 5 },
+      { name: 'Work/Plans/p.md', mtime: 1 },
+      { name: 'Ideas/x.md', mtime: 1 },
+      { name: '../bad.md', mtime: 1 },
+    ],
+    ['Empty', 'Folder 10', 'Folder 2'],
+  )
+  assert.deepEqual(tree.notes.map((n) => n.name), ['root.md'])
+  assert.deepEqual(tree.folders.map((f) => f.name), ['Empty', 'Folder 2', 'Folder 10', 'Ideas', 'Work'])
+  const work = tree.folders.find((f) => f.name === 'Work')
+  assert.deepEqual(work.notes.map((n) => n.name), ['Work/a.md', 'Work/b.md'])
+  assert.deepEqual(work.folders.map((f) => f.path), ['Work/Plans'])
+  assert.equal(work.count, 3)
+  assert.equal(tree.count, 5)
+  assert.equal(tree.folders[0].count, 0)
+})
+
+test('titles and template groups read the file name, not the folders', () => {
+  assert.equal(noteTitle('Work/Plans/Meeting 2026-09-22.md'), 'Meeting 2026-09-22')
+  assert.equal(noteGroup('Work/Meeting 2026-09-22.md'), 'meeting')
+})
+
+test('a new note in a folder is named for that folder', () => {
+  const now = new Date(2026, 8, 22, 10).getTime()
+  assert.deepEqual(planNewNote([], undefined, now, 'Work'), { name: 'Work/2026-09-22.md', body: '', exists: false })
+  assert.equal(planNewNote(['Meeting 2026-09-22.md'], 'meeting', now, 'Work/Q3').name, 'Work/Q3/Meeting 2026-09-22-2.md')
+  assert.deepEqual(planNewNote(['Daily 2026-09-22.md'], 'daily', now, 'Log'), { name: 'Log/Daily 2026-09-22.md', body: '', exists: true })
+})
 
 test('a note name is one Markdown file name, never a path', () => {
   assert.ok(isNoteName('2026-09-15.md'))

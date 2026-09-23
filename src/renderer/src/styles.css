@@ -715,7 +715,6 @@ kbd {
 .launch-cmd-ic { width: 12px; height: 12px; color: var(--muted); }
 /* Reply box at the top of a waiting session's context menu. */
 .ctxmenu-reply { padding: 8px 10px 10px; border-bottom: 1px solid var(--hairline); margin-bottom: 4px; }
-.ctxmenu-reply-q { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; margin-bottom: 6px; }
 .ctxmenu-reply-row { display: flex; gap: 6px; }
 .ctxmenu-reply-input { flex: 1 1 auto; min-width: 0; padding: 5px 8px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 12.5px; }
 .ctxmenu-reply-input:focus { outline: none; border-color: var(--accent); }
@@ -916,11 +915,34 @@ kbd {
 .notes { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 0; height: 100%; margin: -12px; min-height: 0; }
 .notes-list { overflow-y: auto; border-right: 1px solid var(--hairline); padding: 8px 6px; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
 .notes-group + .notes-group { margin-top: 6px; }
+/* Expand/collapse without measuring: a one-row grid track eases 0fr → 1fr,
+   the content fades with it. Used by folders and the template groups alike. */
+.notes-collapse { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease; }
+.notes-collapse.is-open { grid-template-rows: 1fr; opacity: 1; }
+.notes-collapse-inner { overflow: hidden; min-height: 0; }
+.notes-collapse:not(.is-open) .notes-collapse-inner { visibility: hidden; transition: visibility 0s 220ms; }
+.notes-chev { width: 12px; height: 12px; flex: 0 0 auto; transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+.notes-chev.is-open, .notes-folder-row.is-open .notes-chev { transform: rotate(90deg); }
+.notes-folder-row { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 6px 8px 6px 4px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; font-weight: 500; text-align: left; cursor: pointer; }
+.notes-folder-row:hover { background: var(--elev); }
+.notes-folder-row .notes-chev { color: var(--muted); }
+.notes-folder-ic { width: 14px; height: 14px; flex: 0 0 auto; color: var(--muted); }
+.notes-folder-row.is-open .notes-folder-ic { color: var(--accent); }
+.notes-folder-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notes-folder-row .notes-gcount { font-size: 11px; color: var(--muted); }
+.notes-folder-empty { padding: 5px 8px; font-size: 11.5px; color: var(--faint); }
+/* Inline rename: the row becomes a field in place. Amber (a warning) when the name will not work. */
+.notes-rename { display: flex; align-items: center; gap: 6px; padding: 3px 6px 3px 8px; }
+.notes-rename-ic { width: 14px; height: 14px; flex: 0 0 auto; color: var(--muted); }
+.notes-rename-input { flex: 1 1 auto; min-width: 0; padding: 4px 7px; border: 1px solid var(--accent); border-radius: 6px; background: var(--bg, var(--card)); color: var(--text); font: inherit; font-size: 12.5px; outline: none; }
+.notes-rename-input.is-invalid { border-color: var(--st-permission); }
+.ctxmenu-head-ic { width: 14px; height: 14px; flex: 0 0 auto; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) {
+  .notes-collapse, .notes-chev, .notes-collapse:not(.is-open) .notes-collapse-inner { transition: none; }
+}
 .notes-ghead { display: grid; grid-template-columns: 1fr auto; align-items: center; }
 .notes-gtoggle { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 4px 4px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; text-align: left; cursor: pointer; }
 .notes-gtoggle:hover { color: var(--text); }
-.notes-gtoggle svg { width: 12px; height: 12px; flex: 0 0 auto; transition: transform 120ms ease; }
-.notes-gtoggle svg.is-open { transform: rotate(90deg); }
 .notes-gcount { margin-left: 2px; font-weight: 500; opacity: 0.8; }
 .notes-gadd { width: 22px; height: 22px; display: grid; place-items: center; margin-right: 4px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0.45; }
 .notes-gadd svg { width: 13px; height: 13px; }
@@ -1126,13 +1148,6 @@ kbd {
   border-radius: 11px;
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
 }
-/* The projects menu drops from its top-bar button, pinned under the bar. */
-.ctxmenu--topbar { left: auto; bottom: auto; right: 96px; top: 52px; }
-/* Nested group (Folder actions) expands in place, indented with a rail. */
-.ctxmenu-sub { margin-left: 14px; border-left: 1px solid var(--hairline); padding-left: 3px; }
-.ctxmenu-chevron { width: 14px; height: 14px; margin-left: auto; color: var(--faint); }
-/* Recent-question entries: one truncated line each. */
-.ctxmenu-item--q { display: block; max-width: 230px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .ctxmenu-item {
   display: flex;
   align-items: center;
@@ -1149,10 +1164,28 @@ kbd {
   cursor: pointer;
   transition: background 0.12s ease;
 }
-.ctxmenu-item:hover { background: var(--card); }
+.ctxmenu-item:hover, .ctxmenu-item:focus-visible { background: var(--card); outline: none; }
 .ctxmenu-item:disabled { color: var(--faint); cursor: default; }
 .ctxmenu-item:disabled:hover { background: transparent; }
-.ctxmenu-ic { width: 16px; height: 16px; flex: 0 0 16px; color: var(--muted); }
+.ctxmenu-item:disabled .ctxmenu-ic { opacity: 0.5; }
+.ctxmenu-ic { width: 16px; height: 16px; flex: 0 0 16px; color: var(--muted); display: grid; place-items: center; }
+.ctxmenu-ic svg { width: 16px; height: 16px; }
+.ctxmenu-text { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctxmenu-keys { display: flex; gap: 3px; margin-left: 14px; }
+.ctxmenu-keys kbd { font: 500 10.5px/1 inherit; padding: 3px 5px; border-radius: 5px; background: var(--card); color: var(--muted); border: 1px solid var(--hairline); }
+/* Titled sections instead of nested expanders: one flat, scannable list. */
+.ctxmenu-label { padding: 8px 10px 3px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--faint); }
+.ctxmenu-sep { height: 1px; margin: 5px 6px; background: var(--hairline); }
+/* What the menu is about: the session or the note, one line + one detail. */
+.ctxmenu-head { padding: 7px 10px 8px; margin-bottom: 3px; border-bottom: 1px solid var(--hairline); max-width: 280px; }
+.ctxmenu-head-title { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 7px; }
+.ctxmenu-head-detail { margin-top: 2px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.ctxmenu-head-detail > bdi { direction: ltr; unicode-bidi: plaintext; }
+/* Opens from the click point: a quick settle, not a slide. */
+.ctxmenu { animation: ctxmenu-pop 140ms cubic-bezier(0.23, 1, 0.32, 1); transform-origin: top left; outline: none; }
+.ctxmenu.is-up { transform-origin: bottom left; }
+@keyframes ctxmenu-pop { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .ctxmenu { animation: none; } }
 
 .settings-overlay {
   position: absolute;

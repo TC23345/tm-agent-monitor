@@ -109,11 +109,19 @@ const api = {
   /** The activity feed: attention-worthy moments across sessions, newest first. */
   getEvents: (): Promise<ActivityEvent[]> => ipcRenderer.invoke('agent:events'),
   /** The shared notepad (Notes pane): Markdown files in the notes folder. */
-  listNotes: (): Promise<{ dir: string; notes: NoteMeta[] }> => ipcRenderer.invoke('notes:list'),
+  /** Notes carry their path relative to the notes folder ('/'-separated); folders are listed even when empty. */
+  listNotes: (): Promise<{ dir: string; notes: NoteMeta[]; folders: string[] }> => ipcRenderer.invoke('notes:list'),
   readNote: (name: string): Promise<string | null> => ipcRenderer.invoke('notes:read', name),
   writeNote: (name: string, text: string): Promise<boolean> => ipcRenderer.invoke('notes:write', name, text),
-  createNote: (template?: string): Promise<string | null> => ipcRenderer.invoke('notes:create', template),
+  createNote: (template?: string, folder?: string): Promise<string | null> => ipcRenderer.invoke('notes:create', template, folder),
   deleteNote: (name: string): Promise<boolean> => ipcRenderer.invoke('notes:delete', name),
+  /** A free "New folder" inside `parent` ('' = top level); answers its path. */
+  createNoteFolder: (parent: string): Promise<string | null> => ipcRenderer.invoke('notes:mkdir', parent),
+  /** Rename a note or folder in place; `to` is the new last segment. Answers the new path. */
+  renameNoteEntry: (from: string, to: string): Promise<string | null> => ipcRenderer.invoke('notes:rename', from, to),
+  /** Remove an empty folder (refused when it has anything in it). */
+  deleteNoteFolder: (path: string): Promise<boolean> => ipcRenderer.invoke('notes:rmdir', path),
+  revealNoteFolder: (path: string): Promise<boolean> => ipcRenderer.invoke('notes:reveal', path),
   openNotesFolder: (): Promise<string> => ipcRenderer.invoke('notes:open-folder'),
   /** Open a web or mail link in the default app (a note preview's links). */
   openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('shell:open-external', url),

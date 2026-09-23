@@ -70,6 +70,8 @@ export function AgentRow({
           provider: agent.provider,
           focusHwnd: agent.focusHwnd,
           focusPid: agent.focusPid,
+          rawSessionId: agent.rawSessionId,
+          activity: agent.activity,
           name,
           recentQuestions: agent.recentQuestions,
           waiting: agent.state === 'waiting',

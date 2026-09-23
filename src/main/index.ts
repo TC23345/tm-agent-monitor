@@ -8,7 +8,7 @@ import { shellArgs } from '../shared/wtArgs.mjs'
 import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
 import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, promises as fsp, watch as fsWatch, type FSWatcher } from 'node:fs'
-import { isNoteName, planNewNote, notePreview, MAX_NOTES, MAX_NOTE_BYTES, type NoteMeta } from '../shared/notes.mjs'
+import { isNoteName, isNotePath, isFolderName, isFolderPath, nextFolderName, planNewNote, notePreview, MAX_FOLDERS, MAX_NOTES, MAX_NOTE_BYTES, type NoteMeta } from '../shared/notes.mjs'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { statSync } from 'node:fs'
@@ -453,7 +453,8 @@ function ensureNotesDir(): string {
   try { mkdirSync(dir, { recursive: true }) } catch { /* reported by the write that follows */ }
   if (!notesWatcher) {
     try {
-      notesWatcher = fsWatch(dir, { persistent: false }, () => {
+      // Recursive: a note written into a subfolder refreshes the list too.
+      notesWatcher = fsWatch(dir, { persistent: false, recursive: true }, () => {
         if (notesChangedTimer) clearTimeout(notesChangedTimer)
         notesChangedTimer = setTimeout(() => {
           notesChangedTimer = null
@@ -1711,33 +1712,50 @@ function registerIpc(): void {
     return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
   })
   ipcMain.handle('usage:insights', () => getUsageInsights())
-  // ---- the shared notepad: Markdown files in config.notesDir. Names are
-  // validated on the way in (one segment, .md) because they become paths;
+  // ---- the shared notepad: Markdown files in config.notesDir and its
+  // subfolders. Every path is validated segment by segment on the way in
+  // (isNotePath / isFolderPath) because it is joined onto the notes folder;
   // the folder is watched so an agent's edit from a shell shows up in the pane.
-  ipcMain.handle('notes:list', async (): Promise<{ dir: string; notes: NoteMeta[] }> => {
+  /** A validated relative path ('/'-separated) → an absolute one under the notes folder. */
+  const notePathAbs = (rel: string) => join(ensureNotesDir(), ...rel.split('/').filter(Boolean))
+  ipcMain.handle('notes:list', async (): Promise<{ dir: string; notes: NoteMeta[]; folders: string[] }> => {
     const dir = ensureNotesDir()
-    const names = (await fsp.readdir(dir).catch(() => [] as string[])).filter(isNoteName).slice(0, MAX_NOTES)
-    const notes = await Promise.all(names.map(async (name): Promise<NoteMeta | null> => {
+    const files: string[] = []
+    const folders: string[] = []
+    // Breadth-first, bounded by depth and count; dot-folders and anything whose
+    // name the validators reject (so the pane could never open it) are skipped.
+    const queue: string[] = ['']
+    while (queue.length && files.length < MAX_NOTES) {
+      const rel = queue.shift()!
+      const entries = await fsp.readdir(rel ? notePathAbs(rel) : dir, { withFileTypes: true }).catch(() => [])
+      for (const e of entries) {
+        const path = rel ? `${rel}/${e.name}` : e.name
+        if (e.isDirectory() && isFolderPath(path) && folders.length < MAX_FOLDERS) { folders.push(path); queue.push(path) }
+        else if (e.isFile() && isNotePath(path) && files.length < MAX_NOTES) files.push(path)
+      }
+    }
+    const notes = await Promise.all(files.map(async (name): Promise<NoteMeta | null> => {
       try {
-        const st = await fsp.stat(join(dir, name))
+        const abs = notePathAbs(name)
+        const st = await fsp.stat(abs)
         if (!st.isFile()) return null
-        const preview = st.size <= 64 * 1024 ? notePreview(await fsp.readFile(join(dir, name), 'utf8')) : ''
+        const preview = st.size <= 64 * 1024 ? notePreview(await fsp.readFile(abs, 'utf8')) : ''
         return { name, mtime: st.mtimeMs, size: st.size, preview }
       } catch { return null }
     }))
-    return { dir, notes: notes.filter((n): n is NoteMeta => n !== null) }
+    return { dir, notes: notes.filter((n): n is NoteMeta => n !== null), folders }
   })
   ipcMain.handle('notes:read', async (_e, name: unknown): Promise<string | null> => {
-    if (!isNoteName(name)) return null
-    try { return await fsp.readFile(join(ensureNotesDir(), name), 'utf8') } catch { return null }
+    if (!isNotePath(name)) return null
+    try { return await fsp.readFile(notePathAbs(name), 'utf8') } catch { return null }
   })
   ipcMain.handle('notes:write', async (_e, name: unknown, text: unknown): Promise<boolean> => {
-    if (!isNoteName(name) || typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > MAX_NOTE_BYTES) return false
-    const dir = ensureNotesDir()
-    const tmp = join(dir, `.${name}.${process.pid}.tmp`)
+    if (!isNotePath(name) || typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > MAX_NOTE_BYTES) return false
+    const target = notePathAbs(name)
+    const tmp = join(dirname(target), `.${basename(target)}.${process.pid}.tmp`)
     try {
       await fsp.writeFile(tmp, text, 'utf8')
-      await fsp.rename(tmp, join(dir, name))
+      await fsp.rename(tmp, target)
       return true
     } catch (error) {
       console.warn(`[notes] write failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -1747,19 +1765,60 @@ function registerIpc(): void {
   })
   // `template` is a NOTE_TEMPLATES id; anything else is a blank note. A
   // once-a-day template whose note for today exists answers with that name.
-  ipcMain.handle('notes:create', async (_e, template: unknown): Promise<string | null> => {
-    const dir = ensureNotesDir()
-    const existing = (await fsp.readdir(dir).catch(() => [] as string[])).filter(isNoteName)
-    const plan = planNewNote(existing, typeof template === 'string' ? template : undefined)
+  // `folder` ('' or a folder path) is where it goes; it must already exist.
+  ipcMain.handle('notes:create', async (_e, template: unknown, folder: unknown): Promise<string | null> => {
+    const where = folder === undefined || folder === '' ? '' : isFolderPath(folder) ? folder : null
+    if (where === null) return null
+    const base = where ? notePathAbs(where) : ensureNotesDir()
+    const existing = (await fsp.readdir(base).catch(() => [] as string[])).filter(isNoteName)
+    const plan = planNewNote(existing, typeof template === 'string' ? template : undefined, Date.now(), where)
     if (plan.exists) return plan.name
     try {
-      await fsp.writeFile(join(dir, plan.name), plan.body, { encoding: 'utf8', flag: 'wx' })
+      await fsp.writeFile(notePathAbs(plan.name), plan.body, { encoding: 'utf8', flag: 'wx' })
       return plan.name
     } catch { return null }
   })
   ipcMain.handle('notes:delete', async (_e, name: unknown): Promise<boolean> => {
-    if (!isNoteName(name)) return false
-    try { await fsp.unlink(join(ensureNotesDir(), name)); return true } catch { return false }
+    if (!isNotePath(name)) return false
+    try { await fsp.unlink(notePathAbs(name)); return true } catch { return false }
+  })
+  /** A new, free "New folder" inside `parent` ('' = the top level); answers its path. */
+  ipcMain.handle('notes:mkdir', async (_e, parent: unknown): Promise<string | null> => {
+    const where = parent === undefined || parent === '' ? '' : isFolderPath(parent) ? parent : null
+    if (where === null) return null
+    const base = where ? notePathAbs(where) : ensureNotesDir()
+    const existing = await fsp.readdir(base).catch(() => [] as string[])
+    const path = where ? `${where}/${nextFolderName(existing)}` : nextFolderName(existing)
+    if (!isFolderPath(path)) return null // would nest deeper than MAX_FOLDER_DEPTH
+    try { await fsp.mkdir(notePathAbs(path)); return path } catch { return null }
+  })
+  /**
+   * Rename a note or a folder in place (same parent). `to` is the new last
+   * segment, already cleaned by the renderer and validated again here. A
+   * case-only change is allowed; any other clash with an existing name is not.
+   */
+  ipcMain.handle('notes:rename', async (_e, from: unknown, to: unknown): Promise<string | null> => {
+    const isNote = isNotePath(from)
+    if (!isNote && !isFolderPath(from)) return null
+    if (isNote ? !isNoteName(to) : !isFolderName(to)) return null
+    const src = from as string
+    const i = src.lastIndexOf('/')
+    const target = i < 0 ? (to as string) : `${src.slice(0, i)}/${to as string}`
+    if (target === src) return src
+    const caseOnly = target.toLowerCase() === src.toLowerCase()
+    if (!caseOnly && existsSync(notePathAbs(target))) return null
+    try { await fsp.rename(notePathAbs(src), notePathAbs(target)); return target } catch { return null }
+  })
+  /** Remove an empty folder. A folder with anything in it is refused, never emptied. */
+  ipcMain.handle('notes:rmdir', async (_e, path: unknown): Promise<boolean> => {
+    if (!isFolderPath(path)) return false
+    try { await fsp.rmdir(notePathAbs(path)); return true } catch { return false }
+  })
+  /** Show a folder (or the notes folder) in Explorer. */
+  ipcMain.handle('notes:reveal', async (_e, path: unknown): Promise<boolean> => {
+    const where = path === undefined || path === '' ? '' : isFolderPath(path) ? path : null
+    if (where === null) return false
+    return (await shell.openPath(where ? notePathAbs(where) : ensureNotesDir())) === ''
   })
   ipcMain.handle('notes:open-folder', async (): Promise<string> => shell.openPath(ensureNotesDir()))
   // A link in a note's preview. Only web/mail schemes leave the sandbox.

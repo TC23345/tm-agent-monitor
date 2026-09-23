@@ -336,6 +336,13 @@ export function App() {
         return
       }
       if (e.key !== 'Escape') return
+      // A ContextMenu or an inline rename owns Escape while it is open.
+      const owner = document.querySelector('[data-escape-close]')
+      if (owner) {
+        e.preventDefault()
+        owner.dispatchEvent(new CustomEvent('tm-escape'))
+        return
+      }
       if (menu) setMenu(null)
       else if (openMenu) setOpenMenu(null)
       else if (palette) setPalette(false)
@@ -595,6 +602,10 @@ export function App() {
   const openActivity = () => openUnique('activity')
   const openNotes = () => openUnique('notes')
 
+  /** The pane the right-clicked session runs in, if any (reply box, "Go to its pane"). */
+  const menuAgent = menu ? agents.find((a) => a.id === menu.id) : undefined
+  const menuPane = menuAgent ? paneForAgent(panes, menuAgent) : null
+
   /** The agent a feed row or chip points at: its pane when it has one, else its window. */
   const focusAgentAnywhere = (id: string) => {
     const agent = agents.find((a) => a.id === id)
@@ -767,6 +778,7 @@ export function App() {
         <>
           {tool(notesPreview ? 'Edit' : 'Preview', ic(notesPreview ? PenLine : Eye), toggleNotesPreview, false, notesPreview)}
           {tool('New note', ic(FilePlus2), () => notesRef.current?.newNote())}
+          {tool('New folder', ic(FolderPlus), () => notesRef.current?.newFolder())}
           {tool('Open the notes folder', ic(FolderOpen), () => { void window.watch.openNotesFolder() })}
         </>
       )
@@ -1311,11 +1323,15 @@ export function App() {
         <AgentContextMenu
           menu={menu}
           onClose={() => setMenu(null)}
-          replySession={(() => {
-            const agent = agents.find((a) => a.id === menu.id)
-            return agent ? paneForAgent(panes, agent)?.term?.sessionId : undefined
-          })()}
+          replySession={menuPane?.term?.sessionId}
+          inPane={!!menuPane}
+          onGoTo={focusAgentAnywhere}
           onRename={(id) => { setMenu(null); setRenaming(id) }}
+          onLaunch={(launch, cwd) => {
+            // Same as the launch nav: a pane in that folder; a full grid opens a window.
+            if (panes.length >= MAX_PANES) window.watch.openTerminal(cwd, launch)
+            else addPane('terminal', { launch, cwd, label: cwd.split(/[\\/]/).filter(Boolean).pop() })
+          }}
         />
       )}
       {renaming && (

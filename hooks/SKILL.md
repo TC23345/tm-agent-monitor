@@ -32,8 +32,10 @@ your row in `GET /v1/terminals`.
 `%USERPROFILE%\Notes` (or `TM_NOTES_DIR`) is a folder of plain Markdown files
 the user edits in the app's **Notes** pane. Read it when the user says "my
 notes", "the notepad", or points you at a note by name; write there when they
-ask you to leave them something. One file per note, `<name>.md`, no
-subfolders. The list groups notes by name prefix — `Daily <date>.md`,
+ask you to leave them something. One file per note, `<name>.md`.
+Subfolders are real folders and show as a tree in the pane (up to four
+deep, e.g. `Work\Q3\plan.md`); put a note in the folder the user names.
+Top-level notes are grouped by name prefix — `Daily <date>.md`,
 `Meeting …`, `Plan …`, `Prompt …`; anything else sits under Notes — so to
 file a note in a group, start its name with that word and a space. The pane picks up your edits on its own — do not tell the user to
 refresh. Do not delete or rewrite a note they did not ask you to touch.
