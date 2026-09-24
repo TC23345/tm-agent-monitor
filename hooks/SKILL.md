@@ -82,3 +82,36 @@ wraps the same calls (`tm --help`).
   submits a prompt to another agent.
 - Read output before deciding a command finished; `exitCode` is the shell's,
   not the command's.
+
+## Driving another Claude Code pane (orchestration)
+
+When the user asks you to start or steer a session in another pane, the
+routes above are the whole mechanism — the same daemon, no new API. What
+was learned running it (2026-09-23, Claude Code 2.1):
+
+- **Find the pane** with `GET /v1/terminals` (cwd + `launch`), then confirm
+  with `/output` — `agentId` is a folder-fallback match when the pane's shell
+  did not get `TM_TERMINAL_ID`, so two sessions in one project can be
+  mislabelled. Your own pane is the one whose output shows your own commands.
+- **A long injected prompt is held by the paste guard** ("review and press
+  Enter to send"); the newline sent with it and the first bare `\r` after it
+  are swallowed. Send `{text: "\r", enter: false}` again a few seconds later;
+  the second one submits. Confirm with `/wait?until=running`.
+- **Text sent while the session is mid-turn is queued**, not lost: Claude Code
+  shows it under "Press up to edit queued messages" and delivers it when the
+  turn ends. So a protocol note can be sent any time; the answer comes with
+  the next stop.
+- **Wait for a stop, not a state**: a session that finishes a turn reads
+  `complete`; one asking a question reads `waiting`; a session the user
+  restarts in the pane may read `ended` under the old id. Loop
+  `/wait?until=complete&timeout=120000` and check `/v1/status` between calls
+  for `waiting` / `ended`; a fresh id after a restart means look the session
+  up again by cwd.
+- `POST /v1/terminals/:id/input` writes raw to the PTY — no bracketed-paste
+  wrapping, `enter` appends `\r`. `tm send` joins its arguments with spaces,
+  so a prompt with quotes or a leading `/` (Git Bash rewrites it as a path) is
+  safer posted from a file with a small script.
+- The other session's commits land on **its** branch or worktree; check `git
+  rev-parse main <branch>` before assuming `main` moved. Do not commit on
+  `main` while it is about to fast-forward — hold your own commits for its
+  check-in and have it merge `main` before continuing.

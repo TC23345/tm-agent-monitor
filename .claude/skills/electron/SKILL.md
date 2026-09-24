@@ -38,7 +38,11 @@ These defy assumption. Each one cost real debugging time here.
    *succeeds* and produces an installer whose asar contains your direct deps but
    none of their dependencies — the app then dies on first `import`. Never
    package from a linked `node_modules`; run a real `npm install` in that
-   directory, then verify with `scripts/verify-asar-deps.mjs`.
+   directory, then verify with `scripts/verify-asar-deps.mjs`. Claude Code's
+   `EnterWorktree` checkouts (`.claude/worktrees/<name>/`) get a `node_modules`
+   symlink to the main checkout's — fine for typecheck, tests and `build`, but
+   `dist`, `debug:app` and anything that packages run from the main checkout
+   after fast-forwarding `main` (the Update chip already does).
 3. **`requestSingleInstanceLock()` is app-scoped, not path-scoped.** A freshly
    built copy exits instantly (code 0, no window) while an installed build of
    the same app is running. To test a packaged build side by side, give it its
