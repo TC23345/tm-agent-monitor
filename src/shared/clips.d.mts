@@ -109,6 +109,7 @@ export function sizeLabel(bytes: number): string
 export function looksLikeCode(text: string | undefined): boolean
 export function describeSource(input: { owner?: ProcessInfo | null; foreground?: ProcessInfo | null; selfPid?: number; internal?: { at: number; terminalId?: string; cwd?: string; project?: string } | null; agent?: { provider: 'claude' | 'codex' | 'cursor'; id: string; project?: string } | null; now?: number }): ClipSource
 export function appLabel(exe: string | undefined): string
+export function appDisplayName(exe: string | undefined): string
 export function sourceLabel(source: ClipSource | null | undefined): string
 export function mergeText(clips: Array<Pick<Clip, 'kind' | 'text' | 'files'>>): string
 export function sanitizeSource(raw: unknown): ClipSource

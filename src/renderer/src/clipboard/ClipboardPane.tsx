@@ -4,7 +4,7 @@ import {
   Merge, MoreHorizontal, Pause, Pencil, Play, Plus, SlidersHorizontal, Star, Terminal, Trash2, Upload, X
 } from 'lucide-react'
 import type { ClipSummary, ClipsListing } from '@shared/types'
-import { appLabel, fromSource, groupNameOk, inGroup, looksLikeCode, orderFavorites, sizeLabel, sourceLabel } from '@shared/clips.mjs'
+import { appDisplayName, fromSource, groupNameOk, inGroup, looksLikeCode, orderFavorites, sizeLabel, sourceLabel } from '@shared/clips.mjs'
 import { fuzzyScore } from '@shared/palette.mjs'
 import { ContextMenu, tidyEntries, type ContextEntry } from '../ContextMenu'
 import { Collapse } from '../Collapse'
@@ -218,7 +218,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
       if (c.source.exe && c.source.kind === 'app' && c.source.exe !== 'taylormade agents.exe') exes.set(c.source.exe, (exes.get(c.source.exe) ?? 0) + 1)
     }
     for (const [p, n] of [...projects].sort((a, b) => b[1] - a[1]).slice(0, 8)) out.push({ id: `project:${p}`, label: p, icon: <Layers strokeWidth={2} />, count: n })
-    for (const [e, n] of [...exes].sort((a, b) => b[1] - a[1]).slice(0, 8)) out.push({ id: `exe:${e}`, label: appLabel(e) || e, icon: <AppWindow strokeWidth={2} />, count: n })
+    for (const [e, n] of [...exes].sort((a, b) => b[1] - a[1]).slice(0, 8)) out.push({ id: `exe:${e}`, label: appDisplayName(e) || e, icon: <AppWindow strokeWidth={2} />, count: n })
     return out
   }, [clips])
 

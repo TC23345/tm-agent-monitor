@@ -396,12 +396,24 @@ const APP_LABELS = Object.freeze({
   'explorer.exe': 'Explorer', 'pwsh.exe': 'PowerShell', 'powershell.exe': 'PowerShell', 'cmd.exe': 'Command Prompt', 'notepad.exe': 'Notepad',
   'slack.exe': 'Slack', 'discord.exe': 'Discord', 'teams.exe': 'Teams', 'ms-teams.exe': 'Teams', 'outlook.exe': 'Outlook', 'olk.exe': 'Outlook',
   'winword.exe': 'Word', 'excel.exe': 'Excel', 'powerpnt.exe': 'PowerPoint', 'onenote.exe': 'OneNote', 'obsidian.exe': 'Obsidian', 'notion.exe': 'Notion',
-  'claude.exe': 'Claude', 'chatgpt.exe': 'ChatGPT', 'figma.exe': 'Figma', 'snippingtool.exe': 'Snipping Tool', 'screenclippinghost.exe': 'Snipping Tool'
+  'claude.exe': 'Claude', 'chatgpt.exe': 'ChatGPT', 'figma.exe': 'Figma', 'snippingtool.exe': 'Snipping Tool', 'screenclippinghost.exe': 'Snipping Tool',
+  'wispr flow.exe': 'Wispr Flow', 'wispr flow helper.exe': 'Wispr Flow'
 })
 
-/** A display name for an exe, or '' when we have none (the pane shows the exe then). */
+/** A display name for an exe, or '' when we have none (see `appDisplayName` for one that always answers). */
 export function appLabel(exe) {
   return APP_LABELS[exeName(exe)] ?? ''
+}
+
+/**
+ * What to call an app in the pane: its known label, else the exe's stem
+ * title-cased without `.exe` (`some_tool.exe` → `Some Tool`), else ''.
+ */
+export function appDisplayName(exe) {
+  const known = appLabel(exe)
+  if (known) return known
+  const stem = exeName(exe).replace(/\.exe$/, '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim()
+  return stem.replace(/(^|\s)(\S)/g, (_, space, ch) => space + ch.toUpperCase())
 }
 
 /** The meta line under a row: `Chrome · github.com` / `Claude Code · gs-referral` / `PowerShell`. */
@@ -417,7 +429,7 @@ export function sourceLabel(source) {
   } else if (source.kind === 'manual') {
     parts.push('added by you')
   } else {
-    parts.push(source.app || source.exe || 'Unknown app')
+    parts.push(source.app || appDisplayName(source.exe) || 'Unknown app')
     if (source.url) {
       try { parts.push(new URL(source.url).hostname) } catch { /* not a url */ }
     } else if (source.title) parts.push(source.title)
