@@ -195,7 +195,8 @@ export class ClipStore {
       clip.image = { ...clip.image!, hash, bytes: opts.png.length }
       clip.bytes = opts.png.length
     }
-    const { clips, clip: stored, existed } = upsertClip(this.clips, clip, Date.now(), { keepSource: opts.keepSource })
+    const { clips, clip: stored, existed, burst } = upsertClip(this.clips, clip, Date.now(), { keepSource: opts.keepSource })
+    if (burst) return stored
     this.clips = applyRetention(clips, this.retention())
     if (!existed && clip.kind === 'image' && opts.png) {
       await this.writeImage(stored.id, opts.png, opts.thumb)

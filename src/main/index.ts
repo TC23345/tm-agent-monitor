@@ -1020,14 +1020,21 @@ function captureClipboard(seq: number, via: 'listener' | 'poll'): void {
     const owner = clipboardOwner()
     const foreground = foregroundWindowInfo()
     const meta = store.settings()
-    const snap = await readClipboardSnapshot({ withImage: meta.captureImages, maxImageBytes: MAX_IMAGE_BYTES })
+    let snap = await readClipboardSnapshot({ withImage: meta.captureImages, maxImageBytes: MAX_IMAGE_BYTES })
+    // The writer may still hold the clipboard when the first change of a
+    // burst is dispatched, so a read can come back blank although formats are
+    // advertised. Two short retries before believing "empty".
+    for (let attempt = 0; attempt < 2 && !snap.excluded && snap.formats.length && !snap.text.trim() && !snap.files.length && !snap.image; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 120))
+      snap = await readClipboardSnapshot({ withImage: meta.captureImages, maxImageBytes: MAX_IMAGE_BYTES })
+    }
     const decision = shouldCapture(
       { text: snap.text, files: snap.files, hasImage: !!snap.image, imageBytes: snap.image?.png.length, excluded: snap.excluded },
       { ownerExe: owner?.exe || foreground?.exe, blockedExes: meta.blockedExes, redactSecrets: meta.redactSecrets, paused: store.isPaused() }
     )
     const who = `${owner?.exe || '?'}${owner?.pid ? `#${owner.pid}` : ''}`
     if (!decision.keep) {
-      clipboardLog(`[clipboard] update seq=${seq} via=${via} owner=${who} skipped: ${decision.reason}`)
+      clipboardLog(`[clipboard] update seq=${seq} via=${via} owner=${who} skipped: ${decision.reason} formats=${snap.formats.join(',') || '-'}`)
       return
     }
     const internal = lastInternalCopy

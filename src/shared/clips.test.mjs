@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   applyRetention, blockedExe, clipPreview, clipTitle, dedupeKey, describeSource, domainBlocked, filterClips, groupNameOk, inGroup,
   looksLikeCode, looksSecret, mergeText, orderFavorites, parseDropFiles, sanitizeClip, sanitizeGroups, shouldCapture, sizeLabel,
-  sourceLabel, summarize, upsertClip, CF_HDROP, EXCLUSION_FORMATS, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, INTERNAL_COPY_WINDOW_MS
+  sourceLabel, summarize, upsertClip, CF_HDROP, EXCLUSION_FORMATS, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, INTERNAL_COPY_WINDOW_MS, BURST_MS
 } from './clips.mjs'
 
 /** Build a DROPFILES payload the way Explorer does: 20-byte header, then paths. */
@@ -116,6 +116,16 @@ test('dedupeKey distinguishes kinds; upsert moves a re-copy to the top and keeps
   const own = upsertClip(again.clips, { id: 'q', kind: 'text', text: 'alpha', source: { kind: 'app', app: 'TaylorMade Agents' }, bytes: 5 }, 5000, { keepSource: true })
   assert.equal(own.clip.source.kind, 'chrome', 'a re-copy from our own pane keeps the original source')
   assert.equal(own.clip.copies, 3)
+  // A write-then-flush burst: the same content on top again 300 ms later is the same copy.
+  const burst = upsertClip(own.clips, { id: 'r', kind: 'text', text: 'alpha', source: { kind: 'app' }, bytes: 5 }, 5300)
+  assert.equal(burst.burst, true)
+  assert.equal(burst.clip.copies, 3)
+  assert.equal(burst.clips, own.clips, 'nothing changes')
+  const later = upsertClip(own.clips, { id: 'r', kind: 'text', text: 'alpha', source: { kind: 'app' }, bytes: 5 }, 5000 + BURST_MS)
+  assert.equal(later.burst, undefined)
+  assert.equal(later.clip.copies, 4)
+  const notTop = upsertClip([textClip('x', 'other', { copiedAt: 5100 }), ...own.clips], { id: 'r', kind: 'text', text: 'alpha', source: { kind: 'app' }, bytes: 5 }, 5200)
+  assert.equal(notTop.burst, undefined, 'only the clip on top can be a burst echo')
 })
 
 test('applyRetention drops old and surplus unpinned clips only', () => {

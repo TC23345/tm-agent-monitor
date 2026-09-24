@@ -37,6 +37,8 @@ export const MAX_GROUP_NAME = 40
 export const MAX_TITLE = 120
 /** How long an internal `text:copy` hint (a pane's copy-on-select) can precede the clipboard update it explains. */
 export const INTERNAL_COPY_WINDOW_MS = 1500
+/** The same content on top again within this window is the same copy (a write-then-flush burst), not a re-copy. */
+export const BURST_MS = 1000
 
 /** Built-in groups. `all` and `favorites` and `images` are views, never stored on a clip. */
 export const BUILTIN_GROUPS = Object.freeze(['all', 'favorites', 'images'])
@@ -164,7 +166,7 @@ export function dedupeKey(clip) {
  * and keeps its title, groups and star (its `copies` count grows and the
  * newest source wins); anything else goes in front. Never mutates.
  */
-export function upsertClip(clips, incoming, now = Date.now(), { keepSource = false } = {}) {
+export function upsertClip(clips, incoming, now = Date.now(), { keepSource = false, burstMs = BURST_MS } = {}) {
   const list = Array.isArray(clips) ? clips : []
   const key = dedupeKey(incoming)
   const idx = key ? list.findIndex((c) => dedupeKey(c) === key) : -1
@@ -173,6 +175,10 @@ export function upsertClip(clips, incoming, now = Date.now(), { keepSource = fal
     return { clips: [clip, ...list], clip, existed: false }
   }
   const prev = list[idx]
+  // One physical copy can arrive as two clipboard changes (an app writes,
+  // then flushes); the same content landing on top again within `burstMs`
+  // is that, not a second copy.
+  if (idx === 0 && now - (prev.copiedAt ?? 0) < burstMs) return { clips: list, clip: prev, existed: true, burst: true }
   // `keepSource`: the re-copy came from our own pane (the user picked the clip
   // again), so where it *originally* came from stays the interesting fact.
   const source = keepSource ? prev.source : incoming.source ?? prev.source
