@@ -151,6 +151,41 @@ test('a store without encryption writes plain bodies and says so; a garbage line
   }
 })
 
+test('importClips adds new text, skips content already in history without touching it, and creates the groups it names', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tm-clips-'))
+  try {
+    const clock = { t: 50_000 }
+    const { store } = makeStore(dir, clock)
+    await store.load()
+    await store.add(text('a', 'alpha'))
+    const res = await store.importClips([
+      { text: 'alpha', title: 'Dup', favorite: true },
+      { text: 'beta', title: 'Beta', favorite: true, groups: ['Prompts', 'All'], createdAt: 1_000 },
+      { text: '   ' },
+      { text: 'gamma', groups: ['Prompts'] }
+    ])
+    assert.deepEqual(res, { added: 2, skipped: 2 })
+    const a = store.get('a')
+    assert.equal(a.copies, 1, 'a duplicate never bumps the existing clip')
+    assert.equal(a.title, undefined)
+    assert.deepEqual(store.settings().groups, ['Prompts'])
+    const beta = store.list().find((c) => c.text === 'beta')
+    assert.equal(beta.title, 'Beta')
+    assert.equal(beta.favorite, true)
+    assert.deepEqual(beta.groups, ['Prompts'])
+    assert.equal(beta.createdAt, 1_000)
+    assert.equal(beta.manual, true)
+    assert.equal(beta.source.kind, 'manual')
+    assert.deepEqual(store.list().map((c) => c.text), ['gamma', 'alpha', 'beta'], 'newest copied first; imported clips keep their own time')
+    const exported = store.exportData()
+    assert.equal(exported.app, 'taylormade-agent-monitor')
+    assert.equal(exported.clips.length, 3)
+    assert.ok(exported.clips.every((c) => typeof c.text === 'string'), 'an export carries the bodies in the clear')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('sanitizeMeta bounds everything and defaults the rest', () => {
   assert.deepEqual(sanitizeMeta(null), { groups: [], favoritesOrder: [], pausedUntil: 0, blockedExes: [], redactSecrets: true, captureImages: true, maxItems: 2000, maxAgeDays: 30 })
   const m = sanitizeMeta({ groups: ['A', 'A', 'favorites'], favoritesOrder: ['x', 3], pausedUntil: -1, blockedExes: ['ONE.exe'], captureImages: false, maxItems: 99999, maxAgeDays: 7 })

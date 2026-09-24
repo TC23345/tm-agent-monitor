@@ -75,6 +75,10 @@ export function App() {
   // The pane the keyboard owns (Ctrl+1…6, Ctrl+Shift+←/→, or a click), and
   // the terminal pane whose snippet menu is open.
   const [focusedPane, setFocusedPane] = useState<string | null>(null)
+  /** The terminal pane focused most recently: where the Clipboard pane's
+   * Ctrl+Enter and the palette's paste land while another pane holds focus
+   * (typing in the clipboard search focuses *that* pane). */
+  const [lastTermPane, setLastTermPane] = useState<string | null>(null)
   // Ctrl+Shift+W cycles waiting sessions; remember where the cycle is.
   const lastRouted = useRef<string | null>(null)
   // Named layouts and the save-as prompt; a project group dragged over the grid.
@@ -618,6 +622,10 @@ export function App() {
   const openNotes = () => openUnique('notes')
   const openClipboard = () => openUnique('clipboard')
 
+  useEffect(() => {
+    if (focusedPane && panes.some((p) => p.id === focusedPane && p.kind === 'terminal')) setLastTermPane(focusedPane)
+  }, [focusedPane, panes])
+
   /** Open terminal panes a clip can be pasted into (the Clipboard pane's *Paste into ▸*, the palette's Ctrl+Enter). */
   const pasteTargets = (): PasteTarget[] => panes
     .filter((p) => p.kind === 'terminal' && p.term?.sessionId)
@@ -626,6 +634,9 @@ export function App() {
       label: `${p.term!.launch === 'claude' ? 'Claude Code' : p.term!.launch === 'codex' ? 'Codex' : 'Terminal'} · ${p.term!.label ?? p.term!.cwd?.split(/[\\/]/).filter(Boolean).pop() ?? 'home'}`,
       paste: (text: string) => termRefs.current.get(p.id)?.paste(text)
     }))
+  /** The terminal a paste goes to: the focused pane when it is one, else the last terminal pane that had focus. */
+  const pasteTarget = (targets: PasteTarget[]): PasteTarget | undefined =>
+    targets.find((t) => t.id === focusedPane) ?? targets.find((t) => t.id === lastTermPane)
 
   /** The pane the right-clicked session runs in, if any (reply box, "Go to its pane"). */
   const menuAgent = menu ? agents.find((a) => a.id === menu.id) : undefined
@@ -760,7 +771,7 @@ export function App() {
         return <NotesPane ref={notesRef} onDir={setNotesDir} preview={notesPreview} />
       case 'clipboard': {
         const targets = pasteTargets()
-        return <ClipboardPane terminals={targets} focusedTerminal={targets.find((t) => t.id === focusedPane)} />
+        return <ClipboardPane terminals={targets} focusedTerminal={pasteTarget(targets)} />
       }
       case 'terminal':
         return (
@@ -1103,7 +1114,7 @@ export function App() {
       sub('copy', 'copy path', <Copy strokeWidth={2} />, () => window.watch.copyText(cwd))
     }
     // Clipboard history (`!`): Enter copies, Ctrl+Enter pastes into the focused terminal pane.
-    const focusedTarget = pasteTargets().find((t) => t.id === focusedPane)
+    const focusedTarget = pasteTarget(pasteTargets())
     for (const c of paletteClips.slice(0, 300)) {
       items.push({
         id: `clip:${c.id}`,

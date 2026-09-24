@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, screen, powerMonitor, utilityProcess } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, screen, powerMonitor, utilityProcess } from 'electron'
 import { attentionTransition, badgeLabel } from '../shared/attentionSignal.mjs'
 import { edgeDragTarget } from '../shared/edgeDrag.mjs'
 import { blankBitmap, drawBadge } from '../shared/trayBadge.mjs'
@@ -33,6 +33,7 @@ import { startClipboardWatch, type ClipboardWatch } from './clipboardWatch.js'
 import { clipboardHasImage, makeThumbnail, protectText, protectionAvailable, readClipboardSnapshot, readClipboardText, unprotectText, writeClipboardImage, writeClipboardText } from './clipboardIo.js'
 import { ClipStore, type ClipSettingsPatch } from './clipStoreCore.mjs'
 import { describeSource, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, MAX_TITLE } from '../shared/clips.mjs'
+import { parseClipImport, snippetNote, MAX_IMPORT_BYTES } from '../shared/clipImport.mjs'
 import { agentForTerminal } from '../shared/attention.mjs'
 import { buildWindowList } from '../shared/windows.mjs'
 import { parseProjectCommands } from '../shared/projectCommands.mjs'
@@ -2208,6 +2209,66 @@ function registerIpc(): void {
     if (typeof p.maxAgeDays === 'number' && Number.isInteger(p.maxAgeDays) && p.maxAgeDays >= 1 && p.maxAgeDays <= 3650) clean.maxAgeDays = p.maxAgeDays
     clipStore.updateSettings(clean)
     return true
+  })
+  // Export is explicit and plain (PRD §5.1): the user picks the file, and the
+  // file holds every body in the clear — never written on its own.
+  ipcMain.handle('clips:export', async (): Promise<{ path: string; count: number } | null> => {
+    const store = clipStore
+    if (!store || !win || win.isDestroyed()) return null
+    const stamp = new Date().toISOString().slice(0, 10)
+    const res = await dialog.showSaveDialog(win, {
+      title: 'Export clipboard history',
+      defaultPath: join(app.getPath('documents'), `clipboard-history-${stamp}.json`),
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    })
+    if (res.canceled || !res.filePath) return null
+    const data = store.exportData()
+    try {
+      await fsp.writeFile(res.filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf8')
+    } catch (error) {
+      clipboardLog(`[clipboard] export failed: ${error instanceof Error ? error.message : String(error)}`)
+      return null
+    }
+    clipboardLog(`[clipboard] exported ${data.clips.length} clips to ${res.filePath}`)
+    return { path: res.filePath, count: data.clips.length }
+  })
+  // Import (PRD §7): a backup from this app or from Clipboard History Pro.
+  // Clips whose content is already here are skipped; the old extension's text
+  // shortcuts become snippet notes (Notes\Snippets, `shortcut: ;x` first line).
+  ipcMain.handle('clips:import', async (): Promise<{ ok: boolean; added?: number; skipped?: number; snippets?: number; source?: string; error?: string } | null> => {
+    const store = clipStore
+    if (!store || !win || win.isDestroyed()) return null
+    const res = await dialog.showOpenDialog(win, { title: 'Import a clipboard backup', filters: [{ name: 'JSON', extensions: ['json'] }], properties: ['openFile'] })
+    const file = res.filePaths[0]
+    if (res.canceled || !file) return null
+    let raw: unknown
+    try {
+      const stat = await fsp.stat(file)
+      if (stat.size > MAX_IMPORT_BYTES) return { ok: false, error: `That file is larger than ${Math.round(MAX_IMPORT_BYTES / 1_048_576)} MB` }
+      raw = JSON.parse(await fsp.readFile(file, 'utf8'))
+    } catch {
+      return { ok: false, error: 'That is not a JSON file' }
+    }
+    const plan = parseClipImport(raw)
+    if (!plan) return { ok: false, error: 'Not a clipboard backup this app recognises' }
+    const { added, skipped } = await store.importClips(plan.clips)
+    let snippets = 0
+    if (plan.snippets.length) {
+      const dir = join(ensureNotesDir(), 'Snippets')
+      await fsp.mkdir(dir, { recursive: true }).catch(() => {})
+      for (const s of plan.snippets) {
+        const note = snippetNote(s)
+        if (!note) continue
+        const target = join(dir, note.file)
+        if (existsSync(target)) continue
+        try {
+          await fsp.writeFile(target, note.body, { encoding: 'utf8', flag: 'wx' })
+          snippets++
+        } catch { /* a clash or an unwritable folder: that snippet is skipped */ }
+      }
+    }
+    clipboardLog(`[clipboard] imported ${added} clips (${skipped} skipped), ${snippets} snippet notes, from ${plan.source}: ${file}`)
+    return { ok: true, added, skipped, snippets, source: plan.source }
   })
   ipcMain.handle('clips:image', async (_e, id: unknown, thumb: unknown): Promise<string | null> => {
     const key = clipId(id)

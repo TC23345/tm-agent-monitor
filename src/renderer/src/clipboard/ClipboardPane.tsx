@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  AppWindow, Bot, Check, ChevronRight, ChevronsDownUp, Clipboard, ClipboardPaste, Copy, Files, FolderPlus, Globe, Image, Layers,
-  Merge, Pause, Pencil, Play, Plus, Star, Terminal, Trash2, X
+  AppWindow, Bot, Check, ChevronRight, ChevronsDownUp, Clipboard, ClipboardPaste, Copy, Download, Files, FolderPlus, Globe, Image, Layers,
+  Merge, MoreHorizontal, Pause, Pencil, Play, Plus, Star, Terminal, Trash2, Upload, X
 } from 'lucide-react'
 import type { ClipSummary, ClipsListing } from '@shared/types'
 import { appLabel, fromSource, groupNameOk, inGroup, looksLikeCode, orderFavorites, sizeLabel, sourceLabel } from '@shared/clips.mjs'
@@ -329,6 +329,19 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
     setConfirm(null)
     say(n ? `Cleared ${n} clip${n === 1 ? '' : 's'}` : 'Nothing to clear')
   }
+  const exportAll = async () => {
+    const res = await window.watch.exportClips()
+    if (res) say(`Exported ${res.count} clip${res.count === 1 ? '' : 's'} to ${res.path}`)
+  }
+  const importFile = async () => {
+    const res = await window.watch.importClips()
+    if (!res) return
+    if (!res.ok) { say(res.error ?? 'Could not read that file'); return }
+    const parts = [`Imported ${res.added ?? 0} clip${res.added === 1 ? '' : 's'}`]
+    if (res.snippets) parts.push(`${res.snippets} snippet note${res.snippets === 1 ? '' : 's'}`)
+    if (res.skipped) parts.push(`${res.skipped} duplicate${res.skipped === 1 ? '' : 's'} skipped`)
+    say(parts.join(' · '))
+  }
   const addText = async () => {
     const text = adding ?? ''
     if (!text.trim()) { setAdding(null); return }
@@ -459,6 +472,9 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
       { kind: 'item', id: 'add', label: 'Add text clip…', icon: <Plus />, onSelect: () => setAdding('') },
       { kind: 'item', id: 'new-group', label: 'New group…', icon: <FolderPlus />, onSelect: () => setRenaming({ name: null, value: '' }) },
       { kind: 'sep' },
+      { kind: 'item', id: 'import', label: 'Import backup…', icon: <Upload />, hint: 'A JSON export from this app or from Clipboard History Pro; duplicates are skipped', onSelect: () => void importFile() },
+      { kind: 'item', id: 'export', label: 'Export to JSON…', icon: <Download />, hint: 'Writes every clip in the clear to a file you choose', onSelect: () => void exportAll() },
+      { kind: 'sep' },
       { kind: 'item', id: 'clear', label: 'Clear history…', icon: <Trash2 />, hint: 'Favorites and grouped clips stay', onSelect: () => setConfirm('clear') },
       { kind: 'item', id: 'clear-all', label: 'Clear everything…', icon: <Trash2 />, onSelect: () => setConfirm('clear-all') }
     ])
@@ -535,7 +551,14 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
       </button>
       <span className="notes-toolbar-where" data-testid="clip-count">{paused ? 'paused' : `${clips.length} clip${clips.length === 1 ? '' : 's'}`}</span>
       <button className="notes-tool" onClick={() => { setOpenSections([]); writeOpen([]) }} title="Collapse sections" data-testid="clip-tool:collapse"><ChevronsDownUp strokeWidth={2} /></button>
-      <button className="notes-tool" onClick={() => setConfirm('clear')} title="Clear history (favorites and grouped clips stay)" data-testid="clip-tool:clear"><Trash2 strokeWidth={2} /></button>
+      <button
+        className="notes-tool"
+        onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ kind: 'root', x: r.left, y: r.bottom + 4 }) }}
+        title="More: add, import, export, clear"
+        data-testid="clip-tool:more"
+      >
+        <MoreHorizontal strokeWidth={2} />
+      </button>
     </div>
   )
 

@@ -43,6 +43,9 @@ export class ClipStore {
   remove(ids: string[]): number
   clear(all?: boolean): number
   merge(ids: string[], source: ClipSource): Promise<Clip | null>
+  /** A backup's text clips; the same content already in history is skipped. */
+  importClips(items: Array<{ text: string; title?: string; favorite?: boolean; groups?: string[]; createdAt?: number; copiedAt?: number; sourceUrl?: string; order?: number; merged?: boolean; edited?: boolean }>): Promise<{ added: number; skipped: number }>
+  exportData(): { app: string; schemaVersion: 1; exportedAt: string; groups: string[]; favoritesOrder: string[]; clips: Clip[] }
   setGroups(names: string[]): string[]
   setFavoritesOrder(ids: string[]): void
   imageDataUrl(id: string, thumb: boolean): Promise<string | null>

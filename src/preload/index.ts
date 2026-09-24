@@ -158,6 +158,10 @@ const api = {
   /** `minutes` > 0 pauses for that long, 0 pauses until resumed, null resumes. */
   pauseClips: (minutes: number | null): Promise<boolean> => ipcRenderer.invoke('clips:pause', minutes),
   setClipSettings: (patch: Partial<ClipCaptureSettings>): Promise<boolean> => ipcRenderer.invoke('clips:settings', patch),
+  /** Explicit export to a JSON file the user picks (never automatic); answers the path, or null when cancelled. */
+  exportClips: (): Promise<{ path: string; count: number } | null> => ipcRenderer.invoke('clips:export'),
+  /** Import a backup the user picks: ours, or the old Chrome extension's. Duplicates are skipped; its text shortcuts become snippet notes. */
+  importClips: (): Promise<{ ok: boolean; added?: number; skipped?: number; snippets?: number; source?: string; error?: string } | null> => ipcRenderer.invoke('clips:import'),
   /** A data URL for an image clip: the thumbnail (default) or the full PNG. */
   clipImage: (id: string, thumb = true): Promise<string | null> => ipcRenderer.invoke('clips:image', id, thumb),
   /** The history changed (a capture, an edit, a pause). Re-list to follow it. */

@@ -14,7 +14,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, promises as fsp } from 'node:fs'
 import { join } from 'node:path'
-import { applyRetention, sanitizeClip, sanitizeGroups, upsertClip, MAX_CLIPS, RETENTION_DAYS, groupNameOk, mergeText } from '../shared/clips.mjs'
+import { applyRetention, dedupeKey, sanitizeClip, sanitizeGroups, sortClips, upsertClip, MAX_CLIPS, MAX_GROUPS, RETENTION_DAYS, groupNameOk, mergeText } from '../shared/clips.mjs'
 
 const DEFAULT_META = Object.freeze({
   groups: [], favoritesOrder: [], pausedUntil: 0, blockedExes: [], redactSecrets: true, captureImages: true,
@@ -206,6 +206,65 @@ export class ClipStore {
     this.schedule()
     this.emit()
     return stored
+  }
+
+  /**
+   * A backup's clips (PRD §7): each becomes a text clip unless the same
+   * content is already in history, in which case it is skipped — an import
+   * never bumps `copies` or moves anything. Unknown groups are created.
+   * Answers { added, skipped }.
+   */
+  async importClips(items) {
+    let added = 0
+    let skipped = 0
+    const known = new Set(this.clips.map((c) => dedupeKey(c)))
+    const groups = [...this.meta.groups]
+    const ordered = []
+    for (const item of Array.isArray(items) ? items : []) {
+      if (!item || typeof item.text !== 'string' || !item.text.trim()) { skipped++; continue }
+      const key = dedupeKey({ kind: 'text', text: item.text })
+      if (known.has(key)) { skipped++; continue }
+      const wanted = Array.isArray(item.groups) ? item.groups.filter((g) => groupNameOk(g)) : []
+      for (const g of wanted) if (!groups.includes(g) && groups.length < MAX_GROUPS) groups.push(g)
+      const source = typeof item.sourceUrl === 'string' ? { kind: 'chrome', app: 'Chrome', url: item.sourceUrl } : { kind: 'manual' }
+      const clip = sanitizeClip({
+        id: randomUUID(), kind: 'text', text: item.text, groups: wanted.filter((g) => groups.includes(g)), favorite: item.favorite === true,
+        title: typeof item.title === 'string' ? item.title : undefined,
+        createdAt: item.createdAt, copiedAt: item.copiedAt ?? item.createdAt, copies: 1,
+        source, bytes: Buffer.byteLength(item.text, 'utf8'), manual: true,
+        merged: item.merged === true, edited: item.edited === true
+      })
+      if (!clip) { skipped++; continue }
+      known.add(key)
+      this.clips.push(clip)
+      if (clip.favorite && typeof item.order === 'number' && Number.isFinite(item.order)) ordered.push({ id: clip.id, order: item.order })
+      added++
+    }
+    if (groups.length !== this.meta.groups.length) { this.meta.groups = sanitizeGroups(groups); this.metaDirty = true }
+    if (ordered.length) {
+      ordered.sort((a, b) => a.order - b.order)
+      this.meta.favoritesOrder = [...new Set([...this.meta.favoritesOrder, ...ordered.map((o) => o.id)])].slice(0, 500)
+      this.metaDirty = true
+    }
+    if (added) {
+      this.clips = applyRetention(sortClips(this.clips), this.retention())
+      this.dirty = true
+      this.schedule()
+      this.emit()
+    }
+    return { added, skipped }
+  }
+
+  /** Everything, for an explicit export: the records with their bodies (images as metadata only). */
+  exportData() {
+    return {
+      app: 'taylormade-agent-monitor',
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      groups: [...this.meta.groups],
+      favoritesOrder: [...this.meta.favoritesOrder],
+      clips: this.clips.map((c) => ({ ...c }))
+    }
   }
 
   /** Title, text (text clips only — marks it edited), groups (existing names only), star. */
