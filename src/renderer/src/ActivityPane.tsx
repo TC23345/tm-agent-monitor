@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BellRing, CheckCircle2, LogIn, LogOut, Shrink } from 'lucide-react'
+import { BellRing, CheckCircle2, Clipboard, LogIn, LogOut, Shrink } from 'lucide-react'
 import type { ActivityEvent, ProviderId } from '@shared/types'
 import { ProviderBadge } from './ProviderBadge'
 import { clockTime } from './format'
@@ -13,7 +13,8 @@ const KIND: Record<ActivityEvent['kind'], { label: string; icon: typeof BellRing
   finished: { label: 'finished a turn', icon: CheckCircle2, cls: 'is-finished' },
   started: { label: 'session started', icon: LogIn, cls: 'is-started' },
   ended: { label: 'session ended', icon: LogOut, cls: 'is-ended' },
-  compacted: { label: 'compacted context', icon: Shrink, cls: 'is-compacted' }
+  compacted: { label: 'compacted context', icon: Shrink, cls: 'is-compacted' },
+  clip: { label: 'put something on your clipboard', icon: Clipboard, cls: 'is-clip' }
 }
 
 function relative(at: number, now: number): string {

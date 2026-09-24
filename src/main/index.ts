@@ -32,7 +32,8 @@ import { focusHwnd, focusByPid, listDesktopWindows, clipboardOwner, foregroundWi
 import { startClipboardWatch, type ClipboardWatch } from './clipboardWatch.js'
 import { clipboardHasImage, makeThumbnail, protectText, protectionAvailable, readClipboardSnapshot, readClipboardText, unprotectText, writeClipboardImage, writeClipboardText } from './clipboardIo.js'
 import { ClipStore, type ClipSettingsPatch } from './clipStoreCore.mjs'
-import { describeSource, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, MAX_TITLE } from '../shared/clips.mjs'
+import { clipTitle, describeSource, filterClips, parseSnippetNote, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, MAX_TITLE, type ClipSource } from '../shared/clips.mjs'
+import { noteNameFor as snippetFileName } from '../shared/notes.mjs'
 import { parseClipImport, snippetNote, MAX_IMPORT_BYTES } from '../shared/clipImport.mjs'
 import { agentForTerminal } from '../shared/attention.mjs'
 import { buildWindowList } from '../shared/windows.mjs'
@@ -2401,6 +2402,87 @@ if (!gotLock) {
         input: (id, data) => terminals.input(id, data),
         read: (id, lines) => terminals.read(id, lines),
         list: () => terminals.list()
+      },
+      // Clipboard routes for agents (PRD §4.1): the same store and rules as
+      // the pane. `clipStore` is created after the daemon and read lazily.
+      clips: {
+        list: ({ q, group, limit }) => (clipStore ? filterClips(clipStore.list(), { query: q, group, limit }).map((c) => summarize(c)) : []),
+        get: (id) => {
+          const c = clipStore?.get(id)
+          return c ? { id: c.id, kind: c.kind, title: clipTitle(c), text: c.text } : null
+        },
+        add: async ({ text, title, groups, terminalId }) => {
+          const store = clipStore
+          if (!store) return { error: 'clipboard history is not ready yet' }
+          const term = terminalId ? terminals.list().find((t) => t.id === terminalId) : undefined
+          const agent = term ? agentForTerminal(daemon.store.snapshot(), { launch: term.launch, cwd: term.cwd, sessionId: term.id }) : null
+          const project = agent?.project ?? (term ? basename(term.cwd) : undefined)
+          const source: ClipSource = {
+            kind: 'agent',
+            ...(agent ? { provider: agent.provider, agentId: agent.id } : {}),
+            ...(project ? { project } : {}),
+            ...(terminalId ? { terminalId } : {})
+          }
+          const known = store.settings().groups
+          const clip = await store.add({
+            id: randomUUID(), kind: 'text', text, source, bytes: Buffer.byteLength(text, 'utf8'),
+            ...(title ? { title } : {}), groups: (groups ?? []).filter((g) => known.includes(g))
+          })
+          if (!clip) return { error: 'that text could not be stored' }
+          // Our own write follows; the capture sees it as a plain copy of ours and keeps this source.
+          noteInternalCopy(undefined)
+          await writeClipboardText(text)
+          if (agent || term) {
+            daemon.store.recordActivity({
+              at: Date.now(), kind: 'clip',
+              agentId: agent?.id ?? `terminal:${terminalId}`, provider: agent?.provider ?? 'claude', project: project ?? 'agent',
+              cwd: agent?.cwd ?? term?.cwd, text: `put “${clipTitle(clip)}” on your clipboard`
+            })
+          }
+          clipboardLog(`[clipboard] agent added clip id=${clip.id.slice(0, 8)} bytes=${clip.bytes} from "${sourceLabel(source)}"`)
+          return { id: clip.id }
+        },
+        paste: async (id, terminalId) => {
+          const clip = clipStore?.get(id)
+          if (!clip) return 'missing'
+          if (clip.kind === 'image') return 'not-text'
+          if (!terminalId) {
+            noteInternalCopy(undefined)
+            await writeClipboardText(clip.text)
+            return 'copied'
+          }
+          const result = terminals.input(terminalId, clip.text)
+          return result === 'missing' ? 'no-terminal' : result === 'exited' ? 'exited' : 'ok'
+        },
+        // Snippets are notes (PRD §4.2): Notes\Snippets and Notes\Prompts, top level.
+        snippets: async () => {
+          const out: { name: string; shortcut?: string; text: string }[] = []
+          for (const folder of ['Snippets', 'Prompts']) {
+            const dir = join(ensureNotesDir(), folder)
+            const names = (await fsp.readdir(dir).catch(() => [] as string[])).filter((n) => n.toLowerCase().endsWith('.md')).slice(0, 200)
+            for (const name of names) {
+              const text = await fsp.readFile(join(dir, name), 'utf8').catch(() => null)
+              if (text === null || text.length > MAX_CLIP_BYTES) continue
+              const { shortcut, body } = parseSnippetNote(text)
+              out.push({ name: `${folder}/${name.slice(0, -3)}`, ...(shortcut ? { shortcut } : {}), text: body })
+            }
+          }
+          return out
+        },
+        addSnippet: async ({ name, text, shortcut }) => {
+          const file = snippetFileName(name)
+          if (!file) return { error: 'that name cannot be a file name' }
+          const dir = join(ensureNotesDir(), 'Snippets')
+          await fsp.mkdir(dir, { recursive: true }).catch(() => {})
+          const target = join(dir, file)
+          const body = `${shortcut ? `shortcut: ${shortcut}\n\n` : ''}${text.replace(/\r\n/g, '\n').replace(/\n*$/, '')}\n`
+          try {
+            await fsp.writeFile(target, body, { encoding: 'utf8', flag: 'wx' })
+          } catch {
+            return { error: 'a snippet with that name already exists' }
+          }
+          return { path: target }
+        }
       }
     })
     const daemonStarted = await daemon.start()

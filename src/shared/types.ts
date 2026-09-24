@@ -53,7 +53,8 @@ export interface UsageSample { t: number; pct: number }
 /** One attention-worthy moment across sessions, for the activity feed. */
 export interface ActivityEvent {
   at: number
-  kind: 'waiting' | 'finished' | 'started' | 'ended' | 'compacted'
+  /** `clip`: an agent put something on the user's clipboard (PRD §6). */
+  kind: 'waiting' | 'finished' | 'started' | 'ended' | 'compacted' | 'clip'
   agentId: string
   provider: ProviderId
   project: string

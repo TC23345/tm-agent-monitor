@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   applyRetention, blockedExe, clipPreview, clipTitle, dedupeKey, describeSource, domainBlocked, filterClips, groupNameOk, inGroup,
-  looksLikeCode, looksSecret, mergeText, orderFavorites, parseDropFiles, sanitizeClip, sanitizeGroups, shouldCapture, sizeLabel,
+  looksLikeCode, looksSecret, mergeText, orderFavorites, parseDropFiles, parseSnippetNote, sanitizeClip, sanitizeGroups, shouldCapture, sizeLabel,
   sourceLabel, summarize, upsertClip, CF_HDROP, EXCLUSION_FORMATS, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, INTERNAL_COPY_WINDOW_MS, BURST_MS
 } from './clips.mjs'
 
@@ -213,6 +213,14 @@ test('describeSource: our own copy within the pane window is that pane, else own
   assert.equal(sourceLabel({ kind: 'chrome', app: 'Chrome', url: 'https://github.com/x/y' }), 'Chrome · github.com')
   assert.equal(sourceLabel({ kind: 'agent', provider: 'codex', project: 'p' }), 'added by Codex · p')
   assert.equal(sourceLabel({ kind: 'manual' }), 'added by you')
+})
+
+test('parseSnippetNote reads the shortcut line and leaves the expansion clean', () => {
+  assert.deepEqual(parseSnippetNote('shortcut: ;sig\n\nBest,\nTaylor\n'), { shortcut: ';sig', body: 'Best,\nTaylor' })
+  assert.deepEqual(parseSnippetNote('Shortcut:\t;addr\r\n1 Main St\r\n'), { shortcut: ';addr', body: '1 Main St' })
+  assert.deepEqual(parseSnippetNote('# Prompt\n\nWrite a PRD for…\n'), { shortcut: null, body: '# Prompt\n\nWrite a PRD for…' })
+  assert.deepEqual(parseSnippetNote('shortcut: ;only'), { shortcut: ';only', body: '' })
+  assert.deepEqual(parseSnippetNote(undefined), { shortcut: null, body: '' })
 })
 
 test('mergeText joins bodies in order and skips blanks', () => {

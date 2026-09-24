@@ -488,6 +488,19 @@ export function orderFavorites(clips, order) {
   return out
 }
 
+/**
+ * A snippet note (PRD §4.2): a Markdown file whose first line may be
+ * `shortcut: ;sig` — the expander trigger — with the expansion below it.
+ * Without that line the note is a plain snippet. Leading blank lines after
+ * the declaration are dropped; the body keeps its own trailing newline off.
+ */
+export function parseSnippetNote(text) {
+  const src = typeof text === 'string' ? text.replace(/\r\n/g, '\n') : ''
+  const m = /^shortcut:[ \t]*(\S+)[ \t]*\n?/i.exec(src)
+  if (!m) return { shortcut: null, body: src.replace(/\n+$/, '') }
+  return { shortcut: m[1], body: src.slice(m[0].length).replace(/^\n+/, '').replace(/\n+$/, '') }
+}
+
 /** The user's summary of a clip for the renderer: everything but the body, plus a preview. */
 export function summarize(clip) {
   if (!clip) return null

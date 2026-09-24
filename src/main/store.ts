@@ -119,6 +119,11 @@ export class AgentStore {
     if (this.events.length > MAX_EVENTS) this.events.splice(0, this.events.length - MAX_EVENTS)
   }
 
+  /** An attention moment that did not come through a hook (an agent adding a clip over the daemon). */
+  recordActivity(e: ActivityEvent): void {
+    this.record(e)
+  }
+
   /** Newest first. */
   recentEvents(limit = 200): ActivityEvent[] {
     return this.events.slice(-Math.max(0, limit)).reverse()

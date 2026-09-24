@@ -20,6 +20,23 @@ export interface TerminalApi {
   list(): TerminalInfo[]
 }
 
+/**
+ * What the daemon may do with the clipboard history and the snippet notes
+ * on an agent's behalf (PRD §4.1) — the adapter main builds over ClipStore,
+ * the clipboard adapter, the terminals and the notes folder.
+ */
+export interface ClipsApi {
+  /** Summaries (no bodies), newest first, filtered like the pane. */
+  list(opts: { q: string; group: string; limit: number }): unknown[]
+  get(id: string): { id: string; kind: string; title: string; text: string } | null
+  /** Put text on the user's clipboard and in history, attributed to the session in `terminalId`. */
+  add(input: { text: string; title?: string; groups?: string[]; terminalId?: string }): Promise<{ id: string } | { error: string }>
+  /** Type a clip into a terminal; with no terminal, copy it only. */
+  paste(id: string, terminalId?: string): Promise<'ok' | 'copied' | 'missing' | 'not-text' | 'no-terminal' | 'exited'>
+  snippets(): Promise<{ name: string; shortcut?: string; text: string }[]>
+  addSnippet(input: { name: string; text: string; shortcut?: string }): Promise<{ path: string } | { error: string }>
+}
+
 export interface DaemonOptions {
   /** Per-install secret published through the endpoint-discovery file. */
   token?: string
@@ -30,10 +47,21 @@ export interface DaemonOptions {
   snapshot?: () => unknown
   /** Enables the terminal routes; without it they answer 404. */
   terminals?: TerminalApi
+  /** Enables the clipboard and snippet routes; without it they answer 404. */
+  clips?: ClipsApi
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const TERMINAL_ROUTE = /^\/v1\/terminals\/([0-9a-f-]{36})\/(input|output)$/
+const CLIP_ROUTE = /^\/v1\/clips\/([A-Za-z0-9_-]{1,64})(\/paste)?$/
+const MAX_CLIP_QUERY = 200
+const MAX_CLIP_GROUP = 40
+const MAX_CLIP_LIST = 200
+const DEFAULT_CLIP_LIST = 20
+const MAX_CLIP_TEXT_BYTES = 256 * 1024
+const MAX_CLIP_TITLE = 120
+const MAX_SNIPPET_NAME = 80
+const MAX_SHORTCUT = 40
 const AGENT_WAIT_ROUTE = /^\/v1\/agents\/([^/]{1,240})\/wait$/
 const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9:_.-]{0,239}$/
 const WAIT_STATES: ReadonlySet<string> = new Set(['running', 'waiting', 'complete', 'idle', 'ended'])
@@ -46,7 +74,7 @@ const WAIT_POLL_MS = 500
 const MAX_WAITS = 32
 
 interface Route {
-  name: 'health' | 'status' | 'v1status' | 'report' | 'events' | 'terminals' | 'terminalInput' | 'terminalOutput' | 'agentWait'
+  name: 'health' | 'status' | 'v1status' | 'report' | 'events' | 'terminals' | 'terminalInput' | 'terminalOutput' | 'agentWait' | 'clips' | 'clip' | 'clipPaste' | 'snippets'
   methods: string[]
   /** Only these routes accept a query string; everywhere else one is a 404. */
   query?: boolean
@@ -61,6 +89,14 @@ function resolveRoute(pathname: string): Route | null {
     case '/report': return { name: 'report', methods: ['POST'] }
     case '/v1/events': return { name: 'events', methods: ['POST'] }
     case '/v1/terminals': return { name: 'terminals', methods: ['GET', 'POST'] }
+    case '/v1/clips': return { name: 'clips', methods: ['GET', 'POST'], query: true }
+    case '/v1/snippets': return { name: 'snippets', methods: ['GET', 'POST'] }
+  }
+  const clip = CLIP_ROUTE.exec(pathname)
+  if (clip) {
+    return clip[2]
+      ? { name: 'clipPaste', methods: ['POST'], id: clip[1] }
+      : { name: 'clip', methods: ['GET'], id: clip[1] }
   }
   const terminal = TERMINAL_ROUTE.exec(pathname)
   if (terminal) {
@@ -114,6 +150,12 @@ const NOT_FOUND = { error: 'not found' }
  * POST /v1/terminals/:id/input      {text, enter?} → its stdin
  * GET  /v1/terminals/:id/output     ?lines=1..2000 → last lines, escapes stripped
  * GET  /v1/agents/:id/wait          ?until=running|waiting|complete|idle|ended&timeout=ms → long-poll
+ * GET  /v1/clips                    ?q=&group=&limit=1..200 → clipboard history summaries, newest first
+ * POST /v1/clips                    {text, title?, groups?, terminalId?} → on the clipboard and in history (201)
+ * GET  /v1/clips/:id                one clip's full text
+ * POST /v1/clips/:id/paste          {terminalId?} → typed into that terminal; without one, copied only
+ * GET  /v1/snippets                 the expander list from Notes\Snippets and Notes\Prompts
+ * POST /v1/snippets                 {name, text, shortcut?} → a new note in Notes\Snippets (201)
  */
 export class Daemon {
   readonly store: AgentStore
@@ -125,6 +167,7 @@ export class Daemon {
   private readonly maxBodyBytes: number
   private readonly snapshotProvider?: () => unknown
   private readonly terminals?: TerminalApi
+  private readonly clips?: ClipsApi
   private readonly waits = new Set<NodeJS.Timeout>()
 
   constructor(private port: number, options: DaemonOptions | string = {}) {
@@ -133,6 +176,7 @@ export class Daemon {
     this.maxBodyBytes = normalized.maxBodyBytes ?? 256 * 1024
     this.snapshotProvider = normalized.snapshot
     this.terminals = normalized.terminals
+    this.clips = normalized.clips
     this.store = new AgentStore(normalized.maxAgents)
     this.server = http.createServer((req, res) => this.handle(req, res))
     this.server.on('error', (err) => {
@@ -226,6 +270,16 @@ export class Daemon {
         return this.terminalOutput(res, route.id as string, parsed.searchParams)
       case 'agentWait':
         return this.agentWait(req, res, route.id as string, parsed.searchParams)
+      case 'clips':
+        if (req.method === 'GET') return this.listClips(res, parsed.searchParams)
+        return this.withJson(req, res, (value) => { void this.addClip(res, value) })
+      case 'clip':
+        return this.getClip(res, route.id as string)
+      case 'clipPaste':
+        return this.withJson(req, res, (value) => { void this.pasteClip(res, route.id as string, value) })
+      case 'snippets':
+        if (req.method === 'GET') return void this.listSnippets(res)
+        return this.withJson(req, res, (value) => { void this.addSnippet(res, value) })
       case 'report':
       case 'events':
         return this.withJson(req, res, (value) => this.ingest(res, route.name === 'report', value))
@@ -301,6 +355,86 @@ export class Daemon {
     const out = this.terminals.read(id, lines)
     if (!out) return this.json(res, 404, NOT_FOUND)
     return this.json(res, 200, { id, lines: out.lines, exitCode: out.exitCode })
+  }
+
+  // ---- clipboard history and snippets (PRD §4.1) ----
+
+  private listClips(res: http.ServerResponse, query: URLSearchParams): void {
+    if (!this.clips) return this.json(res, 404, NOT_FOUND)
+    const q = query.get('q') ?? ''
+    const group = query.get('group') ?? 'all'
+    const limit = intParam(query.get('limit'), DEFAULT_CLIP_LIST, 1, MAX_CLIP_LIST)
+    const valid = onlyKeys(query.keys(), ['q', 'group', 'limit'])
+      && q.length <= MAX_CLIP_QUERY && !/[\0\r\n]/.test(q)
+      && group.length > 0 && group.length <= MAX_CLIP_GROUP && !/[\0\r\n]/.test(group)
+      && limit !== null
+    if (!valid) return this.json(res, 400, { error: `expected ?q=<≤${MAX_CLIP_QUERY} chars>&group=all|favorites|images|<name>&limit=1..${MAX_CLIP_LIST}` })
+    return this.json(res, 200, { clips: this.clips.list({ q, group, limit: limit as number }), schemaVersion: 1 })
+  }
+
+  private getClip(res: http.ServerResponse, id: string): void {
+    if (!this.clips) return this.json(res, 404, NOT_FOUND)
+    const clip = this.clips.get(id)
+    if (!clip) return this.json(res, 404, NOT_FOUND)
+    return this.json(res, 200, { ...clip, schemaVersion: 1 })
+  }
+
+  private async addClip(res: http.ServerResponse, value: unknown): Promise<void> {
+    if (!this.clips) return this.json(res, 404, NOT_FOUND)
+    const shape = { error: `expected { text: string (≤ ${MAX_CLIP_TEXT_BYTES / 1024} KiB), title?: string, groups?: string[], terminalId?: uuid }` }
+    const body = record(value)
+    const valid = body
+      && onlyKeys(Object.keys(body), ['text', 'title', 'groups', 'terminalId'])
+      && typeof body.text === 'string' && body.text.trim().length > 0 && Buffer.byteLength(body.text, 'utf8') <= MAX_CLIP_TEXT_BYTES && !body.text.includes('\0')
+      && (body.title === undefined || (typeof body.title === 'string' && body.title.length <= MAX_CLIP_TITLE && !/[\0\r\n]/.test(body.title)))
+      && (body.groups === undefined || (Array.isArray(body.groups) && body.groups.length <= 20 && body.groups.every((g) => typeof g === 'string' && g.length > 0 && g.length <= MAX_CLIP_GROUP && !/[\0\r\n]/.test(g))))
+      && (body.terminalId === undefined || (typeof body.terminalId === 'string' && UUID.test(body.terminalId)))
+    if (!valid) return this.json(res, 400, shape)
+    const result = await this.clips.add({
+      text: body.text as string,
+      ...(body.title !== undefined ? { title: body.title as string } : {}),
+      ...(body.groups !== undefined ? { groups: body.groups as string[] } : {}),
+      ...(body.terminalId !== undefined ? { terminalId: body.terminalId as string } : {})
+    })
+    if ('error' in result) return this.json(res, 400, { error: result.error })
+    return this.json(res, 201, { id: result.id })
+  }
+
+  private async pasteClip(res: http.ServerResponse, id: string, value: unknown): Promise<void> {
+    if (!this.clips) return this.json(res, 404, NOT_FOUND)
+    const body = record(value)
+    const valid = body
+      && onlyKeys(Object.keys(body), ['terminalId'])
+      && (body.terminalId === undefined || (typeof body.terminalId === 'string' && UUID.test(body.terminalId)))
+    if (!valid) return this.json(res, 400, { error: 'expected { terminalId?: uuid }' })
+    const outcome = await this.clips.paste(id, body.terminalId as string | undefined)
+    switch (outcome) {
+      case 'ok': return this.json(res, 202, { ok: true, pasted: true })
+      case 'copied': return this.json(res, 200, { ok: true, pasted: false, copied: true })
+      case 'missing': return this.json(res, 404, NOT_FOUND)
+      case 'no-terminal': return this.json(res, 404, { error: 'terminal not found' })
+      case 'exited': return this.json(res, 409, { error: 'terminal exited' })
+      case 'not-text': return this.json(res, 400, { error: 'only a text clip can be pasted' })
+    }
+  }
+
+  private async listSnippets(res: http.ServerResponse): Promise<void> {
+    if (!this.clips) return this.json(res, 404, NOT_FOUND)
+    return this.json(res, 200, { snippets: await this.clips.snippets(), schemaVersion: 1 })
+  }
+
+  private async addSnippet(res: http.ServerResponse, value: unknown): Promise<void> {
+    if (!this.clips) return this.json(res, 404, NOT_FOUND)
+    const body = record(value)
+    const valid = body
+      && onlyKeys(Object.keys(body), ['name', 'text', 'shortcut'])
+      && typeof body.name === 'string' && body.name.trim().length > 0 && body.name.length <= MAX_SNIPPET_NAME && !/[\0\r\n\\/]/.test(body.name)
+      && typeof body.text === 'string' && body.text.trim().length > 0 && Buffer.byteLength(body.text, 'utf8') <= MAX_CLIP_TEXT_BYTES && !body.text.includes('\0')
+      && (body.shortcut === undefined || (typeof body.shortcut === 'string' && body.shortcut.length > 0 && body.shortcut.length <= MAX_SHORTCUT && !/\s/.test(body.shortcut)))
+    if (!valid) return this.json(res, 400, { error: `expected { name: string (≤ ${MAX_SNIPPET_NAME}, no slashes), text: string, shortcut?: string (≤ ${MAX_SHORTCUT}, no spaces) }` })
+    const result = await this.clips.addSnippet({ name: (body.name as string).trim(), text: body.text as string, ...(body.shortcut !== undefined ? { shortcut: body.shortcut as string } : {}) })
+    if ('error' in result) return this.json(res, 409, { error: result.error })
+    return this.json(res, 201, { path: result.path })
   }
 
   /**

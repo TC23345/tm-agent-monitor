@@ -8,7 +8,8 @@ description: Read and drive the TaylorMade Agent Monitor from inside a Claude Co
 The monitor is a Windows tray app that watches every Claude Code, Codex, and
 Cursor session on this machine and embeds terminals. It serves a loopback HTTP
 API for agents. Everything below is read-only except the three terminal
-routes, which only touch shells the monitor spawned.
+routes, which only touch shells the monitor spawned, and the clipboard and
+snippet routes, which add to the user's clipboard history and notes.
 
 ## Find it
 
@@ -45,10 +46,40 @@ pane's own order and layout marker). The pane picks up your edits on its
 own — do not tell the user to refresh. Do not delete, move or rewrite a
 note they did not ask you to touch.
 
+## The clipboard
+
+The app keeps a history of everything the user copies, in any Windows app,
+with where it came from (the **Clipboard** pane). It is a resource for you:
+
+- **Read what the user just copied** instead of asking them to paste it:
+  `GET /v1/clips?limit=1` is the last copy (its `preview`), and
+  `GET /v1/clips/:id` the full `text`. "Here's the error, look at this"
+  usually means the error is on the clipboard already.
+- **Leave the user something to paste**: `POST /v1/clips {text, title?}` puts
+  it on their clipboard *and* in history, attributed to you (the Activity
+  pane shows it). Say so in your reply ("it's on your clipboard"). Pass your
+  `terminalId` (`TM_TERMINAL_ID`) so the clip carries your session and
+  project.
+- **Never paste into a pane the user is typing in.** `POST
+  /v1/clips/:id/paste {terminalId}` types a clip into a terminal you created
+  or were asked to drive; with no `terminalId` it only copies.
+- Password-manager copies and anything that looks like a secret are never in
+  history; do not try to route secrets through it.
+- **Snippets are notes**: `Notes\Snippets\*.md` (and `Notes\Prompts\*.md`) with
+  an optional `shortcut: ;sig` first line are the text-expander list.
+  `GET /v1/snippets` lists them; `POST /v1/snippets {name, text, shortcut?}`
+  writes one, never overwriting.
+
 ## Routes
 
 | Route | Purpose |
 |---|---|
+| `GET /v1/clips?q=&group=&limit=` | Clipboard history, newest first: `{clips: [{id, kind, title, preview, source, copiedAt, favorite, groups, bytes}]}`. `q` is a fuzzy search, `group` a view (`all\|favorites\|images\|<name>`), `limit` ≤ 200. |
+| `GET /v1/clips/:id` | One clip's full `text` (a file list is paths, one per line; an image has none). |
+| `POST /v1/clips` `{text, title?, groups?, terminalId?}` | Put text on the user's clipboard and in history, attributed to the session in `terminalId`. Returns `{id}` — 201. |
+| `POST /v1/clips/:id/paste` `{terminalId?}` | Type the clip into that terminal (raw, no Enter). Without `terminalId` it copies only. |
+| `GET /v1/snippets` | `{snippets: [{name, shortcut?, text}]}` from `Notes\Snippets` and `Notes\Prompts`. |
+| `POST /v1/snippets` `{name, text, shortcut?}` | Write `Notes\Snippets\<name>.md` (refused when it exists). Returns `{path}` — 201. |
 | `GET /v1/status` | The full snapshot: `agents[]` (id, provider, project, cwd, state `running\|waiting\|complete\|idle`, question, contextPct), `waitingCount`, usage. |
 | `GET /v1/terminals` | Embedded terminals: `{id, launch, cwd, attached, exitCode?, agentId?}`. `agentId` is the session running in it. |
 | `POST /v1/terminals` `{launch?: "shell"\|"claude"\|"codex", cwd?, command?}` | Spawn a terminal (a pane opens when the grid has room). Returns `{id, launch, cwd}` — 201. `cwd` must exist. |
@@ -67,7 +98,8 @@ Invoke-RestMethod "http://127.0.0.1:$($ep.port)/v1/terminals/$($t.id)/output?lin
 ```
 
 From the repo checkout, `npm run tm -- status | terminals | new | send | read | wait`
-wraps the same calls (`tm --help`).
+wraps the same calls (`tm --help`), and `npm run tm -- clip list | show | copy | add | paste`
+the clipboard ones (`tm clip list` from a pane shows the last copies).
 
 ## How to behave
 

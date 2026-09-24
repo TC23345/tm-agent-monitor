@@ -145,6 +145,105 @@ test('terminal routes are absent without a terminal adapter', async () => {
   assert.equal((await fetch(`${base}/v1/terminals`, { method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: '{}' })).status, 404)
 })
 
+test('clipboard and snippet routes are absent without a clips adapter', async () => {
+  assert.equal((await fetch(`${base}/v1/clips`, { headers: auth })).status, 404)
+  assert.equal((await fetch(`${base}/v1/clips/abc`, { headers: auth })).status, 404)
+  assert.equal((await fetch(`${base}/v1/clips/abc/paste`, { method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: '{}' })).status, 404)
+  assert.equal((await fetch(`${base}/v1/snippets`, { headers: auth })).status, 404)
+})
+
+test('clipboard routes: list, get, add, paste and snippets are validated and answer like every route', async () => {
+  const calls = []
+  const clips = new Map([
+    ['clip-1', { id: 'clip-1', kind: 'text', title: 'npm run dist', text: 'npm run dist', preview: 'npm run dist', copiedAt: 2, favorite: true, groups: [], bytes: 12, source: { kind: 'app', exe: 'pwsh.exe' } }],
+    ['img-1', { id: 'img-1', kind: 'image', title: 'Image 1×1', text: '', preview: '', copiedAt: 1, favorite: false, groups: [], bytes: 10, source: { kind: 'app' } }]
+  ])
+  const adapter = {
+    list: (opts) => { calls.push(['list', opts]); return [...clips.values()].map(({ text: _t, ...rest }) => rest) },
+    get: (id) => { const c = clips.get(id); return c ? { id: c.id, kind: c.kind, title: c.title, text: c.text } : null },
+    add: async (input) => { calls.push(['add', input]); return input.text === 'refuse' ? { error: 'refused' } : { id: 'new-1' } },
+    paste: async (id, terminalId) => {
+      calls.push(['paste', id, terminalId])
+      const c = clips.get(id)
+      if (!c) return 'missing'
+      if (c.kind === 'image') return 'not-text'
+      if (!terminalId) return 'copied'
+      return terminalId === MISSING ? 'no-terminal' : 'ok'
+    },
+    snippets: async () => [{ name: 'Snippets/sig', shortcut: ';sig', text: 'Best,\nTaylor' }],
+    addSnippet: async (input) => { calls.push(['snippet', input]); return input.name === 'taken' ? { error: 'exists' } : { path: `C:\\Notes\\Snippets\\${input.name}.md` } }
+  }
+  const d = new Daemon(0, { token: 'clip-token', clips: adapter })
+  assert.equal(await d.start(), true)
+  const b = `http://127.0.0.1:${d.getPort()}`
+  const h = { authorization: 'Bearer clip-token' }
+  const get = (path) => fetch(`${b}${path}`, { headers: h })
+  const post = (path, body) => fetch(`${b}${path}`, { method: 'POST', headers: { ...h, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  try {
+    assert.equal((await fetch(`${b}/v1/clips`)).status, 401, 'the token guards these too')
+    const list = await get('/v1/clips?q=dist&group=favorites&limit=5')
+    assert.equal(list.status, 200)
+    const listed = await list.json()
+    assert.equal(listed.schemaVersion, 1)
+    assert.equal(listed.clips.length, 2)
+    assert.ok(!('text' in listed.clips[0]), 'summaries carry no body')
+    assert.deepEqual(calls.at(-1), ['list', { q: 'dist', group: 'favorites', limit: 5 }])
+    assert.deepEqual((await (await get('/v1/clips')).json()).clips.length, 2)
+    assert.deepEqual(calls.at(-1), ['list', { q: '', group: 'all', limit: 20 }], 'defaults')
+    assert.equal((await get('/v1/clips?limit=0')).status, 400)
+    assert.equal((await get('/v1/clips?limit=201')).status, 400)
+    assert.equal((await get('/v1/clips?sort=asc')).status, 400)
+    assert.equal((await get(`/v1/clips?q=${'x'.repeat(201)}`)).status, 400)
+
+    const one = await get('/v1/clips/clip-1')
+    assert.equal(one.status, 200)
+    assert.deepEqual(await one.json(), { id: 'clip-1', kind: 'text', title: 'npm run dist', text: 'npm run dist', schemaVersion: 1 })
+    assert.equal((await get('/v1/clips/nope')).status, 404)
+    assert.equal((await get('/v1/clips/bad%20id')).status, 404)
+    assert.equal((await get('/v1/clips/clip-1?x=1')).status, 404, 'no query string on a clip')
+
+    assert.equal((await post('/v1/clips', {})).status, 400)
+    assert.equal((await post('/v1/clips', { text: '   ' })).status, 400)
+    assert.equal((await post('/v1/clips', { text: 'a\0b' })).status, 400)
+    assert.equal((await post('/v1/clips', { text: 'x', extra: 1 })).status, 400)
+    assert.equal((await post('/v1/clips', { text: 'x', terminalId: 'not-a-uuid' })).status, 400)
+    assert.equal((await post('/v1/clips', { text: 'x', groups: ['ok', 7] })).status, 400)
+    assert.equal((await post('/v1/clips', { text: 'x', title: 'a\nb' })).status, 400)
+    assert.equal((await post('/v1/clips', { text: 'refuse' })).status, 400)
+    const added = await post('/v1/clips', { text: 'git status', title: 'Status', groups: ['Work'], terminalId: MISSING })
+    assert.equal(added.status, 201)
+    assert.deepEqual(await added.json(), { id: 'new-1' })
+    assert.deepEqual(calls.at(-1), ['add', { text: 'git status', title: 'Status', groups: ['Work'], terminalId: MISSING }])
+
+    assert.equal((await post('/v1/clips/clip-1/paste', { terminalId: 'nope' })).status, 400)
+    assert.equal((await post('/v1/clips/clip-1/paste', { enter: true })).status, 400)
+    const copied = await post('/v1/clips/clip-1/paste', {})
+    assert.equal(copied.status, 200)
+    assert.deepEqual(await copied.json(), { ok: true, pasted: false, copied: true })
+    const pasted = await post('/v1/clips/clip-1/paste', { terminalId: '11111111-2222-4333-8444-555555555555' })
+    assert.equal(pasted.status, 202)
+    assert.deepEqual(await pasted.json(), { ok: true, pasted: true })
+    assert.equal((await post('/v1/clips/clip-1/paste', { terminalId: MISSING })).status, 404)
+    assert.equal((await post('/v1/clips/img-1/paste', {})).status, 400)
+    assert.equal((await post('/v1/clips/nope/paste', {})).status, 404)
+    assert.equal((await get('/v1/clips/clip-1/paste')).status, 405)
+
+    const snippets = await get('/v1/snippets')
+    assert.equal(snippets.status, 200)
+    assert.deepEqual(await snippets.json(), { snippets: [{ name: 'Snippets/sig', shortcut: ';sig', text: 'Best,\nTaylor' }], schemaVersion: 1 })
+    assert.equal((await post('/v1/snippets', { name: 'a/b', text: 'x' })).status, 400)
+    assert.equal((await post('/v1/snippets', { name: 'ok', text: 'x', shortcut: 'has space' })).status, 400)
+    assert.equal((await post('/v1/snippets', { name: 'ok', text: '' })).status, 400)
+    assert.equal((await post('/v1/snippets', { name: 'taken', text: 'x' })).status, 409)
+    const made = await post('/v1/snippets', { name: 'sig', text: 'Best,\nTaylor', shortcut: ';sig' })
+    assert.equal(made.status, 201)
+    assert.deepEqual(await made.json(), { path: 'C:\\Notes\\Snippets\\sig.md' })
+    assert.deepEqual(calls.at(-1), ['snippet', { name: 'sig', text: 'Best,\nTaylor', shortcut: ';sig' }])
+  } finally {
+    d.stop()
+  }
+})
+
 test('an agent can spawn a terminal, type into it, and read it back as plain text', async () => {
   assert.deepEqual(await (await get('/v1/terminals')).json(), { terminals: [], schemaVersion: 1 })
   assert.equal((await post('/v1/terminals', { launch: 'bash' })).status, 400)

@@ -7,7 +7,7 @@
 // instance receives it through Electron's `second-instance` event and hands it
 // to the workspace (src/shared/workspaceCommand.mjs parses it on both sides).
 //
-// Daemon verbs (status, terminals, new, send, read, wait) call the app's
+// Daemon verbs (status, terminals, new, send, read, wait, clip) call the app's
 // authenticated loopback daemon directly — the same routes an agent calls
 // (hooks/SKILL.md) — and never open a window.
 //
@@ -17,6 +17,8 @@
 //   node scripts/tm.mjs send <terminal-id> git status
 //   node scripts/tm.mjs read <terminal-id> --lines 40
 //   node scripts/tm.mjs wait claude:<session> --until waiting --timeout 90
+//   node scripts/tm.mjs clip list [--q text] [--group favorites] [--limit 20]
+//   node scripts/tm.mjs clip show <id> | copy <id> | add <text…> [--title t] | paste <id> [--terminal <id>]
 //   node scripts/tm.mjs skill --install
 //
 // With no installed app, `--dev` runs the built main bundle through electron
@@ -154,6 +156,63 @@ if (verb === 'wait') {
   if (json) print(out)
   else process.stdout.write(`${out.id} ${out.state ?? 'ended'}${out.satisfied ? '' : ' (timed out)'}\n`)
   process.exit(out.satisfied ? 0 : 3)
+}
+
+// Clipboard history (hooks/SKILL.md → The clipboard). `add` and `paste` name
+// the pane this shell runs in through TM_TERMINAL_ID, so a clip an agent
+// leaves is attributed to its session.
+if (verb === 'clip') {
+  const sub = userArgs[1]
+  const age = (at) => {
+    const s = Math.max(0, Math.round((Date.now() - at) / 1000))
+    return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : s < 172_800 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86_400)}d`
+  }
+  if (sub === 'list' || sub === undefined) {
+    const query = new URLSearchParams()
+    for (const key of ['q', 'group', 'limit']) {
+      const v = option(key)
+      if (v !== undefined) query.set(key, v)
+    }
+    const out = await call('GET', `/v1/clips${query.size ? `?${query}` : ''}`)
+    if (json) print(out)
+    else if (!out.clips.length) process.stdout.write('no clips\n')
+    else for (const c of out.clips) {
+      const src = [c.source?.app ?? c.source?.exe, c.source?.project].filter(Boolean).join(' · ')
+      process.stdout.write(`  ${c.id.slice(0, 8)}  ${age(c.copiedAt).padStart(3)}  ${c.favorite ? '★' : ' '} ${c.title}${src ? `  (${src})` : ''}\n`)
+    }
+    process.exit(0)
+  }
+  if (sub === 'show') {
+    const id = userArgs[2]
+    if (!id) fail('usage: tm clip show <id>', 1)
+    const clip = await call('GET', `/v1/clips/${encodeURIComponent(id)}`)
+    if (json) print(clip)
+    else process.stdout.write(`${clip.text}\n`)
+    process.exit(0)
+  }
+  if (sub === 'copy' || sub === 'paste') {
+    const id = userArgs[2]
+    if (!id) fail(`usage: tm clip ${sub} <id>${sub === 'paste' ? ' [--terminal <terminal-id>]' : ''}`, 1)
+    const terminalId = sub === 'paste' ? (option('terminal') ?? process.env.TM_TERMINAL_ID) : undefined
+    if (sub === 'paste' && !terminalId) fail('no terminal: pass --terminal <id>, or run inside a monitor pane', 1)
+    const out = await call('POST', `/v1/clips/${encodeURIComponent(id)}/paste`, terminalId ? { terminalId } : {})
+    if (json) print(out)
+    else process.stdout.write(out.pasted ? `pasted into ${terminalId}\n` : 'copied\n')
+    process.exit(0)
+  }
+  if (sub === 'add') {
+    const title = option('title')
+    const group = option('group')
+    const skip = new Set(['--json', '--title', '--group', title, group].filter((x) => x !== undefined))
+    const text = userArgs.slice(2).filter((a) => !skip.has(a)).join(' ')
+    if (!text) fail('usage: tm clip add <text…> [--title <title>] [--group <group>]', 1)
+    const terminalId = process.env.TM_TERMINAL_ID
+    const out = await call('POST', '/v1/clips', { text, ...(title ? { title } : {}), ...(group ? { groups: [group] } : {}), ...(terminalId ? { terminalId } : {}) })
+    if (json) print(out)
+    else process.stdout.write(`${out.id}\n`)
+    process.exit(0)
+  }
+  fail('usage: tm clip list [--q <text>] [--group <view>] [--limit <n>] | show <id> | copy <id> | add <text…> | paste <id> [--terminal <id>]', 1)
 }
 
 if (verb === 'skill') {

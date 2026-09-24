@@ -114,3 +114,4 @@ export function sanitizeClip(raw: unknown): Clip | null
 export function sanitizeGroups(raw: unknown): string[]
 export function orderFavorites<T extends { id: string; favorite: boolean; copiedAt?: number }>(clips: T[], order: unknown): T[]
 export function summarize(clip: Clip): ClipSummary
+export function parseSnippetNote(text: string | undefined): { shortcut: string | null; body: string }
