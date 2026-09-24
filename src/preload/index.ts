@@ -141,6 +141,8 @@ const api = {
   },
   /** Clipboard history (the Clipboard pane). Bodies are fetched one at a time. */
   listClips: (): Promise<ClipsListing> => ipcRenderer.invoke('clips:list'),
+  /** Just the flags (paused, mode, count) — what the status bar chip needs, without the summaries. */
+  clipsState: (): Promise<{ paused: boolean; pausedUntil: number; mode: string; count: number }> => ipcRenderer.invoke('clips:state'),
   getClip: (id: string): Promise<{ text: string } | null> => ipcRenderer.invoke('clips:get', id),
   /** Put a clip back on the clipboard (text, file list as text, or the image). */
   copyClip: (id: string): Promise<boolean> => ipcRenderer.invoke('clips:copy', id),

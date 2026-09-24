@@ -1830,3 +1830,133 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
    sidebar; panes keep their own opaque surfaces. */
 :root[data-material="mica"] .app { background: rgba(28, 27, 32, 0.78); }
 :root[data-material="acrylic"] .app { background: rgba(28, 27, 32, 0.66); }
+
+/* ---- clipboard ------------------------------------------------------------
+   Tokens from Plans\Clipboard design.md (Bencho / Beautiful UI, read from their
+   stylesheets): lightness steps and 1px translucent edges for hierarchy, pills
+   for controls, fast springy motion that only ever answers an action. The
+   pane reuses the notes tree's classes (toolbar, collapse, row action, ghost,
+   drop line, notice) so a group and a folder move identically. */
+:root {
+  --surface-0: #101114;
+  --surface-2: #222428;
+  --surface-3: #2a2c31;
+  --tint: rgba(236, 235, 231, 0.06);
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.13);
+  --ink-2: #b8b7b1;
+  --ink-3: #9d9c96;
+  --ink-4: #86857f;
+  --ink-5: #6f6e69;
+  --shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.11), 0 1px 2px rgba(0, 0, 0, 0.2), 0 2px 6px rgba(0, 0, 0, 0.2);
+  --shadow-raised: 0 0 0 1px rgba(255, 255, 255, 0.13), 0 2px 10px rgba(0, 0, 0, 0.22);
+  --shadow-field: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+  --r-chip: 6px;
+  --r-control: 8px;
+  --r-card: 12px;
+  --r-row: 22px;
+  --r-pill: 999px;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --spring: cubic-bezier(0.24, 1.34, 0.38, 1);
+  --spring-press: cubic-bezier(0.28, 1.4, 0.36, 1);
+}
+
+.clips { grid-template-columns: minmax(160px, 210px) 1fr; }
+.clips.is-paused .clip-list { color: var(--ink-3); }
+.clips.is-paused .clip-row { opacity: 0.72; }
+.notes-tool.is-warn { color: var(--st-permission); background: rgba(233, 162, 60, 0.14); }
+
+/* sidebar: built-in views, groups, sources */
+.clip-nav-list { padding-top: 4px; }
+.clip-nav-row { border-radius: 6px; transition: background 0.14s ease; }
+.clip-nav-row:hover { background: var(--elev); }
+.clip-nav-row.is-active { background: var(--elev); box-shadow: inset 2px 0 0 var(--accent); }
+.clip-nav { display: flex; align-items: center; gap: 7px; width: 100%; padding: 5px 8px 5px 7px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; font-weight: 500; text-align: left; cursor: pointer; min-width: 0; transition: scale 0.2s var(--spring-press); }
+.clip-nav:active { scale: 0.97; }
+.clip-nav-ic { width: 14px; height: 14px; display: grid; place-items: center; flex: 0 0 14px; color: var(--muted); }
+.clip-nav-ic svg { width: 14px; height: 14px; }
+.clip-nav-row.is-active .clip-nav-ic { color: var(--accent); }
+.clip-nav-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clip-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
+.clip-section { display: flex; align-items: center; gap: 4px; width: 100%; margin-top: 8px; padding: 4px 6px 3px; border: 0; background: transparent; color: var(--faint); font: inherit; font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; text-align: left; cursor: pointer; }
+.clip-section:hover { color: var(--muted); }
+.clip-section.is-open .notes-chev { transform: rotate(90deg); }
+.notes-notice.is-quiet { color: var(--ink-4); }
+
+/* inline confirm (Bencho "Inline confirm"): a modal would be too much for a clear */
+.clip-confirm { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px; font-size: 11.5px; color: var(--text); border-bottom: 1px solid var(--hairline); background: rgba(233, 162, 60, 0.08); animation: fade-in 140ms ease; }
+.clip-confirm > span { flex: 1 1 100%; }
+.clip-confirm-yes, .clip-confirm-no { padding: 3px 10px; border: 0; border-radius: var(--r-pill); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: scale 0.2s var(--spring-press), background 0.14s ease; }
+.clip-confirm-yes { background: var(--accent); color: #fff; }
+.clip-confirm-no { background: var(--tint); color: var(--text); }
+.clip-confirm-yes:active, .clip-confirm-no:active { scale: 0.96; }
+
+/* main column: search, list, selection bar, detail */
+.clip-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.clip-searchrow { display: flex; align-items: center; gap: 8px; padding: 8px 10px 6px; border-bottom: 1px solid var(--hairline); }
+.clip-search { flex: 1 1 auto; min-width: 0; height: 30px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-pill); background: var(--tint); box-shadow: var(--shadow-field); color: var(--text); font: inherit; font-size: 13px; outline: none; transition: background 0.16s ease, border-color 0.16s ease; }
+.clip-search::placeholder { color: var(--ink-5); }
+.clip-search:focus { border-color: var(--line-strong); background: var(--surface-2); }
+.clip-search-hint { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--ink-5); white-space: nowrap; }
+.clip-search-hint kbd { font-size: 10px; padding: 1px 4px; min-width: 0; }
+.clip-add { padding: 8px 10px; border-bottom: 1px solid var(--hairline); display: flex; flex-direction: column; gap: 6px; }
+.clip-add-text { min-height: 72px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface-2); color: var(--text); font: 12.5px/1.45 ui-monospace, "Cascadia Code", Consolas, monospace; resize: vertical; outline: none; }
+.clip-add-row { display: flex; align-items: center; gap: 6px; }
+.clip-list { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 8px 24px; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+
+.clip-row { position: relative; display: grid; grid-template-columns: auto 1fr auto auto; grid-template-areas: "icon title when act" ". meta meta act"; align-items: center; gap: 1px 8px; padding: 6px 6px 6px 8px; border-radius: 10px; color: var(--text); cursor: default; touch-action: none; outline: none; transition: background 0.14s ease, box-shadow 0.14s ease, scale 0.2s var(--spring-press); animation: clip-fade-up 200ms var(--ease-out) both; }
+.clip-row:hover { background: var(--surface-2); }
+.clip-row.is-active { background: var(--surface-3); box-shadow: inset 2px 0 0 var(--accent); }
+.clip-row.is-picked { box-shadow: inset 0 0 0 1px var(--accent); }
+.clip-row:focus-visible { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px rgba(236, 235, 231, 0.35); }
+.clip-row:active { scale: 0.995; }
+.clip-row.is-dragging { opacity: 0.4; }
+.clip-ic { grid-area: icon; width: 14px; height: 14px; color: var(--ink-4); }
+.clip-row.is-active .clip-ic { color: var(--accent); }
+.clip-thumb { grid-area: icon; width: 28px; height: 28px; object-fit: cover; border-radius: var(--r-chip); background: var(--surface-0); }
+.clip-title { grid-area: title; min-width: 0; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clip-title.is-custom { color: var(--accent-bright); }
+.clip-title-input { grid-area: title; min-width: 0; padding: 2px 6px; border: 1px solid var(--accent); border-radius: var(--r-chip); background: var(--surface-0); color: var(--text); font: inherit; font-size: 12.5px; outline: none; }
+.clip-when { grid-area: when; font-size: 10.5px; color: var(--ink-5); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.clip-copied { color: var(--st-complete); background: rgba(68, 196, 128, 0.14); padding: 1px 6px; border-radius: var(--r-pill); font-weight: 600; animation: fade-in 120ms ease; }
+.clip-meta { grid-area: meta; min-width: 0; font-size: 11px; color: var(--ink-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.clip-star { grid-area: act; align-self: center; margin: 0; }
+.clip-row:hover .clip-star, .clip-star.is-on, .clip-star:focus-visible { opacity: 1; }
+.clip-star.is-on { color: var(--st-permission); }
+.clip-star.is-on svg { fill: currentColor; }
+.clip-favkey { grid-area: when; justify-self: end; margin-right: 26px; font-size: 10px; padding: 0 5px; min-width: 0; color: var(--accent-bright); border-color: rgba(217, 119, 87, 0.4); }
+.clip-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 8px; font-size: 13px; color: var(--muted); text-align: center; line-height: 1.5; }
+.clip-link { border: 0; background: transparent; color: var(--accent-bright); font: inherit; font-size: 12.5px; cursor: pointer; text-decoration: underline; }
+@keyframes clip-fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.clip-pickbar { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-top: 1px solid var(--hairline); background: var(--surface-2); font-size: 12px; color: var(--text); animation: fade-in 140ms ease; }
+.clip-pickbar > span { margin-right: 6px; font-weight: 600; }
+.clip-pickbar button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border: 0; border-radius: var(--r-pill); background: var(--tint); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; transition: scale 0.2s var(--spring-press), background 0.14s ease; }
+.clip-pickbar button:hover { background: var(--surface-3); }
+.clip-pickbar button:active { scale: 0.96; }
+.clip-pickbar button svg { width: 13px; height: 13px; }
+.clip-pickbar-x { margin-left: auto; }
+
+.clip-detail { flex: 0 0 auto; max-height: 45%; display: flex; flex-direction: column; min-height: 0; margin: 0 8px 8px; border-radius: var(--r-card); background: var(--surface-0); box-shadow: var(--shadow-card); animation: clip-fade-up 200ms var(--ease-out); }
+.clip-detail-head { display: flex; align-items: center; gap: 7px; padding: 7px 8px 7px 10px; border-bottom: 1px solid var(--line); min-width: 0; }
+.clip-detail-head .clip-ic { flex: 0 0 auto; }
+.clip-detail-title { flex: 0 1 auto; min-width: 0; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clip-detail-meta { flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--ink-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.clip-detail-actions { flex: 0 0 auto; display: flex; gap: 8px; margin-left: 4px; }
+.clip-detail-text, .clip-code { flex: 1 1 auto; min-height: 0; margin: 0; padding: 10px 12px; overflow: auto; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); white-space: pre-wrap; word-break: break-word; scrollbar-width: thin; scrollbar-color: var(--track) transparent; user-select: text; cursor: text; }
+.clip-code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; white-space: pre; }
+.clip-code-line { display: block; }
+.clip-ln { display: inline-block; width: 3ch; margin-right: 12px; color: var(--ink-5); text-align: right; user-select: none; font-variant-numeric: tabular-nums; }
+.clip-edit { flex: 1 1 auto; min-height: 120px; margin: 0; padding: 10px 12px; border: 0; outline: none; resize: none; background: transparent; color: var(--text); font: 12.5px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace; }
+.clip-detail-img { max-width: 100%; max-height: 100%; object-fit: contain; margin: 10px auto; border-radius: var(--r-control); }
+
+/* status bar: capture paused (amber = warning, never red) */
+.sb-paused { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border: 1px solid rgba(233, 162, 60, 0.45); border-radius: var(--r-pill); background: rgba(233, 162, 60, 0.12); color: var(--st-permission); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; transition: background 0.14s ease; }
+.sb-paused:hover { background: rgba(233, 162, 60, 0.22); }
+.sb-paused-ic { width: 11px; height: 11px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .clip-row, .clip-detail, .clip-confirm, .clip-pickbar, .clip-copied { animation: none; }
+  .clip-row, .clip-nav, .clip-confirm-yes, .clip-confirm-no, .clip-pickbar button { transition: none; }
+}

@@ -27,6 +27,8 @@ export interface TerminalPaneHandle {
   /** Kill the session and start a fresh one with the same launch. */
   restart: () => void
   focus: () => void
+  /** Paste text the way Ctrl+V does (one bracketed paste when the CLI asks for it). */
+  paste: (text: string) => void
 }
 
 /**
@@ -242,7 +244,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function Termi
   useImperativeHandle(ref, () => ({
     clear: () => termRef.current?.clear(),
     restart,
-    focus: () => termRef.current?.focus()
+    focus: () => termRef.current?.focus(),
+    paste: (text: string) => { termRef.current?.paste(text); termRef.current?.focus() }
   }), [])
 
   return (

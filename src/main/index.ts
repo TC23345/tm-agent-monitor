@@ -2113,6 +2113,12 @@ function registerIpc(): void {
       loaded: true
     }
   })
+  // The light read for the status bar: no summaries, just the flags.
+  ipcMain.handle('clips:state', async (): Promise<{ paused: boolean; pausedUntil: number; mode: string; count: number }> => {
+    const store = clipStore
+    if (!store) return { paused: false, pausedUntil: 0, mode: 'off', count: 0 }
+    return { paused: store.isPaused(), pausedUntil: store.settings().pausedUntil, mode: clipboardWatch?.mode ?? 'off', count: store.list().length }
+  })
   ipcMain.handle('clips:get', async (_e, id: unknown): Promise<{ text: string } | null> => {
     const key = clipId(id)
     const clip = key ? clipStore?.get(key) : undefined

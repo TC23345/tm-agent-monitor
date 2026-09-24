@@ -112,5 +112,5 @@ export function mergeText(clips: Array<Pick<Clip, 'kind' | 'text' | 'files'>>): 
 export function sanitizeSource(raw: unknown): ClipSource
 export function sanitizeClip(raw: unknown): Clip | null
 export function sanitizeGroups(raw: unknown): string[]
-export function orderFavorites<T extends Clip>(clips: T[], order: unknown): T[]
+export function orderFavorites<T extends { id: string; favorite: boolean; copiedAt?: number }>(clips: T[], order: unknown): T[]
 export function summarize(clip: Clip): ClipSummary

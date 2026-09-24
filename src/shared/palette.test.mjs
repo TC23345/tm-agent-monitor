@@ -6,6 +6,9 @@ test('prefixes narrow the section and are stripped from the text', () => {
   assert.deepEqual(parseQuery('>zoom'), { mode: 'command', text: 'zoom' })
   assert.deepEqual(parseQuery('@ api'), { mode: 'agent', text: 'api' })
   assert.deepEqual(parseQuery('#chrome'), { mode: 'window', text: 'chrome' })
+  assert.deepEqual(parseQuery('!npm run'), { mode: 'clip', text: 'npm run' })
+  const clips = [{ section: 'clip', label: 'npm run dist' }, { section: 'command', label: 'Run: npm run dist' }]
+  assert.deepEqual(rankItems(clips, '!dist').map((i) => i.section), ['clip'], '`!` narrows to clipboard history')
   assert.deepEqual(parseQuery('  new term '), { mode: null, text: 'new term' })
   assert.deepEqual(parseQuery(undefined), { mode: null, text: '' })
 })

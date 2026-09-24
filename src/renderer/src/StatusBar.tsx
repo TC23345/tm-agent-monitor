@@ -1,4 +1,4 @@
-import { ChevronUp, Columns3, LayoutGrid, LayoutTemplate, Monitor, PanelLeft, PanelRight, RefreshCw, Ruler, Save, Sparkles, Trash2 } from 'lucide-react'
+import { ChevronUp, Columns3, LayoutGrid, LayoutTemplate, Monitor, PanelLeft, PanelRight, Pause, RefreshCw, Ruler, Save, Sparkles, Trash2 } from 'lucide-react'
 import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
 import { MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, isUniqueKind, type PaneCols, type PaneInstance, type PaneKind, type SidebarView } from './panes'
 import type { SizeMode } from '@shared/types'
@@ -41,6 +41,9 @@ interface Props {
   version?: string
   /** CDP port when the app was launched for automation; shown so an agent can find it. */
   debugPort?: number
+  /** Clipboard capture is paused (a warning, not a request): the chip resumes it. */
+  clipsPaused?: boolean
+  onResumeClips?: () => void
 }
 
 export const REBUILD_HINT = 'Quit, rebuild the installer from the local checkout (npm run dist), silently reinstall, and relaunch'
@@ -59,7 +62,7 @@ export function StatusBar(props: Props) {
   const {
     rebuild, onRebuild, panes, onAddPane, onClosePane, sidebarViews, onToggleSidebarView,
     sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, fieldOn, onToggleField, sidebarHidden, onToggleSidebar,
-    layouts, onSaveLayout, onApplyLayout, onDeleteLayout, openMenu, onOpenMenu, version, debugPort
+    layouts, onSaveLayout, onApplyLayout, onDeleteLayout, openMenu, onOpenMenu, version, debugPort, clipsPaused, onResumeClips
   } = props
   const full = panes.length >= MAX_PANES
   const warn = rebuild.msg ? /failed|no repo|no installer|dev build|could not/.test(rebuild.msg) : false
@@ -191,6 +194,12 @@ export function StatusBar(props: Props) {
         </div>
       </div>
       <div className="statusbar-right">
+        {clipsPaused && (
+          <button className="sb-paused" onClick={onResumeClips} title="Clipboard capture is paused — click to resume" data-testid="clips-paused-chip">
+            <Pause className="sb-paused-ic" strokeWidth={2} />
+            Clipboard paused
+          </button>
+        )}
         {debugPort && (
           <span className="conn conn--cdp" title={`Chrome DevTools Protocol on 127.0.0.1:${debugPort} — an agent can attach here (electron-debug MCP)`} data-testid="cdp-chip">
             CDP :{debugPort}

@@ -17,12 +17,15 @@ export interface PaletteItem {
    * session and the jump to a waiting one — the resting list must stay short. */
   pinned?: boolean
   run: () => void
+  /** Ctrl+Enter: the item's second verb (a clip pastes into the focused pane instead of copying). */
+  runAlt?: () => void
 }
 
 const SECTION_LABEL: Record<PaletteSection, string> = {
   command: 'Commands',
   agent: 'Coding agents',
-  window: 'Open windows'
+  window: 'Open windows',
+  clip: 'Clipboard history'
 }
 
 interface Props {
@@ -64,10 +67,11 @@ export function CommandPalette({ items, onClose }: Props) {
     row?.scrollIntoView({ block: 'nearest' })
   }, [active, results])
 
-  const run = (item: PaletteItem | undefined) => {
+  const run = (item: PaletteItem | undefined, alt = false) => {
     if (!item) return
     onClose()
-    item.run()
+    if (alt && item.runAlt) item.runAlt()
+    else item.run()
   }
 
   const onKeyDown = (event: React.KeyboardEvent) => {
@@ -76,12 +80,12 @@ export function CommandPalette({ items, onClose }: Props) {
     } else if (event.key === 'ArrowUp') {
       setActive((i) => Math.max(i - 1, 0))
     } else if (event.key === 'Enter') {
-      run(results[active])
+      run(results[active], event.ctrlKey)
     } else if (event.key === 'Escape') {
       onClose()
     } else if (event.key === 'Tab') {
       // Tab cycles the section prefixes so the mouse never has to leave the input.
-      const next = mode === null ? '>' : mode === 'command' ? '@' : mode === 'agent' ? '#' : ''
+      const next = mode === null ? '>' : mode === 'command' ? '@' : mode === 'agent' ? '#' : mode === 'window' ? '!' : ''
       setQuery(next + parseQuery(query).text)
     } else {
       return
@@ -106,7 +110,7 @@ export function CommandPalette({ items, onClose }: Props) {
             data-testid="palette-input"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search commands, agents, and windows  (> commands · @ agents · # windows)"
+            placeholder="Search commands, agents, windows and clips  (> commands · @ agents · # windows · ! clips)"
             spellCheck={false}
             autoComplete="off"
             aria-activedescendant={results[active] ? `palette-${results[active].id}` : undefined}

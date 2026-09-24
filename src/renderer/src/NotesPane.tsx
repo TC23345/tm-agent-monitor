@@ -9,13 +9,13 @@ import {
 } from '@shared/notes.mjs'
 import { MarkdownView } from './MarkdownView'
 import { ContextMenu, tidyEntries, type ContextEntry } from './ContextMenu'
+import { Collapse } from './Collapse'
+import { useTreeDrag, type DragPress } from './useTreeDrag'
 import { tid } from './testid'
 
 const SAVE_AFTER_MS = 600
 /** Expanded folders, by path. First run opens the four template folders. */
 const OPEN_KEY = 'tm.notes.open.v2'
-/** A drag starts once the pointer has moved this far, so a click stays a click. */
-const DRAG_THRESHOLD_PX = 5
 /** Hovering a closed folder this long mid-drag opens it. */
 const AUTO_OPEN_MS = 600
 
@@ -66,18 +66,6 @@ function repath(path: string, from: string, to: string): string {
   return path.startsWith(`${from}/`) ? to + path.slice(from.length) : path
 }
 
-/**
- * Height animation without measuring: a one-row grid whose track goes from
- * 0fr to 1fr. The content stays mounted, so nothing re-reads on expand.
- */
-function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
-  return (
-    <div className={`notes-collapse ${open ? 'is-open' : ''}`} aria-hidden={!open}>
-      <div className="notes-collapse-inner">{children}</div>
-    </div>
-  )
-}
-
 type MenuTarget =
   | { kind: 'root' }
   | { kind: 'templates'; folder: string }
@@ -97,15 +85,6 @@ interface DropTarget {
   lineY?: number
   lineIndent?: number
   problem?: string
-}
-
-interface DragState {
-  path: string
-  kind: 'note' | 'folder'
-  label: string
-  x: number
-  y: number
-  target: DropTarget | null
 }
 
 /** The inline name field for a note or folder: Enter or blur commits, Escape cancels. */
@@ -174,7 +153,6 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
   const [menu, setMenu] = useState<{ x: number; y: number; target: MenuTarget } | null>(null)
   const [renaming, setRenaming] = useState<Renaming | null>(null)
   const [copied, setCopied] = useState(false)
-  const [drag, setDrag] = useState<DragState | null>(null)
 
   const listRef = useRef<HTMLDivElement>(null)
   const saveTimer = useRef<number | null>(null)
@@ -398,11 +376,7 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
     return map
   }, [tree])
 
-  // ---- drag and drop (pointer events, so it is the same under a mouse, a pen, and automation) ----
-  const pressRef = useRef<{ path: string; kind: 'note' | 'folder'; label: string; x: number; y: number; id: number } | null>(null)
-  const dragRef = useRef<DragState | null>(null)
-  dragRef.current = drag
-  const justDragged = useRef(false)
+  // ---- drag and drop: the shared pointer plumbing (useTreeDrag); what a drop means stays here ----
   const autoOpen = useRef<{ path: string; timer: number } | null>(null)
 
   /** Work out what the pointer is over: a folder to drop into, or a slot between rows. */
@@ -449,23 +423,16 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
     return { folder: parent, visible: siblings, into: parent, problem: problemFor(parent) ?? undefined }
   }
 
-  const endDrag = useCallback(() => {
-    if (autoOpen.current) { window.clearTimeout(autoOpen.current.timer); autoOpen.current = null }
-    pressRef.current = null
-    setDrag(null)
-    document.body.classList.remove('notes-dragging')
-  }, [])
-
-  useEffect(() => {
-    const onMove = (e: PointerEvent) => {
-      const press = pressRef.current
-      if (!press || e.pointerId !== press.id) return
-      const d = dragRef.current
-      if (!d) {
-        if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < DRAG_THRESHOLD_PX) return
-        document.body.classList.add('notes-dragging')
-      }
-      const target = hitTest(e.clientX, e.clientY, press)
+  const { drag, pressRow: pressDrag, ghostRef, justDragged } = useTreeDrag<DropTarget>({
+    listRef,
+    hitTest: (x, y, press) => hitTest(x, y, { path: press.key, kind: press.kind as 'note' | 'folder' }),
+    ignoreSelector: '.notes-rowact',
+    enabled: !renaming,
+    onDrop: (press, t) => {
+      if (t?.problem) say(t.problem)
+      else if (t) void moveEntry(press.key, press.kind as 'note' | 'folder', t)
+    },
+    onTarget: (target) => {
       // Open a closed folder the pointer rests on, so a deep drop is reachable.
       const into = target?.into && !target.problem ? target.into : null
       if (into && !openFolders.includes(into)) {
@@ -474,54 +441,9 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
           autoOpen.current = { path: into, timer: window.setTimeout(() => setFolderOpen([into], true), AUTO_OPEN_MS) }
         }
       } else if (autoOpen.current) { window.clearTimeout(autoOpen.current.timer); autoOpen.current = null }
-      // Scroll the list when dragging near its top or bottom edge.
-      const list = listRef.current
-      if (list) {
-        const lr = list.getBoundingClientRect()
-        if (e.clientY < lr.top + 24) list.scrollTop -= 10
-        else if (e.clientY > lr.bottom - 24) list.scrollTop += 10
-      }
-      setDrag({ path: press.path, kind: press.kind, label: press.label, x: e.clientX, y: e.clientY, target })
     }
-    const onUp = (e: PointerEvent) => {
-      const press = pressRef.current
-      if (!press || e.pointerId !== press.id) return
-      const d = dragRef.current
-      if (d) {
-        justDragged.current = true
-        window.setTimeout(() => { justDragged.current = false }, 0)
-        const t = d.target
-        if (t?.problem) say(t.problem)
-        else if (t) void moveEntry(d.path, d.kind, t)
-      }
-      endDrag()
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', endDrag)
-    return () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', endDrag)
-    }
-  // hitTest reads the latest tree through closures rebuilt each render.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openFolders, visibleByFolder, folders, moveEntry, endDrag, setFolderOpen])
-
-  // Escape cancels a drag (App hands it to whatever carries data-escape-close).
-  const ghostRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = ghostRef.current
-    if (!el) return
-    el.addEventListener('tm-escape', endDrag)
-    return () => el.removeEventListener('tm-escape', endDrag)
-  }, [drag !== null, endDrag])
-
-  const pressRow = (e: React.PointerEvent, path: string, kind: 'note' | 'folder', label: string) => {
-    if (e.button !== 0 || renaming) return
-    if ((e.target as HTMLElement).closest('.notes-rowact')) return
-    pressRef.current = { path, kind, label, x: e.clientX, y: e.clientY, id: e.pointerId }
-  }
+  })
+  const pressRow = (e: React.PointerEvent, path: string, kind: 'note' | 'folder', label: string) => pressDrag(e, { key: path, kind, label } satisfies DragPress)
 
   if (!notes || !tree) return <div className="empty">Opening notes…</div>
 
@@ -634,7 +556,7 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
     return renameFor(n.name, depth) ?? (
       <div
         key={n.name}
-        className={`notes-row ${selected === n.name ? 'is-active' : ''} ${drag?.path === n.name ? 'is-dragging' : ''}`}
+        className={`notes-row ${selected === n.name ? 'is-active' : ''} ${drag?.press.key === n.name ? 'is-dragging' : ''}`}
         data-drop="note"
         data-path={n.name}
         data-depth={depth}
@@ -668,7 +590,7 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
       <div key={node.path} className="notes-folder" data-testid={tid('notes-folder', node.path)}>
         {renameFor(node.path, depth) ?? (
           <div
-            className={`notes-folder-row ${isOpen ? 'is-open' : ''} ${selectedFolder === node.path ? 'is-selected' : ''} ${dropInto === node.path ? (dropBad ? 'is-drop-bad' : 'is-drop-into') : ''} ${drag?.path === node.path ? 'is-dragging' : ''}`}
+            className={`notes-folder-row ${isOpen ? 'is-open' : ''} ${selectedFolder === node.path ? 'is-selected' : ''} ${dropInto === node.path ? (dropBad ? 'is-drop-bad' : 'is-drop-into') : ''} ${drag?.press.key === node.path ? 'is-dragging' : ''}`}
             data-drop="folder"
             data-path={node.path}
             data-depth={depth}
@@ -789,8 +711,8 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
       </div>
       {drag && (
         <div ref={ghostRef} className={`notes-ghost ${dropBad ? 'is-bad' : ''}`} style={{ left: drag.x + 12, top: drag.y + 10 }} data-escape-close="" data-testid="notes-ghost">
-          {drag.kind === 'folder' ? <Folder strokeWidth={2} /> : <FileText strokeWidth={2} />}
-          <span>{drag.label}</span>
+          {drag.press.kind === 'folder' ? <Folder strokeWidth={2} /> : <FileText strokeWidth={2} />}
+          <span>{drag.press.label}</span>
           {drag.target?.problem && <em>{drag.target.problem}</em>}
         </div>
       )}

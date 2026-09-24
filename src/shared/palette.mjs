@@ -3,14 +3,15 @@
  * first Enter runs is testable without a DOM.
  *
  * Query prefixes narrow the list the way VS Code's do: `>` commands only,
- * `@` agents only, `#` open windows only. Anything else searches everything.
+ * `@` agents only, `#` open windows only, `!` clipboard history only.
+ * Anything else searches everything.
  */
 
 /** Section a prefix narrows to, or null for everything. */
 export function parseQuery(raw) {
   const text = typeof raw === 'string' ? raw : ''
   const first = text[0]
-  const mode = first === '>' ? 'command' : first === '@' ? 'agent' : first === '#' ? 'window' : null
+  const mode = first === '>' ? 'command' : first === '@' ? 'agent' : first === '#' ? 'window' : first === '!' ? 'clip' : null
   return { mode, text: (mode ? text.slice(1) : text).trim() }
 }
 
@@ -88,7 +89,7 @@ export function commandGroup(id) {
   if (/^snippet:/.test(key)) return 'Snippets'
   if (/^run:/.test(key)) return 'Run'
   if (/^(cursor|chrome|new-project|projects-dir|collapse|waiting|reset-order)$/.test(key)) return 'Project'
-  if (/^(activity|notes|usage|spend|insights|history|add-|zoom:|close:|view:)/.test(key)) return 'Panes'
+  if (/^(activity|notes|clipboard|usage|spend|insights|history|add-|zoom:|close:|view:)/.test(key)) return 'Panes'
   if (/^(size-|cols-|reset-sizes|save-layout|layout:|layout-delete:|field$|sidebar$)/.test(key)) return 'Layout'
   if (/^(settings|rebuild|hide|quit)$/.test(key)) return 'App'
   return 'Other'

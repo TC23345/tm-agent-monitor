@@ -24,6 +24,9 @@ import { SESSION_NAME_MAX, setSessionName, useSessionNames } from './sessionName
 import { useProjectCommands } from './useProject'
 import { ActivityPane } from './ActivityPane'
 import { NotesPane, type NotesPaneHandle } from './NotesPane'
+import { ClipboardPane, type PasteTarget } from './clipboard/ClipboardPane'
+import { sourceLabel } from '@shared/clips.mjs'
+import type { ClipSummary } from '@shared/types'
 import { isWorkspaceCommand } from '@shared/workspaceCommand.mjs'
 import type { ProjectCommand } from '@shared/types'
 import { LAYOUT_NAME_MAX, loadLayouts, panesFromLayout, saveLayouts, snapshotLayout, type LayoutMap } from './layouts'
@@ -47,7 +50,7 @@ import {
 import { launchFor, launchKey, withLaunch, type LaunchPrefs } from '@shared/panes.mjs'
 import { LaunchNav, type LaunchTarget, type NavMenu } from './LaunchNav'
 import {
-  AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Code2, Code2 as CursorIcon, Columns3, Copy,
+  AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Clipboard, Code2, Code2 as CursorIcon, Columns3, Copy,
   Eye, EyeOff, Filter, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
   NotebookPen, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, Rss, Ruler, Save, Shrink, Sparkles, SquareSlash,
   SquareTerminal, Terminal, Trash2, X
@@ -140,6 +143,10 @@ export function App() {
   // poll only runs while its section is open; the palette wants the list now).
   const [palette, setPalette] = useState(false)
   const [paletteWindows, setPaletteWindows] = useState<DesktopWindow[]>([])
+  /** Clipboard history for the palette's `!` prefix, fetched once per open like the windows. */
+  const [paletteClips, setPaletteClips] = useState<ClipSummary[]>([])
+  /** Capture paused → the status bar's amber chip (a warning, not a request). */
+  const [clipsPaused, setClipsPaused] = useState(false)
   // Live handles to the terminal panes, for the header tools (clear/restart).
   const termRefs = useRef(new Map<string, TerminalPaneHandle>())
   const notesRef = useRef<NotesPaneHandle | null>(null)
@@ -390,13 +397,21 @@ export function App() {
   }
   useEffect(() => window.watch.onCommand((c) => commandRef.current(c)), [])
 
-  // The palette lists open windows: refresh once per open rather than polling.
+  // The palette lists open windows and clips: refresh once per open rather than polling.
   useEffect(() => {
     if (!palette) return
     let live = true
     window.watch.listWindows().then((list) => { if (live) setPaletteWindows(list) }).catch(() => {})
+    window.watch.listClips().then((res) => { if (live) setPaletteClips(res.clips) }).catch(() => {})
     return () => { live = false }
   }, [palette])
+
+  // Only the pause flag is watched here; the pane owns the full listing.
+  useEffect(() => {
+    const load = () => { window.watch.clipsState().then((s) => setClipsPaused(s.paused)).catch(() => {}) }
+    load()
+    return window.watch.onClipsChanged(load)
+  }, [])
 
   const agents = snap?.agents ?? []
   const waitingParents = new Set(agents.filter((a) => a.state === 'waiting' && a.parentId).map((a) => a.parentId!))
@@ -601,6 +616,16 @@ export function App() {
   const openUsage = () => openUnique('spend')
   const openActivity = () => openUnique('activity')
   const openNotes = () => openUnique('notes')
+  const openClipboard = () => openUnique('clipboard')
+
+  /** Open terminal panes a clip can be pasted into (the Clipboard pane's *Paste into ▸*, the palette's Ctrl+Enter). */
+  const pasteTargets = (): PasteTarget[] => panes
+    .filter((p) => p.kind === 'terminal' && p.term?.sessionId)
+    .map((p) => ({
+      id: p.id,
+      label: `${p.term!.launch === 'claude' ? 'Claude Code' : p.term!.launch === 'codex' ? 'Codex' : 'Terminal'} · ${p.term!.label ?? p.term!.cwd?.split(/[\\/]/).filter(Boolean).pop() ?? 'home'}`,
+      paste: (text: string) => termRefs.current.get(p.id)?.paste(text)
+    }))
 
   /** The pane the right-clicked session runs in, if any (reply box, "Go to its pane"). */
   const menuAgent = menu ? agents.find((a) => a.id === menu.id) : undefined
@@ -733,6 +758,10 @@ export function App() {
         return <ActivityPane onFocusAgent={focusAgentAnywhere} />
       case 'notes':
         return <NotesPane ref={notesRef} onDir={setNotesDir} preview={notesPreview} />
+      case 'clipboard': {
+        const targets = pasteTargets()
+        return <ClipboardPane terminals={targets} focusedTerminal={targets.find((t) => t.id === focusedPane)} />
+      }
       case 'terminal':
         return (
           <Suspense fallback={<div className="empty">Starting terminal…</div>}>
@@ -980,6 +1009,12 @@ export function App() {
       keywords: ['notepad', 'scratch', 'markdown', 'todo', 'shared'],
       detail: hasNotes ? 'zoom the open pane' : full ? 'all six panes are open' : 'the shared notepad'
     })
+    const hasClipboard = panes.some((p) => p.kind === 'clipboard')
+    cmd('clipboard', 'Clipboard', openClipboard, {
+      icon: <Clipboard strokeWidth={2} />,
+      keywords: ['history', 'copy', 'paste', 'clips', 'favorites', 'groups'],
+      detail: hasClipboard ? 'zoom the open pane' : full ? 'all six panes are open' : 'everything you copy, searchable'
+    })
     for (const k of PANE_KINDS) {
       if (k.id !== 'spend' && k.id !== 'insights' && k.id !== 'history') continue
       const open = panes.some((p) => p.kind === k.id)
@@ -1066,6 +1101,23 @@ export function App() {
       sub('folder', 'open folder', <Folder strokeWidth={2} />, () => window.watch.openPath(cwd))
       sub('cursor', 'open in Cursor', <CursorIcon strokeWidth={2} />, () => window.watch.openCursor(cwd))
       sub('copy', 'copy path', <Copy strokeWidth={2} />, () => window.watch.copyText(cwd))
+    }
+    // Clipboard history (`!`): Enter copies, Ctrl+Enter pastes into the focused terminal pane.
+    const focusedTarget = pasteTargets().find((t) => t.id === focusedPane)
+    for (const c of paletteClips.slice(0, 300)) {
+      items.push({
+        id: `clip:${c.id}`,
+        section: 'clip',
+        label: c.title || '(blank)',
+        detail: sourceLabel(c.source),
+        keywords: [c.preview],
+        icon: <Clipboard strokeWidth={2} />,
+        run: () => { void window.watch.copyClip(c.id) },
+        runAlt: () => {
+          if (!focusedTarget || c.kind === 'image') { void window.watch.copyClip(c.id); return }
+          void window.watch.getClip(c.id).then((res) => { if (res) focusedTarget.paste(res.text) })
+        }
+      })
     }
     for (const w of paletteWindows) {
       items.push({
@@ -1303,6 +1355,8 @@ export function App() {
         onOpenMenu={setOpenMenu}
         version={appInfo.version}
         debugPort={appInfo.debugPort}
+        clipsPaused={clipsPaused}
+        onResumeClips={() => { void window.watch.pauseClips(null) }}
       />
 
       {palette && <CommandPalette items={paletteItems()} onClose={() => setPalette(false)} />}

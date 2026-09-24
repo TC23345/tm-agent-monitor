@@ -1,4 +1,4 @@
-export type PaletteSection = 'command' | 'agent' | 'window'
+export type PaletteSection = 'command' | 'agent' | 'window' | 'clip'
 
 export interface PaletteMatchable {
   section: PaletteSection
