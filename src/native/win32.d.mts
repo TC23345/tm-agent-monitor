@@ -8,3 +8,12 @@ export function focusHwndWithApi(fns: Record<string, (...args: any[]) => any>, h
 export function focusHwnd(hwnd: string, expectedPid?: number): boolean
 export function focusByPid(pid: number): boolean
 export function available(): boolean
+
+/** Clipboard: the change sequence number, or null when Win32 is unavailable. */
+export function clipboardSequence(): number | null
+/** A message-only window listening for WM_CLIPBOARDUPDATE; null when it could not be set up. */
+export function clipboardListen(onUpdate: () => void): { hwnd: string; stop: () => void } | null
+/** The window that last set the clipboard, resolved to its process. */
+export function clipboardOwner(): { hwnd: string; pid: number; exe: string; title: string } | null
+/** Whether a registered clipboard format (by name) is on the clipboard right now. */
+export function hasClipboardFormat(name: string): boolean

@@ -28,7 +28,8 @@ import type { scanCodexUsage, CodexRateLimits } from './codexUsage.mjs'
 import { PendingCalls, WORKER_TIMEOUT_MS, type WorkerKind } from '../shared/usageWorkerProtocol.mjs'
 import { mockSnapshot, mockHistory, mockUsageInsights, mockWindows, mockEvents } from './mock.js'
 import { parseWorkspaceArgs } from '../shared/workspaceCommand.mjs'
-import { focusHwnd, focusByPid, listDesktopWindows, available as winAvailable } from '../native/win32.mjs'
+import { focusHwnd, focusByPid, listDesktopWindows, clipboardOwner, available as winAvailable } from '../native/win32.mjs'
+import { startClipboardWatch, type ClipboardWatch } from './clipboardWatch.js'
 import { buildWindowList } from '../shared/windows.mjs'
 import { parseProjectCommands } from '../shared/projectCommands.mjs'
 import { parseGitStatus, type GitStatus } from '../shared/gitStatus.mjs'
@@ -976,6 +977,33 @@ function setPower(next: PowerState): void {
   }
 }
 const whenActive = (fn: () => void) => () => { if (tickAllowed(power)) fn() }
+
+// ---- clipboard capture (M1) -------------------------------------------------
+let clipboardWatch: ClipboardWatch | null = null
+
+/** Main's clipboard log: stdout, and — when a CDP port is open so an agent is
+ * driving the app — mirrored into the renderer console, which is what
+ * `read_electron_logs` reads. Main-process stdout is invisible over CDP. */
+function clipboardLog(line: string): void {
+  console.log(line)
+  if (debugPort() !== undefined && win && !win.isDestroyed()) {
+    win.webContents.executeJavaScript(`console.log(${JSON.stringify(line)})`).catch(() => { /* renderer not up yet */ })
+  }
+}
+
+function startClipboardCapture(): void {
+  if (process.platform !== 'win32' || clipboardWatch) return
+  clipboardWatch = startClipboardWatch({
+    mode: process.env.CLAUDE_WATCH_CLIPBOARD === 'poll' ? 'poll' : 'auto',
+    log: clipboardLog,
+    gate: whenActive,
+    onChange: (seq, via) => {
+      const owner = clipboardOwner()
+      const formats = clipboard.availableFormats().join(',')
+      clipboardLog(`[clipboard] update seq=${seq} via=${via} owner=${owner?.exe || '?'}${owner?.pid ? `#${owner.pid}` : ''} formats=${formats || '-'}`)
+    }
+  })
+}
 
 function pushStatus(): void {
   const snap = buildSnapshot()
@@ -2116,6 +2144,7 @@ if (!gotLock) {
     createTray()
     registerIpc()
     if (app.isPackaged) setupAutoUpdate()
+    startClipboardCapture()
 
     // Subscription windows (real, OAuth), API usage (admin), and the local
     // today-tokens scan all refresh in the background on their own cadence.
@@ -2246,6 +2275,7 @@ if (!gotLock) {
 
   app.on('will-quit', () => {
     globalShortcut.unregisterAll()
+    clipboardWatch?.stop()
     terminals.disposeAll()
     daemon?.stop()
   })

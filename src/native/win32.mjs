@@ -22,6 +22,23 @@ function load() {
     const kernel32 = koffi.load('kernel32.dll')
 
     const EnumProc = koffi.proto('bool __stdcall CW_EnumProc(uintptr_t hwnd, intptr_t lparam)')
+    // LRESULT WndProc(HWND, UINT, WPARAM, LPARAM) — a registered callback, so
+    // Chromium's UI message pump may dispatch to it long after registration.
+    const WndProc = koffi.proto('intptr_t __stdcall CW_WndProc(uintptr_t hwnd, uint32 msg, uintptr_t wParam, intptr_t lParam)')
+    const WNDCLASSEXW = koffi.struct('CW_WNDCLASSEXW', {
+      cbSize: 'uint32',
+      style: 'uint32',
+      lpfnWndProc: koffi.pointer(WndProc),
+      cbClsExtra: 'int',
+      cbWndExtra: 'int',
+      hInstance: 'uintptr_t',
+      hIcon: 'uintptr_t',
+      hCursor: 'uintptr_t',
+      hbrBackground: 'uintptr_t',
+      lpszMenuName: 'str16',
+      lpszClassName: 'str16',
+      hIconSm: 'uintptr_t'
+    })
 
     const fns = {
       EnumWindows: user32.func('int __stdcall EnumWindows(CW_EnumProc *proc, intptr_t lparam)'),
@@ -38,7 +55,21 @@ function load() {
       GetCurrentThreadId: kernel32.func('uint32 __stdcall GetCurrentThreadId()'),
       GetConsoleWindow: kernel32.func('uintptr_t __stdcall GetConsoleWindow()'),
       CreateToolhelp32Snapshot: kernel32.func('uintptr_t __stdcall CreateToolhelp32Snapshot(uint32 flags, uint32 pid)'),
-      CloseHandle: kernel32.func('int __stdcall CloseHandle(uintptr_t h)')
+      CloseHandle: kernel32.func('int __stdcall CloseHandle(uintptr_t h)'),
+      GetModuleHandleW: kernel32.func('uintptr_t __stdcall GetModuleHandleW(str16 name)'),
+      GetLastError: kernel32.func('uint32 __stdcall GetLastError()'),
+      // Clipboard change notification (a message-only window) and the reads
+      // the clipboard watcher needs. Nothing here opens the clipboard.
+      RegisterClassExW: user32.func('uint16 __stdcall RegisterClassExW(CW_WNDCLASSEXW *wc)'),
+      CreateWindowExW: user32.func('uintptr_t __stdcall CreateWindowExW(uint32 exStyle, str16 cls, str16 name, uint32 style, int x, int y, int w, int h, intptr_t parent, uintptr_t menu, uintptr_t inst, uintptr_t param)'),
+      DestroyWindow: user32.func('int __stdcall DestroyWindow(uintptr_t hwnd)'),
+      DefWindowProcW: user32.func('intptr_t __stdcall DefWindowProcW(uintptr_t hwnd, uint32 msg, uintptr_t wParam, intptr_t lParam)'),
+      AddClipboardFormatListener: user32.func('int __stdcall AddClipboardFormatListener(uintptr_t hwnd)'),
+      RemoveClipboardFormatListener: user32.func('int __stdcall RemoveClipboardFormatListener(uintptr_t hwnd)'),
+      GetClipboardSequenceNumber: user32.func('uint32 __stdcall GetClipboardSequenceNumber()'),
+      GetClipboardOwner: user32.func('uintptr_t __stdcall GetClipboardOwner()'),
+      RegisterClipboardFormatW: user32.func('uint32 __stdcall RegisterClipboardFormatW(str16 name)'),
+      IsClipboardFormatAvailable: user32.func('int __stdcall IsClipboardFormatAvailable(uint32 format)')
     }
 
     const PROCESSENTRY32W = koffi.struct('CW_PROCESSENTRY32W', {
@@ -56,7 +87,7 @@ function load() {
     fns.Process32FirstW = kernel32.func('bool __stdcall Process32FirstW(uintptr_t snap, _Inout_ CW_PROCESSENTRY32W *e)')
     fns.Process32NextW = kernel32.func('bool __stdcall Process32NextW(uintptr_t snap, _Inout_ CW_PROCESSENTRY32W *e)')
 
-    api = { koffi, EnumProc, fns, sizeofEntry: koffi.sizeof(PROCESSENTRY32W) }
+    api = { koffi, EnumProc, WndProc, fns, sizeofEntry: koffi.sizeof(PROCESSENTRY32W), sizeofWndClass: koffi.sizeof(WNDCLASSEXW) }
   } catch (err) {
     if (process.env.CLAUDE_WATCH_DEBUG) console.error('[win32] load failed:', err.message)
     api = null
@@ -369,6 +400,120 @@ export function focusHwnd(hwndStr, expectedPid) {
 export function focusByPid(pid) {
   const found = findTerminalWindow(pid)
   return found ? focusHwnd(found.hwnd) : false
+}
+
+// ---- clipboard ------------------------------------------------------------
+// Reads and the change listener only. What to keep, dedupe, or redact is
+// decided in src/shared/clips.mjs; the watcher in src/main/clipboardWatch.ts
+// picks between the listener and the sequence-number poll.
+
+const WM_CLIPBOARDUPDATE = 0x031d
+const HWND_MESSAGE = -3
+
+/** The clipboard sequence number (bumps on every change), or null when Win32 is unavailable. */
+export function clipboardSequence() {
+  const a = load()
+  if (!a) return null
+  try {
+    return a.fns.GetClipboardSequenceNumber() >>> 0
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Register a message-only window for WM_CLIPBOARDUPDATE. `onUpdate` runs on
+ * the JS thread whenever Windows posts the message — which only happens if the
+ * thread's message loop dispatches to windows koffi created (the M1.1 probe).
+ * Returns { hwnd, stop } or null when any step fails; never throws.
+ */
+export function clipboardListen(onUpdate) {
+  const a = load()
+  if (!a) return null
+  const { koffi, WndProc, fns } = a
+  let cb = null
+  let hwnd = 0n
+  try {
+    cb = koffi.register((h, msg, wParam, lParam) => {
+      if (msg === WM_CLIPBOARDUPDATE) {
+        try { onUpdate() } catch { /* the watcher logs its own failures */ }
+        return 0
+      }
+      return fns.DefWindowProcW(h, msg, wParam, lParam)
+    }, koffi.pointer(WndProc))
+    const hInstance = fns.GetModuleHandleW(null)
+    const className = `TMClipboardListener.${process.pid}`
+    const atom = fns.RegisterClassExW({
+      cbSize: a.sizeofWndClass,
+      style: 0,
+      lpfnWndProc: cb,
+      cbClsExtra: 0,
+      cbWndExtra: 0,
+      hInstance,
+      hIcon: 0,
+      hCursor: 0,
+      hbrBackground: 0,
+      lpszMenuName: null,
+      lpszClassName: className,
+      hIconSm: 0
+    })
+    if (!atom) throw new Error(`RegisterClassExW failed (${fns.GetLastError()})`)
+    hwnd = BigInt(fns.CreateWindowExW(0, className, 'TaylorMade clipboard listener', 0, 0, 0, 0, 0, HWND_MESSAGE, 0, hInstance, 0))
+    if (hwnd === 0n) throw new Error(`CreateWindowExW failed (${fns.GetLastError()})`)
+    if (!fns.AddClipboardFormatListener(hwnd)) throw new Error(`AddClipboardFormatListener failed (${fns.GetLastError()})`)
+  } catch (err) {
+    if (process.env.CLAUDE_WATCH_DEBUG) console.error('[win32] clipboard listener failed:', err.message)
+    try { if (hwnd !== 0n) fns.DestroyWindow(hwnd) } catch { /* best effort */ }
+    try { if (cb) koffi.unregister(cb) } catch { /* best effort */ }
+    return null
+  }
+  let stopped = false
+  return {
+    hwnd: hwnd.toString(),
+    stop() {
+      if (stopped) return
+      stopped = true
+      try { fns.RemoveClipboardFormatListener(hwnd) } catch { /* best effort */ }
+      try { fns.DestroyWindow(hwnd) } catch { /* best effort */ }
+      try { koffi.unregister(cb) } catch { /* best effort */ }
+    }
+  }
+}
+
+/** The window that last set the clipboard, resolved to its process. Null when unknown. */
+export function clipboardOwner() {
+  const a = load()
+  if (!a) return null
+  try {
+    const hwnd = a.fns.GetClipboardOwner()
+    if (!hwnd || BigInt(hwnd) === 0n) return null
+    const pidBox = [0]
+    a.fns.GetWindowThreadProcessId(hwnd, pidBox)
+    const pid = pidBox[0]
+    if (!pid) return null
+    return { hwnd: BigInt(hwnd).toString(), pid, exe: processSnapshot().exeOf.get(pid) ?? '', title: windowTitle(a.fns, hwnd) }
+  } catch {
+    return null
+  }
+}
+
+const formatIds = new Map()
+
+/** Whether a registered clipboard format (by name) is on the clipboard right now. */
+export function hasClipboardFormat(name) {
+  const a = load()
+  if (!a || typeof name !== 'string' || !name) return false
+  try {
+    let id = formatIds.get(name)
+    if (id === undefined) {
+      id = a.fns.RegisterClipboardFormatW(name) >>> 0
+      if (!id) return false
+      formatIds.set(name, id)
+    }
+    return a.fns.IsClipboardFormatAvailable(id) !== 0
+  } catch {
+    return false
+  }
 }
 
 export const available = () => load() !== null
