@@ -39,6 +39,22 @@ function load() {
       lpszClassName: 'str16',
       hIconSm: 'uintptr_t'
     })
+    // INPUT is { DWORD type; union { MOUSEINPUT mi; KEYBDINPUT ki; HARDWAREINPUT hi; } }:
+    // 40 bytes on x64 — the union is 8-aligned (offset 8) and MOUSEINPUT (32) is
+    // its largest arm, so KEYBDINPUT (24) is followed by 8 bytes of padding.
+    // Declared before the function table, which names CW_INPUT.
+    const KEYBDINPUT = koffi.struct('CW_KEYBDINPUT', {
+      wVk: 'uint16',
+      wScan: 'uint16',
+      dwFlags: 'uint32',
+      time: 'uint32',
+      dwExtraInfo: 'uintptr_t'
+    })
+    const INPUT = koffi.struct('CW_INPUT', {
+      type: 'uint32',
+      ki: KEYBDINPUT,
+      pad: 'uint64'
+    })
 
     const fns = {
       EnumWindows: user32.func('int __stdcall EnumWindows(CW_EnumProc *proc, intptr_t lparam)'),
@@ -75,9 +91,10 @@ function load() {
       OpenClipboard: user32.func('int __stdcall OpenClipboard(uintptr_t owner)'),
       CloseClipboard: user32.func('int __stdcall CloseClipboard()'),
       GetClipboardData: user32.func('uintptr_t __stdcall GetClipboardData(uint32 format)'),
-      // Synthetic keys for paste-back (the picker and Shift+Alt+n). keybd_event
-      // is the old API, but four calls need no INPUT union layout.
-      keybd_event: user32.func('void __stdcall keybd_event(uint8 vk, uint8 scan, uint32 flags, uintptr_t extra)'),
+      // Synthetic keys for paste-back (the picker and Shift+Alt+n): one
+      // SendInput call carries the whole sequence, so nothing interleaves with
+      // real input between the releases and Ctrl+V (keybd_event could).
+      SendInput: user32.func('uint32 __stdcall SendInput(uint32 count, CW_INPUT *inputs, int size)'),
       GlobalLock: kernel32.func('void * __stdcall GlobalLock(uintptr_t h)'),
       GlobalUnlock: kernel32.func('int __stdcall GlobalUnlock(uintptr_t h)'),
       GlobalSize: kernel32.func('size_t __stdcall GlobalSize(uintptr_t h)')
@@ -98,7 +115,7 @@ function load() {
     fns.Process32FirstW = kernel32.func('bool __stdcall Process32FirstW(uintptr_t snap, _Inout_ CW_PROCESSENTRY32W *e)')
     fns.Process32NextW = kernel32.func('bool __stdcall Process32NextW(uintptr_t snap, _Inout_ CW_PROCESSENTRY32W *e)')
 
-    api = { koffi, EnumProc, WndProc, fns, sizeofEntry: koffi.sizeof(PROCESSENTRY32W), sizeofWndClass: koffi.sizeof(WNDCLASSEXW) }
+    api = { koffi, EnumProc, WndProc, fns, sizeofEntry: koffi.sizeof(PROCESSENTRY32W), sizeofWndClass: koffi.sizeof(WNDCLASSEXW), sizeofInput: koffi.sizeof(INPUT) }
   } catch (err) {
     if (process.env.CLAUDE_WATCH_DEBUG) console.error('[win32] load failed:', err.message)
     api = null
@@ -575,28 +592,54 @@ export function clipboardData(format) {
 }
 
 const VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_MENU = 0x12, VK_LWIN = 0x5b, VK_RWIN = 0x5c, VK_V = 0x56
+const INPUT_KEYBOARD = 1
 const KEYEVENTF_KEYUP = 0x0002
+/** The modifiers a hotkey may still be holding when its handler runs. */
+const HELD_MODIFIERS = Object.freeze([VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN, VK_CONTROL])
+
+/** One INPUT record: a key press or release. */
+function keyInput(vk, up) {
+  return { type: INPUT_KEYBOARD, ki: { wVk: vk, wScan: 0, dwFlags: up ? KEYEVENTF_KEYUP : 0, time: 0, dwExtraInfo: 0 }, pad: 0 }
+}
+
+/** Send a sequence of key events as one SendInput call; true only when every event was accepted. */
+function sendKeys(inputs) {
+  const a = load()
+  if (!a) return false
+  const { fns, sizeofInput } = a
+  try {
+    const sent = fns.SendInput(inputs.length, inputs, sizeofInput) >>> 0
+    if (sent !== inputs.length && process.env.CLAUDE_WATCH_DEBUG) console.error(`[win32] SendInput sent ${sent} of ${inputs.length} (error ${fns.GetLastError()})`)
+    return sent === inputs.length
+  } catch (err) {
+    if (process.env.CLAUDE_WATCH_DEBUG) console.error('[win32] SendInput failed:', err.message)
+    return false
+  }
+}
+
+/**
+ * Release the modifiers a hotkey may still hold (Shift, Alt, Win, Ctrl).
+ * Harmless on its own — a release for a key that is up types nothing — which
+ * is what makes it the safe probe of the INPUT layout. Never throws.
+ */
+export function releaseModifierKeys() {
+  return sendKeys(HELD_MODIFIERS.map((vk) => keyInput(vk, true)))
+}
 
 /**
  * Send Ctrl+V to the foreground window. Any modifier the user still holds
- * from the hotkey that got us here (Shift+Alt+1, Ctrl+Alt+V) is released
- * first, or the paste would arrive as Ctrl+Shift+Alt+V. Never throws.
+ * from the hotkey that got us here (Shift+Alt+1, Ctrl+Alt+V) is released in
+ * the same SendInput call, or the paste would arrive as Ctrl+Shift+Alt+V.
+ * Never throws.
  */
 export function sendPasteKeys() {
-  const a = load()
-  if (!a) return false
-  const { fns } = a
-  try {
-    for (const vk of [VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN, VK_CONTROL]) fns.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
-    fns.keybd_event(VK_CONTROL, 0, 0, 0)
-    fns.keybd_event(VK_V, 0, 0, 0)
-    fns.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
-    fns.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
-    return true
-  } catch (err) {
-    if (process.env.CLAUDE_WATCH_DEBUG) console.error('[win32] paste keys failed:', err.message)
-    return false
-  }
+  return sendKeys([
+    ...HELD_MODIFIERS.map((vk) => keyInput(vk, true)),
+    keyInput(VK_CONTROL, false),
+    keyInput(VK_V, false),
+    keyInput(VK_V, true),
+    keyInput(VK_CONTROL, true)
+  ])
 }
 
 /** The foreground window with its owning process — provenance for a copy whose clipboard owner is null. */
