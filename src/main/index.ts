@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, clipboard, screen, powerMonitor, utilityProcess } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, screen, powerMonitor, utilityProcess } from 'electron'
 import { attentionTransition, badgeLabel } from '../shared/attentionSignal.mjs'
 import { edgeDragTarget } from '../shared/edgeDrag.mjs'
 import { blankBitmap, drawBadge } from '../shared/trayBadge.mjs'
@@ -30,6 +30,7 @@ import { mockSnapshot, mockHistory, mockUsageInsights, mockWindows, mockEvents }
 import { parseWorkspaceArgs } from '../shared/workspaceCommand.mjs'
 import { focusHwnd, focusByPid, listDesktopWindows, clipboardOwner, available as winAvailable } from '../native/win32.mjs'
 import { startClipboardWatch, type ClipboardWatch } from './clipboardWatch.js'
+import { clipboardHasImage, readClipboardSnapshot, readClipboardText, writeClipboardText } from './clipboardIo.js'
 import { buildWindowList } from '../shared/windows.mjs'
 import { parseProjectCommands } from '../shared/projectCommands.mjs'
 import { parseGitStatus, type GitStatus } from '../shared/gitStatus.mjs'
@@ -999,8 +1000,12 @@ function startClipboardCapture(): void {
     gate: whenActive,
     onChange: (seq, via) => {
       const owner = clipboardOwner()
-      const formats = clipboard.availableFormats().join(',')
-      clipboardLog(`[clipboard] update seq=${seq} via=${via} owner=${owner?.exe || '?'}${owner?.pid ? `#${owner.pid}` : ''} formats=${formats || '-'}`)
+      void readClipboardSnapshot().then((snap) => {
+        clipboardLog(
+          `[clipboard] update seq=${seq} via=${via} owner=${owner?.exe || '?'}${owner?.pid ? `#${owner.pid}` : ''} ` +
+          `formats=${snap.formats.join(',') || '-'}${snap.excluded ? ' excluded' : ''}${snap.files.length ? ` files=${snap.files.length}` : ''}${snap.text ? ` chars=${snap.text.length}` : ''}`
+        )
+      })
     }
   })
 }
@@ -1469,7 +1474,7 @@ function registerIpc(): void {
   // Codex intentionally owns the trust decision. We can guide the user to its
   // interactive reviewer, but must not edit or spoof Codex's persisted trust.
   ipcMain.handle('hooks:review-codex-trust', () => {
-    clipboard.writeText('/hooks')
+    void writeClipboardText('/hooks')
     openTerminal(undefined, 'codex', 'hook-trust')
     return {
       ok: true,
@@ -1598,14 +1603,14 @@ function registerIpc(): void {
       reinstalling = false
     }
   })
-  ipcMain.on('text:copy', (_e, t: string) => { if (typeof t === 'string' && t.length <= 100_000) clipboard.writeText(t) })
+  ipcMain.on('text:copy', (_e, t: string) => { if (typeof t === 'string' && t.length <= 100_000) void writeClipboardText(t) })
   // Ctrl+V in a terminal pane (TerminalPane.tsx). The 1 MB cap matches
   // term:input; a larger clipboard pastes nothing rather than half a script.
-  ipcMain.handle('clipboard:read', () => {
-    const text = clipboard.readText()
+  ipcMain.handle('clipboard:read', async () => {
+    const text = await readClipboardText()
     return {
       text: text.length <= 1_048_576 ? text : '',
-      hasImage: clipboard.availableFormats().some((format) => format.startsWith('image/'))
+      hasImage: clipboardHasImage()
     }
   })
   ipcMain.on('terminal:open', (_e, cwd?: string, provider?: TerminalTarget) => {

@@ -69,7 +69,15 @@ function load() {
       GetClipboardSequenceNumber: user32.func('uint32 __stdcall GetClipboardSequenceNumber()'),
       GetClipboardOwner: user32.func('uintptr_t __stdcall GetClipboardOwner()'),
       RegisterClipboardFormatW: user32.func('uint32 __stdcall RegisterClipboardFormatW(str16 name)'),
-      IsClipboardFormatAvailable: user32.func('int __stdcall IsClipboardFormatAvailable(uint32 format)')
+      IsClipboardFormatAvailable: user32.func('int __stdcall IsClipboardFormatAvailable(uint32 format)'),
+      // Raw format bytes (CF_HDROP file lists, the exclusion DWORDs) — the one
+      // path here that opens the clipboard, held for microseconds.
+      OpenClipboard: user32.func('int __stdcall OpenClipboard(uintptr_t owner)'),
+      CloseClipboard: user32.func('int __stdcall CloseClipboard()'),
+      GetClipboardData: user32.func('uintptr_t __stdcall GetClipboardData(uint32 format)'),
+      GlobalLock: kernel32.func('void * __stdcall GlobalLock(uintptr_t h)'),
+      GlobalUnlock: kernel32.func('int __stdcall GlobalUnlock(uintptr_t h)'),
+      GlobalSize: kernel32.func('size_t __stdcall GlobalSize(uintptr_t h)')
     }
 
     const PROCESSENTRY32W = koffi.struct('CW_PROCESSENTRY32W', {
@@ -499,20 +507,84 @@ export function clipboardOwner() {
 
 const formatIds = new Map()
 
+/** A clipboard format id: a standard CF_* number, or a registered name (cached). 0 when unknown. */
+function formatId(a, format) {
+  if (typeof format === 'number') return format >>> 0
+  if (typeof format !== 'string' || !format) return 0
+  let id = formatIds.get(format)
+  if (id === undefined) {
+    id = a.fns.RegisterClipboardFormatW(format) >>> 0
+    if (id) formatIds.set(format, id)
+  }
+  return id
+}
+
 /** Whether a registered clipboard format (by name) is on the clipboard right now. */
 export function hasClipboardFormat(name) {
   const a = load()
-  if (!a || typeof name !== 'string' || !name) return false
+  if (!a) return false
   try {
-    let id = formatIds.get(name)
-    if (id === undefined) {
-      id = a.fns.RegisterClipboardFormatW(name) >>> 0
-      if (!id) return false
-      formatIds.set(name, id)
-    }
-    return a.fns.IsClipboardFormatAvailable(id) !== 0
+    const id = formatId(a, name)
+    return id !== 0 && a.fns.IsClipboardFormatAvailable(id) !== 0
   } catch {
     return false
+  }
+}
+
+const MAX_FORMAT_BYTES = 4 * 1024 * 1024
+
+/**
+ * The raw bytes of one clipboard format (a CF_* id or a registered name) as a
+ * Buffer copy, or null when it is absent, oversized, or the clipboard is held
+ * by another app right now. Opens the clipboard for the copy only.
+ */
+export function clipboardData(format) {
+  const a = load()
+  if (!a) return null
+  const { koffi, fns } = a
+  let id
+  try {
+    id = formatId(a, format)
+    if (!id || !fns.IsClipboardFormatAvailable(id)) return null
+    if (!fns.OpenClipboard(0)) return null
+  } catch {
+    return null
+  }
+  let handle = 0n
+  try {
+    handle = BigInt(fns.GetClipboardData(id))
+    if (handle === 0n) return null
+    const size = Number(fns.GlobalSize(handle))
+    if (!size || size > MAX_FORMAT_BYTES) return null
+    const ptr = fns.GlobalLock(handle)
+    if (!ptr) return null
+    try {
+      return Buffer.from(koffi.decode(ptr, 'uint8_t', size))
+    } finally {
+      fns.GlobalUnlock(handle)
+    }
+  } catch (err) {
+    if (process.env.CLAUDE_WATCH_DEBUG) console.error('[win32] clipboard read failed:', err.message)
+    return null
+  } finally {
+    try { fns.CloseClipboard() } catch { /* best effort */ }
+  }
+}
+
+/** The foreground window with its owning process — provenance for a copy whose clipboard owner is null. */
+export function foregroundWindowInfo() {
+  const a = load()
+  if (!a) return null
+  try {
+    const hwnd = a.fns.GetForegroundWindow()
+    if (!hwnd || BigInt(hwnd) === 0n) return null
+    const pidBox = [0]
+    a.fns.GetWindowThreadProcessId(hwnd, pidBox)
+    const pid = pidBox[0]
+    if (!pid) return null
+    return { hwnd: BigInt(hwnd).toString(), pid, exe: processSnapshot().exeOf.get(pid) ?? '', title: windowTitle(a.fns, hwnd) }
+  } catch {
+    return null
   }
 }
 

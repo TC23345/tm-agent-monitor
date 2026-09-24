@@ -17,3 +17,7 @@ export function clipboardListen(onUpdate: () => void): { hwnd: string; stop: () 
 export function clipboardOwner(): { hwnd: string; pid: number; exe: string; title: string } | null
 /** Whether a registered clipboard format (by name) is on the clipboard right now. */
 export function hasClipboardFormat(name: string): boolean
+/** Raw bytes of one clipboard format (CF_* id or registered name), or null. */
+export function clipboardData(format: number | string): Buffer | null
+/** The foreground window resolved to its process (provenance fallback). */
+export function foregroundWindowInfo(): { hwnd: string; pid: number; exe: string; title: string } | null
