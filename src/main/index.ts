@@ -46,7 +46,8 @@ import { estimateCostUsd } from '../shared/pricing.mjs'
 // export 'autoUpdater' not found"), so import the default export and destructure.
 import electronUpdater from 'electron-updater'
 import { validateMutableSettingsPatch } from './store.js'
-import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type WindowMaterial, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights, type ClipsListing, type ExtensionStatus } from '../shared/types.js'
+import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type WindowMaterial, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights, type ClipsListing, type ExtensionStatus, type PickerFavoriteModifier, type ShortcutId, type ShortcutRow } from '../shared/types.js'
+import { isPickerFavoriteModifier, normalizeAccelerator, normalizeFavoriteHotkeys, sameChord, SHORTCUT_DEFAULTS } from '../shared/hotkeys.mjs'
 
 const { autoUpdater } = electronUpdater
 
@@ -80,6 +81,10 @@ const CODEX_USAGE_POLL_MS = 5 * 60_000
 interface Settings {
   hotkey?: string
   pickerHotkey?: string
+  halfHotkey?: string
+  /** The three paste-favorite chords, in favorite order. */
+  favoriteHotkeys?: string[]
+  pickerFavoriteModifier?: PickerFavoriteModifier
   notifications?: boolean
   mock?: boolean
   sizeMode?: SizeMode
@@ -136,13 +141,32 @@ let tray: Tray | null = null
 const HOTKEY_FALLBACKS = ['Alt+Shift+C', 'Control+Shift+Space', 'Alt+Shift+A', 'Alt+Shift+S']
 let activeHotkey: string | null = null
 /** The quick picker's chord (PRD §5.3): Ctrl+Alt+V, else the first free alternate. */
-const PICKER_HOTKEY_DEFAULT = 'Control+Alt+V'
-const PICKER_HOTKEY_FALLBACKS = ['Control+Alt+V', 'Control+Shift+Alt+V', 'Alt+Shift+V', 'Control+Alt+Insert']
-let pickerHotkeyPref = PICKER_HOTKEY_DEFAULT
+const PICKER_HOTKEY_FALLBACKS = ['Control+Alt+V', 'Control+Alt+Shift+V', 'Alt+Shift+V', 'Control+Alt+Insert']
+let pickerHotkeyPref: string = SHORTCUT_DEFAULTS.pickerHotkey
 let activePickerHotkey: string | null = null
-/** Shift+Alt+1..3 paste favorites 1–3 into the foreground window; each registers on its own. */
-const FAVORITE_HOTKEYS = ['Shift+Alt+1', 'Shift+Alt+2', 'Shift+Alt+3']
-let activeFavoriteHotkeys: string[] = []
+/** The transient half view (Alt+Q unless Settings → Keyboard shortcuts says otherwise). */
+let halfHotkeyPref: string = SHORTCUT_DEFAULTS.halfHotkey
+let activeHalfHotkey: string | null = null
+/** Alt+Shift+1..3 paste favorites 1–3 into the foreground window; each registers on its own. */
+let favoriteHotkeyPrefs: string[] = [...SHORTCUT_DEFAULTS.favoriteHotkeys]
+let activeFavoriteHotkeys: (string | null)[] = [null, null, null]
+/** The picker's own favorite keys: Alt+1–3 or Ctrl+1–3 (sent with each open). */
+let pickerFavoriteModifier: PickerFavoriteModifier = SHORTCUT_DEFAULTS.pickerFavoriteModifier as PickerFavoriteModifier
+const SHORTCUT_LABELS: Record<ShortcutId, string> = {
+  hotkey: 'Summon workspace', halfHotkey: 'Half view', pickerHotkey: 'Clipboard picker',
+  favorite1: 'Paste favorite 1', favorite2: 'Paste favorite 2', favorite3: 'Paste favorite 3'
+}
+/** Chords this app holds right now → the row holding each; rebuilt by `registerAllHotkeys`. */
+let claimedChords = new Map<string, ShortcutId>()
+/** Why a row's preferred chord did not register (another app, or another row of ours). */
+let shortcutNotes: Partial<Record<ShortcutId, string>> = {}
+/**
+ * Set while Settings records a chord: every global chord is let go so the one
+ * pressed reaches the page (a chord we hold never arrives as a keydown). Saving,
+ * cancelling, or this timeout registers them all again.
+ */
+let hotkeysSuspended: NodeJS.Timeout | null = null
+const HOTKEY_SUSPEND_MS = 30_000
 let updateReady: string | null = null // version string once an update is downloaded
 let installingUpdate = false
 
@@ -729,97 +753,116 @@ function sanitizeProjectName(raw: string): string {
     .slice(0, 120)
 }
 
-/** Summons the bottom-half workspace; the main hotkey summons the full one. */
-const HALF_HOTKEY = 'Alt+Q'
+/**
+ * Register one chord for one row, `register()` *and* `isRegistered()` (a
+ * chord another app holds can report success). A chord another row of ours
+ * already holds is refused before Electron is asked, so Settings can say
+ * which row has it. The first refusal is the row's note: for summon and the
+ * picker that is the preferred chord's, not a fallback's.
+ */
+function claimChord(id: ShortcutId, acc: string, handler: () => void): boolean {
+  const chord = normalizeAccelerator(acc) ?? acc
+  const holder = claimedChords.get(chord)
+  if (holder) {
+    shortcutNotes[id] ??= `used by ${SHORTCUT_LABELS[holder]}`
+    return false
+  }
+  let ok = false
+  try {
+    ok = globalShortcut.register(acc, handler)
+  } catch {
+    ok = false
+  }
+  if (ok && globalShortcut.isRegistered(acc)) {
+    claimedChords.set(chord, id)
+    return true
+  }
+  globalShortcut.unregister(acc)
+  shortcutNotes[id] ??= 'not registered — held by another app'
+  return false
+}
 
-/** Register the summon hotkeys, falling back through alternates on conflict. */
+/** The summon hotkey, falling back through alternates on conflict. */
 function registerHotkey(): void {
-  const candidates = [hotkeyPref, ...HOTKEY_FALLBACKS.filter((h) => h !== hotkeyPref)]
+  const candidates = [hotkeyPref, ...HOTKEY_FALLBACKS.filter((h) => !sameChord(h, hotkeyPref))]
   for (const acc of candidates) {
-    let ok = false
-    try {
-      ok = globalShortcut.register(acc, toggleWindow)
-    } catch {
-      ok = false
-    }
-    if (ok && globalShortcut.isRegistered(acc)) {
+    if (claimChord('hotkey', acc, toggleWindow)) {
       activeHotkey = acc
       console.log(`[hotkey] active: ${acc}${acc === hotkeyPref ? '' : ` (fallback — ${hotkeyPref} was unavailable)`}`)
-      registerHalfHotkey()
       return
     }
-    globalShortcut.unregister(acc)
     console.warn(`[hotkey] could not register ${acc}`)
   }
   activeHotkey = null
-  registerHalfHotkey()
   console.error(
     `[hotkey] no hotkey registered (tried ${candidates.join(', ')}). ` +
-    `Use the tray icon to toggle, or set CLAUDE_WATCH_HOTKEY to a free combo.`
+    `Use the tray icon to toggle, or set one in Settings → Keyboard shortcuts.`
   )
 }
 
-/** The picker's chord, the same way: register() *and* isRegistered(), then the fallbacks. */
+/** Summons the half-screen workspace; the main hotkey summons the full one. No fallbacks. */
+function registerHalfHotkey(): void {
+  activeHalfHotkey = claimChord('halfHotkey', halfHotkeyPref, () => toggleWindowMode('half')) ? halfHotkeyPref : null
+  if (activeHalfHotkey) console.log(`[hotkey] half view: ${activeHalfHotkey}`)
+  else console.warn(`[hotkey] could not register ${halfHotkeyPref} for the half view`)
+}
+
+/** The picker's chord, the same way as summon: the preference, then the fallbacks. */
 function registerPickerHotkey(): void {
-  const candidates = [pickerHotkeyPref, ...PICKER_HOTKEY_FALLBACKS.filter((h) => h !== pickerHotkeyPref)]
+  const candidates = [pickerHotkeyPref, ...PICKER_HOTKEY_FALLBACKS.filter((h) => !sameChord(h, pickerHotkeyPref))]
   for (const acc of candidates) {
-    if (acc === activeHotkey || acc === HALF_HOTKEY) continue
-    let ok = false
-    try {
-      ok = globalShortcut.register(acc, togglePicker)
-    } catch {
-      ok = false
-    }
-    if (ok && globalShortcut.isRegistered(acc)) {
+    if (claimChord('pickerHotkey', acc, togglePicker)) {
       activePickerHotkey = acc
       console.log(`[hotkey] picker: ${acc}${acc === pickerHotkeyPref ? '' : ` (fallback — ${pickerHotkeyPref} was unavailable)`}`)
       return
     }
-    globalShortcut.unregister(acc)
     console.warn(`[hotkey] could not register ${acc} for the picker`)
   }
   activePickerHotkey = null
   console.error(`[hotkey] no picker hotkey registered (tried ${candidates.join(', ')})`)
 }
 
-/** Shift+Alt+1..3: each on its own, so one taken chord does not cost the others. */
+/** Paste favorites 1–3: each on its own, so one taken chord does not cost the others. */
 function registerFavoriteHotkeys(): void {
-  activeFavoriteHotkeys = []
-  FAVORITE_HOTKEYS.forEach((acc, index) => {
-    let ok = false
-    try {
-      ok = globalShortcut.register(acc, () => { void pasteFavorite(index) })
-    } catch {
-      ok = false
-    }
-    if (ok && globalShortcut.isRegistered(acc)) activeFavoriteHotkeys.push(acc)
-    else {
-      globalShortcut.unregister(acc)
-      console.warn(`[hotkey] could not register ${acc} for favorite ${index + 1}`)
-    }
+  activeFavoriteHotkeys = favoriteHotkeyPrefs.map((acc, index) => {
+    const id = `favorite${index + 1}` as ShortcutId
+    if (claimChord(id, acc, () => { void pasteFavorite(index) })) return acc
+    console.warn(`[hotkey] could not register ${acc} for favorite ${index + 1}`)
+    return null
   })
-  if (activeFavoriteHotkeys.length) console.log(`[hotkey] favorites: ${activeFavoriteHotkeys.join(', ')}`)
+  const held = activeFavoriteHotkeys.filter(Boolean)
+  if (held.length) console.log(`[hotkey] favorites: ${held.join(', ')}`)
 }
 
-/** Every global chord, in one place, so a hotkey change re-registers them all. */
+/**
+ * Every global chord, in one place, so any change re-registers them all —
+ * in priority order, so when two rows ask for one chord the earlier row
+ * keeps it and the later one is told who has it.
+ */
 function registerAllHotkeys(): void {
+  if (hotkeysSuspended) { clearTimeout(hotkeysSuspended); hotkeysSuspended = null }
+  globalShortcut.unregisterAll()
+  claimedChords = new Map()
+  shortcutNotes = {}
   registerHotkey()
+  registerHalfHotkey()
   registerPickerHotkey()
   registerFavoriteHotkeys()
 }
 
-function registerHalfHotkey(): void {
-  if (HALF_HOTKEY === activeHotkey) return
-  try {
-    if (globalShortcut.register(HALF_HOTKEY, () => toggleWindowMode('half')) && globalShortcut.isRegistered(HALF_HOTKEY)) {
-      console.log(`[hotkey] half view: ${HALF_HOTKEY}`)
-      return
-    }
-  } catch {
-    /* fall through */
+/** Settings → Keyboard shortcuts: each chord as preferred, as registered, and why they differ. */
+function shortcutRows(): ShortcutRow[] {
+  const row = (id: ShortcutId, preferred: string, active: string | null, fallback: string): ShortcutRow => {
+    const note = active && sameChord(active, preferred) ? undefined : shortcutNotes[id]
+    return { id, label: SHORTCUT_LABELS[id], preferred, active, default: fallback, ...(note ? { note } : {}) }
   }
-  globalShortcut.unregister(HALF_HOTKEY)
-  console.warn(`[hotkey] could not register ${HALF_HOTKEY} for the half view`)
+  return [
+    row('hotkey', hotkeyPref, activeHotkey, config.hotkey),
+    row('halfHotkey', halfHotkeyPref, activeHalfHotkey, SHORTCUT_DEFAULTS.halfHotkey),
+    row('pickerHotkey', pickerHotkeyPref, activePickerHotkey, SHORTCUT_DEFAULTS.pickerHotkey),
+    ...favoriteHotkeyPrefs.map((preferred, index) =>
+      row(`favorite${index + 1}` as ShortcutId, preferred, activeFavoriteHotkeys[index] ?? null, SHORTCUT_DEFAULTS.favoriteHotkeys[index]))
+  ]
 }
 
 // --- status assembly --------------------------------------------------------
@@ -1540,7 +1583,9 @@ function settingsView() {
   return {
     hotkey: activeHotkey ?? hotkeyPref,
     pickerHotkey: activePickerHotkey ?? '',
-    favoriteHotkeys: [...activeFavoriteHotkeys],
+    favoriteHotkeys: [...favoriteHotkeyPrefs],
+    pickerFavoriteModifier,
+    shortcuts: shortcutRows(),
     notifications: notify,
     launchAtLogin: app.getLoginItemSettings().openAtLogin,
     mock: mockMode,
@@ -1737,15 +1782,26 @@ function registerIpc(): void {
       message: 'Opened Codex and copied /hooks. Paste it and trust the TaylorMade Agent Monitor hooks, then send Codex any prompt — the first event it reports confirms trust and clears this.'
     }
   })
+  ipcMain.on('hotkeys:suspend', (event, on: unknown) => {
+    if (typeof on !== 'boolean' || event.sender !== win?.webContents) return
+    if (!on) { registerAllHotkeys(); return }
+    globalShortcut.unregisterAll()
+    if (hotkeysSuspended) clearTimeout(hotkeysSuspended)
+    hotkeysSuspended = setTimeout(() => { hotkeysSuspended = null; registerAllHotkeys() }, HOTKEY_SUSPEND_MS)
+  })
   ipcMain.handle('settings:set', (_e, rawPatch: AppSettingsPatch) => {
     const patch = validateMutableSettingsPatch(rawPatch)
     if (!patch) throw new Error('Invalid settings patch')
-    if ((patch.hotkey && patch.hotkey !== hotkeyPref) || (patch.pickerHotkey && patch.pickerHotkey !== pickerHotkeyPref)) {
+    // Any chord in the patch re-registers them all, even one that did not change:
+    // recording the same chord again is how a chord another app let go is retaken.
+    if (patch.hotkey || patch.pickerHotkey || patch.halfHotkey || patch.favoriteHotkeys) {
       if (patch.hotkey) { hotkeyPref = patch.hotkey; settings.hotkey = patch.hotkey }
       if (patch.pickerHotkey) { pickerHotkeyPref = patch.pickerHotkey; settings.pickerHotkey = patch.pickerHotkey }
-      globalShortcut.unregisterAll()
+      if (patch.halfHotkey) { halfHotkeyPref = patch.halfHotkey; settings.halfHotkey = patch.halfHotkey }
+      if (patch.favoriteHotkeys) { favoriteHotkeyPrefs = [...patch.favoriteHotkeys]; settings.favoriteHotkeys = [...patch.favoriteHotkeys] }
       registerAllHotkeys()
     }
+    if (patch.pickerFavoriteModifier) { pickerFavoriteModifier = patch.pickerFavoriteModifier; settings.pickerFavoriteModifier = patch.pickerFavoriteModifier }
     if (typeof patch.notifications === 'boolean') { notify = patch.notifications; settings.notifications = patch.notifications }
     if (patch.sizeMode) { applySizeMode(patch.sizeMode); settings.sizeMode = patch.sizeMode }
     if (patch.windowMaterial) {
@@ -2464,6 +2520,14 @@ function registerIpc(): void {
     void pickClip(id, mode)
   })
   ipcMain.on('picker:close', () => hidePicker())
+  // The footer's "keys" link: close the picker, open the workspace at Settings →
+  // Keyboard shortcuts. No arguments, and only from the picker's own page.
+  ipcMain.on('picker:settings', (event, ...args: unknown[]) => {
+    if (args.length || event.sender !== pickerWindow()?.webContents) return
+    hidePicker()
+    showWindow()
+    win?.webContents.send('workspace:command', { kind: 'settings', section: 'shortcuts' })
+  })
   ipcMain.on('window:hide', () => hideWindow())
   ipcMain.on('window:edge-drag', (_event, edge: unknown, delta: unknown) => {
     if ((edge !== 'left' && edge !== 'right') || typeof delta !== 'number' || !Number.isFinite(delta) || Math.abs(delta) > 10_000) return
@@ -2478,7 +2542,7 @@ function registerIpc(): void {
 function buildTrayMenu(): Menu {
   const items: Electron.MenuItemConstructorOptions[] = [
     { label: activeHotkey ? `Show / Hide  (${activeHotkey})` : 'Show / Hide', click: toggleWindow },
-    { label: `Half view  (${HALF_HOTKEY})`, click: () => toggleWindowMode('half') },
+    { label: activeHalfHotkey ? `Half view  (${activeHalfHotkey})` : 'Half view', click: () => toggleWindowMode('half') },
     { label: activePickerHotkey ? `Clipboard picker  (${activePickerHotkey})` : 'Clipboard picker', click: () => showPicker() },
     { type: 'separator' },
     { label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (i) => app.setLoginItemSettings({ openAtLogin: i.checked, args: ['--hidden'] }) },
@@ -2545,6 +2609,11 @@ if (!gotLock) {
     loadUsageHistory()
     if (settings.hotkey) hotkeyPref = settings.hotkey
     if (typeof settings.pickerHotkey === 'string' && settings.pickerHotkey.trim()) pickerHotkeyPref = settings.pickerHotkey.trim()
+    const storedHalf = normalizeAccelerator(settings.halfHotkey)
+    if (storedHalf) halfHotkeyPref = storedHalf
+    const storedFavorites = normalizeFavoriteHotkeys(settings.favoriteHotkeys)
+    if (storedFavorites) favoriteHotkeyPrefs = storedFavorites
+    if (isPickerFavoriteModifier(settings.pickerFavoriteModifier)) pickerFavoriteModifier = settings.pickerFavoriteModifier!
     // Capture tooling pins the boot view; the persisted mode must not override it.
     if (!process.env.CLAUDE_WATCH_CAPTURE_HALF && (settings.sizeMode === 'full' || settings.sizeMode === 'left' || settings.sizeMode === 'right')) applySizeMode(settings.sizeMode)
     if (settings.windowMaterial === 'none' || settings.windowMaterial === 'mica' || settings.windowMaterial === 'acrylic') materialPref = settings.windowMaterial
@@ -2722,6 +2791,7 @@ if (!gotLock) {
         else w.loadFile(join(__dirname, '../renderer/index.html'), { query: { window: 'picker' } })
       },
       copyClip: copyClipToClipboard,
+      favoriteModifier: () => pickerFavoriteModifier,
       log: clipboardLog
     })
     registerAllHotkeys()

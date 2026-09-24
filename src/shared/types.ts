@@ -351,10 +351,33 @@ export type SizeMode = 'full' | 'left' | 'right'
 /** The system-drawn backdrop behind the workspace (Windows 11 22H2+; ignored elsewhere). */
 export type WindowMaterial = 'none' | 'mica' | 'acrylic'
 
+export type PickerFavoriteModifier = 'Alt' | 'Control'
+
+export type ShortcutId = 'hotkey' | 'halfHotkey' | 'pickerHotkey' | 'favorite1' | 'favorite2' | 'favorite3'
+
+/** One global chord as Settings shows it. */
+export interface ShortcutRow {
+  id: ShortcutId
+  label: string
+  /** What the user asked for. */
+  preferred: string
+  /** What is registered right now (a fallback for summon/picker), or null. */
+  active: string | null
+  default: string
+  /** Why `active` is not `preferred`: held by another app, or used by another of our rows. */
+  note?: string
+}
+
 export interface AppSettingsPatch {
   hotkey?: string
   /** The quick picker's chord (default Control+Alt+V); falls back like the summon hotkey. */
   pickerHotkey?: string
+  /** The transient half view (default Alt+Q). */
+  halfHotkey?: string
+  /** The three global paste-favorite chords, in favorite order (default Alt+Shift+1..3). Always all three. */
+  favoriteHotkeys?: string[]
+  /** The modifier of the picker's own favorite keys: Alt+1–3 or Ctrl+1–3. */
+  pickerFavoriteModifier?: PickerFavoriteModifier
   notifications?: boolean
   launchAtLogin?: boolean
   mock?: boolean
@@ -370,8 +393,11 @@ export interface AppSettings {
   hotkey: string
   /** The chord the picker actually got (its preference, or the fallback that registered), or '' when none did. */
   pickerHotkey: string
-  /** Which of Shift+Alt+1..3 registered — another app may hold one. */
+  /** The three paste-favorite chords as preferred (the rows in `shortcuts` say which registered). */
   favoriteHotkeys: string[]
+  pickerFavoriteModifier: PickerFavoriteModifier
+  /** Settings → Keyboard shortcuts: every chord, preferred against what actually registered. */
+  shortcuts: ShortcutRow[]
   notifications: boolean
   launchAtLogin: boolean
   mock: boolean

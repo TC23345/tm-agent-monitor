@@ -22,6 +22,7 @@ for (const [source, target] of [
   writeFileSync(target, output)
 }
 copyFileSync('src/shared/pricing.mjs', join(fixtureRoot, 'shared', 'pricing.mjs'))
+copyFileSync('src/shared/hotkeys.mjs', join(fixtureRoot, 'shared', 'hotkeys.mjs'))
 after(() => rmSync(fixtureRoot, { recursive: true, force: true }))
 
 const { AgentStore, validateMutableSettingsPatch } = await import(pathToFileURL(join(fixtureRoot, 'main', 'store.js')).href)
@@ -77,7 +78,22 @@ test('settings patches allow only mutable fields with bounded runtime types', ()
   assert.deepEqual(validateMutableSettingsPatch({ pickerHotkey: ' Control+Alt+V ' }), { pickerHotkey: 'Control+Alt+V' })
   assert.equal(validateMutableSettingsPatch({ pickerHotkey: '' }), null)
   assert.equal(validateMutableSettingsPatch({ pickerHotkey: 'x'.repeat(81) }), null)
-  assert.equal(validateMutableSettingsPatch({ favoriteHotkeys: ['Shift+Alt+1'] }), null, 'read-only: which favorites registered is reported, not set')
+  // Keyboard shortcuts: every chord through the one accelerator rule, stored in one spelling.
+  assert.deepEqual(validateMutableSettingsPatch({ hotkey: 'ctrl+shift+space' }), { hotkey: 'Control+Shift+Space' })
+  assert.equal(validateMutableSettingsPatch({ hotkey: 'Shift+A' }), null, 'a global chord needs Ctrl, Alt or Win')
+  assert.equal(validateMutableSettingsPatch({ hotkey: 'Control+Alt' }), null, 'modifiers alone are no chord')
+  assert.deepEqual(validateMutableSettingsPatch({ halfHotkey: 'Alt+Q' }), { halfHotkey: 'Alt+Q' })
+  assert.equal(validateMutableSettingsPatch({ halfHotkey: 'Alt+Nope' }), null)
+  assert.deepEqual(
+    validateMutableSettingsPatch({ favoriteHotkeys: ['Shift+Alt+1', 'Control+Alt+2', 'Alt+Shift+F3'] }),
+    { favoriteHotkeys: ['Alt+Shift+1', 'Control+Alt+2', 'Alt+Shift+F3'] }
+  )
+  assert.equal(validateMutableSettingsPatch({ favoriteHotkeys: ['Shift+Alt+1'] }), null, 'always all three')
+  assert.equal(validateMutableSettingsPatch({ favoriteHotkeys: ['Alt+1', 'Alt+2', 'Shift+3'] }), null)
+  assert.equal(validateMutableSettingsPatch({ favoriteHotkeys: 'Alt+1,Alt+2,Alt+3' }), null)
+  assert.deepEqual(validateMutableSettingsPatch({ pickerFavoriteModifier: 'Control' }), { pickerFavoriteModifier: 'Control' })
+  assert.equal(validateMutableSettingsPatch({ pickerFavoriteModifier: 'Shift' }), null)
+  assert.equal(validateMutableSettingsPatch({ shortcuts: [] }), null, 'the rows are reported, never set')
   assert.deepEqual(validateMutableSettingsPatch({ sizeMode: 'left' }), { sizeMode: 'left' })
   assert.deepEqual(validateMutableSettingsPatch({ sizeMode: 'full' }), { sizeMode: 'full' })
   assert.equal(validateMutableSettingsPatch({ sizeMode: 'half' }), null)

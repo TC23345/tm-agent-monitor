@@ -1,5 +1,6 @@
 import { DEFAULTS, type Agent, type AgentEventV1, type AppSettingsPatch, type HookReport, type ProviderId, type ToolKind, type ActivityEvent } from '../shared/types.js'
 import { estimateCostUsd } from '../shared/pricing.mjs'
+import { isPickerFavoriteModifier, normalizeAccelerator, normalizeFavoriteHotkeys } from '../shared/hotkeys.mjs'
 
 export type { AgentEventKind, ProviderId } from '../shared/types.js'
 export type StoreEventV1 = AgentEventV1
@@ -8,17 +9,29 @@ export type StoreEventV1 = AgentEventV1
 export function validateMutableSettingsPatch(value: unknown): AppSettingsPatch | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const input = value as Record<string, unknown>
-  const allowed = new Set(['hotkey', 'pickerHotkey', 'notifications', 'launchAtLogin', 'mock', 'sizeMode', 'windowMaterial', 'pushUrl', 'pushAfterMin'])
+  const allowed = new Set([
+    'hotkey', 'pickerHotkey', 'halfHotkey', 'favoriteHotkeys', 'pickerFavoriteModifier',
+    'notifications', 'launchAtLogin', 'mock', 'sizeMode', 'windowMaterial', 'pushUrl', 'pushAfterMin'
+  ])
   if (Object.keys(input).some((key) => !allowed.has(key))) return null
 
   const result: AppSettingsPatch = {}
-  for (const key of ['hotkey', 'pickerHotkey'] as const) {
+  // Chords go through the one accelerator rule (Settings → Keyboard shortcuts).
+  for (const key of ['hotkey', 'pickerHotkey', 'halfHotkey'] as const) {
     if (key in input) {
-      const v = input[key]
-      if (typeof v !== 'string' || v.length < 1 || v.length > 80 || /[\r\n\0]/.test(v)) return null
-      result[key] = v.trim()
-      if (!result[key]) return null
+      const chord = normalizeAccelerator(input[key])
+      if (!chord) return null
+      result[key] = chord
     }
+  }
+  if ('favoriteHotkeys' in input) {
+    const chords = normalizeFavoriteHotkeys(input.favoriteHotkeys)
+    if (!chords) return null
+    result.favoriteHotkeys = chords
+  }
+  if ('pickerFavoriteModifier' in input) {
+    if (!isPickerFavoriteModifier(input.pickerFavoriteModifier)) return null
+    result.pickerFavoriteModifier = input.pickerFavoriteModifier as AppSettingsPatch['pickerFavoriteModifier']
   }
   if ('sizeMode' in input) {
     if (input.sizeMode !== 'full' && input.sizeMode !== 'left' && input.sizeMode !== 'right') return null

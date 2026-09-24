@@ -96,6 +96,8 @@ export function App() {
   const [gridDropHot, setGridDropHot] = useState(false)
   const snapRef = useRef<StatusSnapshot | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /** Where Settings opens scrolled to (the picker's "keys" link asks for the shortcuts table). */
+  const [settingsSection, setSettingsSection] = useState<'shortcuts' | undefined>(undefined)
   // First-run hook installation from the Agents pane's empty state.
   const [hookSetup, setHookSetup] = useState<{ busy: 'claude' | 'codex' | null; msg: string | null }>({ busy: null, msg: null })
   // Rebuild & relaunch: one state shared by the title-bar chip, File menu, and
@@ -298,6 +300,8 @@ export function App() {
   // Ctrl+Shift+P rather than Ctrl+P alone.
   const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => {})
   onKeyRef.current = (e: KeyboardEvent) => {
+      // Settings → Keyboard shortcuts is recording: the next chord is its, not ours.
+      if (document.querySelector('[data-shortcut-recording]')) return
       const inTerminal = !!(e.target as HTMLElement)?.closest?.('.termpane')
       const ctrl = e.ctrlKey && !e.altKey && !e.metaKey
       if (ctrl && e.shiftKey && (e.key === 'P' || e.key === 'p')) {
@@ -383,6 +387,7 @@ export function App() {
       case 'activity': openActivity(); break
       case 'notes': openNotes(); break
       case 'layout': applyLayout(raw.name); break
+      case 'settings': setSettingsSection(raw.section); setSettingsOpen(true); break
       case 'open': {
         const label = raw.cwd ? raw.cwd.split(/[\\/]/).pop() : undefined
         if (raw.sessionId) {
@@ -1371,7 +1376,7 @@ export function App() {
       />
 
       {palette && <CommandPalette items={paletteItems()} onClose={() => setPalette(false)} />}
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsPanel section={settingsSection} onClose={() => { setSettingsOpen(false); setSettingsSection(undefined) }} />}
       {newProjectOpen && <NewProject onClose={() => setNewProjectOpen(false)} />}
       {layoutDialog && (
         <NameDialog

@@ -21,6 +21,8 @@ export interface PickerDeps {
   load: (win: BrowserWindow) => void
   /** Put a clip on the clipboard (text, file list, or the image); false when it is gone. */
   copyClip: (id: string) => Promise<boolean>
+  /** Alt or Control: the modifier of the picker's own favorite keys, read on every open. */
+  favoriteModifier: () => 'Alt' | 'Control'
   log: (line: string) => void
 }
 
@@ -85,8 +87,9 @@ export function showPicker(): void {
   win.show()
   win.focus()
   shownAt = Date.now()
-  // After show, so the pop-in runs against painted frames.
-  win.webContents.send('picker:phase', 'enter', place.origin)
+  // After show, so the pop-in runs against painted frames. The favorite keys'
+  // modifier rides along, so a Settings change reaches the next open.
+  win.webContents.send('picker:phase', 'enter', place.origin, deps?.favoriteModifier() ?? 'Alt')
 }
 
 export function hidePicker(): void {

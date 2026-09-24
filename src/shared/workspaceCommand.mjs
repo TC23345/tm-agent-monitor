@@ -65,6 +65,8 @@ export function isWorkspaceCommand(value) {
   switch (c.kind) {
     case 'palette': case 'usage': case 'activity': case 'notes': case 'show': case 'hide': return true
     case 'layout': return typeof c.name === 'string' && c.name.length > 0 && c.name.length <= MAX_NAME
+    // Only main sends this (the picker's "keys" link); the CLI parser never produces it.
+    case 'settings': return Object.keys(c).every((k) => k === 'kind' || k === 'section') && (c.section === undefined || c.section === 'shortcuts')
     case 'open':
       return LAUNCHES.has(c.launch)
         && (c.cwd === undefined || (typeof c.cwd === 'string' && c.cwd.length > 0 && c.cwd.length <= MAX_PATH && !/[\r\n\0]/.test(c.cwd)))

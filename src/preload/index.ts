@@ -189,6 +189,8 @@ const api = {
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
   diagnoseSystem: (id?: string): Promise<SystemDiagnostic[]> => ipcRenderer.invoke('system:diagnose', id),
   setSettings: (patch: AppSettingsPatch): Promise<AppSettings> => ipcRenderer.invoke('settings:set', patch),
+  /** Settings → Keyboard shortcuts is recording: let go of the global chords so the next one reaches the page. */
+  suspendHotkeys: (on: boolean): void => ipcRenderer.send('hotkeys:suspend', on),
   quit: () => ipcRenderer.send('app:quit')
 }
 

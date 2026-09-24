@@ -3,6 +3,7 @@ import { AppWindow, Bot, Files, Globe, Image, Pencil, Search, Star, Terminal } f
 import type { ClipSummary, ClipsListing } from '@shared/types'
 import { appLabel, fromSource, inGroup, orderFavorites, sizeLabel, sourceLabel } from '@shared/clips.mjs'
 import { fuzzyScore } from '@shared/palette.mjs'
+import { isPickerFavoriteModifier, modifierLabel } from '@shared/hotkeys.mjs'
 import { tid } from '../testid'
 
 /** How many rows the enter animation staggers (Beautiful UI: 20 ms each, at most 8). */
@@ -38,7 +39,8 @@ type Chip = { id: string; label: string; count: number; dot?: string }
  * bar shape — a 28px panel with a pill search — over Beautiful UI's search
  * results: favorites pinned first, then recent, filter chips, one gliding
  * highlight, a kbd footer. Enter pastes into the window the picker opened
- * over, Shift+Enter copies only, Alt+1–3 take a favorite, Escape closes.
+ * over, Shift+Enter copies only, Alt+1–3 (or Ctrl+1–3, Settings → Keyboard
+ * shortcuts) take a favorite, Escape closes.
  * It reads the same list as the Clipboard pane through IPC and re-reads on
  * `clips:changed`; nothing is held per window.
  */
@@ -52,6 +54,8 @@ export function Picker() {
   const [notice, setNotice] = useState<string | null>(null)
   const [thumbs, setThumbs] = useState<Map<string, string>>(new Map())
   const [now, setNow] = useState(Date.now())
+  /** The favorite keys' modifier, as main sent it with the last open. */
+  const [favMod, setFavMod] = useState<'Alt' | 'Control'>('Alt')
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const [glide, setGlide] = useState<{ top: number; height: number } | null>(null)
@@ -66,9 +70,10 @@ export function Picker() {
   useEffect(() => {
     void refresh()
     const offChanged = window.picker.onClipsChanged(() => { void refresh() })
-    const offPhase = window.picker.onPhase((phase, corner) => {
+    const offPhase = window.picker.onPhase((phase, corner, modifier) => {
       if (phase === 'enter') {
         if (corner) setOrigin(corner)
+        if (isPickerFavoriteModifier(modifier)) setFavMod(modifier as 'Alt' | 'Control')
         setQuery('')
         setFilter('all')
         setActive(0)
@@ -147,12 +152,19 @@ export function Picker() {
     window.picker.pick(clip.id, mode)
   }
 
+  /** 1–3 when the key is the favorite modifier plus a digit (and nothing else), else 0. By code: Digit1 on any layout. */
+  const favoriteKey = (e: React.KeyboardEvent): number => {
+    const held = favMod === 'Alt' ? e.altKey && !e.ctrlKey : e.ctrlKey && !e.altKey
+    const digit = /^Digit([1-3])$/.exec(e.code)
+    return held && !e.shiftKey && !e.metaKey && digit ? Number(digit[1]) : 0
+  }
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') setActive((i) => Math.min(i + 1, Math.max(0, rows.length - 1)))
     else if (e.key === 'ArrowUp') setActive((i) => Math.max(i - 1, 0))
     else if (e.key === 'Enter') pick(rows[active], e.shiftKey ? 'copy' : 'paste')
     else if (e.key === 'Escape') window.picker.close()
-    else if (e.altKey && /^[1-3]$/.test(e.key)) pick(favorites[Number(e.key) - 1], 'paste')
+    else if (favoriteKey(e)) pick(favorites[favoriteKey(e) - 1], 'paste')
     else if (e.key === 'Tab') {
       const at = chips.findIndex((c) => c.id === filter)
       const next = chips[(at + (e.shiftKey ? chips.length - 1 : 1)) % chips.length]
@@ -216,7 +228,7 @@ export function Picker() {
                 <span className="picker-title">{c.title || '(blank)'}</span>
                 <span className="picker-meta">{[sourceLabel(c.source) || appLabel(c.source.exe), c.bytes >= 4096 ? sizeLabel(c.bytes) : null].filter(Boolean).join(' · ')}</span>
                 <span className="picker-when">{ago(c.copiedAt, now)}</span>
-                {favAt >= 0 && favAt < 3 && <kbd className="picker-favkey">Alt+{favAt + 1}</kbd>}
+                {favAt >= 0 && favAt < 3 && <kbd className="picker-favkey">{modifierLabel(favMod)}+{favAt + 1}</kbd>}
                 {c.favorite && favAt >= 3 && <Star className="picker-star" strokeWidth={2} />}
               </div>
             )
@@ -229,9 +241,10 @@ export function Picker() {
         <div className="picker-foot">
           <span><kbd>↵</kbd> paste</span>
           <span><kbd>⇧</kbd><kbd>↵</kbd> copy only</span>
-          <span><kbd>Alt</kbd><kbd>1–3</kbd> favorites</span>
+          <span><kbd>{modifierLabel(favMod)}</kbd><kbd>1–3</kbd> favorites</span>
           <span><kbd>Tab</kbd> filter</span>
           <span><kbd>Esc</kbd> close</span>
+          <button className="picker-keys" onClick={() => window.picker.openKeySettings()} title="Change these keys in Settings → Keyboard shortcuts" data-testid="picker-keys">keys</button>
         </div>
       </div>
     </div>

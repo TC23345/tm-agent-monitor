@@ -1,6 +1,7 @@
 // The quick picker's bridge: the smallest surface that lists, picks and
-// closes. Nothing else from the workspace preload — a popup that can only
-// read history and hand a clip back has nothing to expose.
+// closes (and opens its keys in Settings). Nothing else from the workspace
+// preload — a popup that can only read history and hand a clip back has
+// nothing to expose.
 import { contextBridge, ipcRenderer } from 'electron'
 import type { ClipsListing } from '../shared/types.js'
 
@@ -13,9 +14,11 @@ const api = {
   pick: (id: string, mode: 'paste' | 'copy') => ipcRenderer.send('picker:pick', id, mode),
   /** Escape or a click on the margin. */
   close: () => ipcRenderer.send('picker:close'),
-  /** Open/close cue from main, with the pop-in's origin corner on `enter`. */
-  onPhase: (cb: (phase: 'enter' | 'exit', origin?: string) => void) => {
-    const listener = (_e: unknown, phase: 'enter' | 'exit', origin?: string) => cb(phase, origin)
+  /** The footer's "keys" link: close, and open the workspace at Settings → Keyboard shortcuts. */
+  openKeySettings: () => ipcRenderer.send('picker:settings'),
+  /** Open/close cue from main, with the pop-in's origin corner and the favorite keys' modifier on `enter`. */
+  onPhase: (cb: (phase: 'enter' | 'exit', origin?: string, favoriteModifier?: string) => void) => {
+    const listener = (_e: unknown, phase: 'enter' | 'exit', origin?: string, favoriteModifier?: string) => cb(phase, origin, favoriteModifier)
     ipcRenderer.on('picker:phase', listener)
     return () => {
       ipcRenderer.removeListener('picker:phase', listener)

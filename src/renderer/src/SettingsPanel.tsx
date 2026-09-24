@@ -1,24 +1,25 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { AppSettings, AppSettingsPatch, ProviderId, SystemDiagnostic } from '@shared/types'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { AppSettings, AppSettingsPatch, ProviderId, ShortcutId, ShortcutRow, SystemDiagnostic } from '@shared/types'
 import { providerStatus } from '@shared/health.mjs'
+import { chordFromKeydown, modifierLabel, sameChord } from '@shared/hotkeys.mjs'
 import { ArrowLeft, CheckCircle2, CircleAlert, RefreshCw, X } from 'lucide-react'
 import { ProviderBadge } from './ProviderBadge'
 
-/** Build an Electron accelerator string from a keydown event (needs a modifier). */
-function accelFromEvent(e: KeyboardEvent): string | null {
-  const mods: string[] = []
-  if (e.ctrlKey) mods.push('Control')
-  if (e.altKey) mods.push('Alt')
-  if (e.shiftKey) mods.push('Shift')
-  if (e.metaKey) mods.push('Super')
-  const k = e.key
-  if (['Control', 'Alt', 'Shift', 'Meta', 'OS'].includes(k)) return null // modifier alone
-  if (mods.length === 0) return null // require at least one modifier
-  let key = k
-  if (k === ' ') key = 'Space'
-  else if (k.startsWith('Arrow')) key = k.slice(5)
-  else if (k.length === 1) key = k.toUpperCase()
-  return [...mods, key].join('+')
+/** The patch that sets one row's chord: the three favorites always travel as one array. */
+function shortcutPatch(s: AppSettings, id: ShortcutId, chord: string): AppSettingsPatch {
+  const fav = /^favorite([1-3])$/.exec(id)
+  if (!fav) return { [id]: chord } as AppSettingsPatch
+  const chords = [...s.favoriteHotkeys]
+  chords[Number(fav[1]) - 1] = chord
+  return { favoriteHotkeys: chords }
+}
+
+/** What a row's result reads after a Record or Reset. */
+function shortcutOutcome(row: ShortcutRow | undefined): string {
+  if (!row) return ''
+  if (row.active && sameChord(row.active, row.preferred)) return `${row.label}: ${row.active} registered.`
+  if (row.active) return `${row.label}: ${row.preferred} ${row.note ?? 'is unavailable'} — using ${row.active} instead.`
+  return `${row.label}: ${row.preferred} ${row.note ?? 'not registered'}.`
 }
 
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
@@ -29,10 +30,15 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
   )
 }
 
-export function SettingsPanel({ onClose }: { onClose: () => void }) {
+export function SettingsPanel({ onClose, section }: { onClose: () => void; section?: 'shortcuts' }) {
   const [s, setS] = useState<AppSettings | null>(null)
-  /** Which chord is being captured: the summon hotkey or the quick picker's. */
-  const [capturing, setCapturing] = useState<'hotkey' | 'pickerHotkey' | null>(null)
+  /** The Keyboard shortcuts row recording its next chord, if any. */
+  const [recording, setRecording] = useState<ShortcutId | null>(null)
+  /** Why the last key pressed while recording is no shortcut (Shift+A…). */
+  const [recordHint, setRecordHint] = useState<string | null>(null)
+  /** The outcome of the last Record / Reset, under the table. */
+  const [shortcutMsg, setShortcutMsg] = useState<{ id: ShortcutId | 'pickerFavorites'; text: string; ok: boolean } | null>(null)
+  const shortcutsRef = useRef<HTMLElement>(null)
   const [updateMsg, setUpdateMsg] = useState<string | null>(null)
   const [hookMsg, setHookMsg] = useState<string | null>(null)
   const [hookBusy, setHookBusy] = useState<ProviderId | 'extension' | null>(null)
@@ -116,33 +122,69 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   }, [view])
 
   useEffect(() => {
-    if (capturing) return
+    if (recording) return
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); onClose() }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [capturing, onClose])
+  }, [recording, onClose])
 
+  /** Save one row's chord; main re-registers every chord and answers with the rows. */
+  const saveShortcut = useCallback((id: ShortcutId, chord: string) => {
+    if (!s) return
+    window.watch.setSettings(shortcutPatch(s, id, chord)).then((next) => {
+      setS(next)
+      const row = next.shortcuts.find((r) => r.id === id)
+      setShortcutMsg({ id, text: shortcutOutcome(row), ok: !!row?.active && sameChord(row.active, row.preferred) })
+    }).catch((error) => setShortcutMsg({ id, text: `Could not save: ${String(error)}`, ok: false }))
+  }, [s])
+
+  const startRecording = (id: ShortcutId) => {
+    setRecording(id)
+    setRecordHint(null)
+    setShortcutMsg(null)
+    // Let go of our global chords, so pressing one of them (Alt+Q…) reaches this page.
+    window.watch.suspendHotkeys(true)
+  }
+  const stopRecording = useCallback((saved: boolean) => {
+    setRecording(null)
+    setRecordHint(null)
+    if (!saved) window.watch.suspendHotkeys(false) // a save re-registers them itself
+  }, [])
+
+  // The Record button owns the next keydown: Escape cancels, a bare modifier
+  // waits, a chord a global shortcut cannot be says why, anything else saves.
   useEffect(() => {
-    if (!capturing) return
+    if (!recording) return
     const onKey = (e: KeyboardEvent) => {
       e.preventDefault()
       e.stopPropagation()
-      if (e.key === 'Escape') {
-        setCapturing(null)
-        return
-      }
-      const accel = accelFromEvent(e)
-      if (accel) {
-        const which = capturing
-        setCapturing(null)
-        apply({ [which]: accel })
-      }
+      const result = chordFromKeydown(e)
+      if ('cancel' in result) { stopRecording(false); return }
+      if ('pending' in result) return
+      if ('invalid' in result) { setRecordHint(result.invalid); return }
+      stopRecording(true)
+      saveShortcut(recording, result.accelerator)
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [capturing, apply])
+  }, [recording, saveShortcut, stopRecording])
+
+  // Closing mid-recording must not leave the global chords let go.
+  const recordingRef = useRef(recording)
+  recordingRef.current = recording
+  useEffect(() => () => { if (recordingRef.current) window.watch.suspendHotkeys(false) }, [])
+
+  // Opened from the picker's "keys" link: scroll to the table and mark it.
+  const [flashShortcuts, setFlashShortcuts] = useState(false)
+  useEffect(() => {
+    if (section !== 'shortcuts' || !s) return
+    shortcutsRef.current?.scrollIntoView({ block: 'start' })
+    setFlashShortcuts(true)
+    const t = setTimeout(() => setFlashShortcuts(false), 1600)
+    return () => clearTimeout(t)
+  }, [section, !!s])
 
   return (
     <div className="settings-overlay" onClick={onClose}>
@@ -162,35 +204,85 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         ) : (
           <div className={`settings-body settings-body--${view}`}>
             {view === 'general' && <>
-            <div className="srow">
-              <span className="slabel">Hotkey</span>
-              <button
-                className={`hotkey-btn ${capturing === 'hotkey' ? 'is-capturing' : ''}`}
-                onClick={() => setCapturing('hotkey')}
-                title="Click, then press a key combo (with a modifier). Esc to cancel."
-              >
-                {capturing === 'hotkey' ? 'Press a combo…' : s.hotkey}
-              </button>
-            </div>
-
-            <div className="srow">
-              <span className="slabel">Clipboard picker<span className="shint">{s.pickerHotkey ? 'the chord that registered' : 'no free chord — set one'}</span></span>
-              <button
-                className={`hotkey-btn ${capturing === 'pickerHotkey' ? 'is-capturing' : ''}`}
-                onClick={() => setCapturing('pickerHotkey')}
-                title="Click, then press a key combo (with a modifier). Esc to cancel."
-                data-testid="picker-hotkey"
-              >
-                {capturing === 'pickerHotkey' ? 'Press a combo…' : s.pickerHotkey || 'none'}
-              </button>
-            </div>
-
-            <div className="srow srow--info">
-              <span className="slabel">Paste favorites<span className="shint">Shift+Alt+1, 2, 3 paste the top three starred clips into whatever is focused</span></span>
-              <span className="shint" data-testid="favorite-hotkeys">
-                {s.favoriteHotkeys.length === 3 ? 'all three registered' : s.favoriteHotkeys.length ? `${s.favoriteHotkeys.join(', ')} registered` : 'none registered — another app holds them'}
-              </span>
-            </div>
+            <section
+              ref={shortcutsRef}
+              className={`shortcuts ${flashShortcuts ? 'is-flash' : ''}`}
+              aria-labelledby="shortcuts-title"
+              data-testid="settings-shortcuts"
+            >
+              <div className="shortcuts-head">
+                <span className="slabel" id="shortcuts-title">Keyboard shortcuts<span className="shint">global chords work from any app; Record, then press the chord (Esc cancels)</span></span>
+              </div>
+              <table className="shortcuts-table">
+                <thead>
+                  <tr><th scope="col">Action</th><th scope="col">Shortcut</th><th scope="col">Registered</th><th scope="col"><span className="sr-only">Change</span></th></tr>
+                </thead>
+                <tbody>
+                  {s.shortcuts.map((row) => {
+                    const live = !!row.active && sameChord(row.active, row.preferred)
+                    const isRecording = recording === row.id
+                    return (
+                      <tr key={row.id} className={isRecording ? 'is-recording' : ''} data-testid={`shortcut:${row.id}`}>
+                        <th scope="row">{row.label}</th>
+                        <td><kbd className="shortcut-chord" data-testid={`shortcut-preferred:${row.id}`}>{row.preferred}</kbd></td>
+                        <td className={`shortcut-state ${live ? 'is-live' : row.active ? 'is-fallback' : 'is-missing'}`} data-testid={`shortcut-active:${row.id}`}>
+                          {live ? <><CheckCircle2 className="ic-svg" strokeWidth={2} />{row.active}</>
+                            : row.active ? <><CircleAlert className="ic-svg" strokeWidth={2} />{row.active} <span className="shint">fallback — {row.note ?? 'preferred unavailable'}</span></>
+                            : <><CircleAlert className="ic-svg" strokeWidth={2} />{row.note ?? 'not registered'}</>}
+                        </td>
+                        <td className="shortcut-actions">
+                          <button
+                            className={`hotkey-btn is-compact ${isRecording ? 'is-capturing' : ''}`}
+                            onClick={() => (isRecording ? stopRecording(false) : startRecording(row.id))}
+                            aria-pressed={isRecording}
+                            data-shortcut-recording={isRecording || undefined}
+                            data-testid={`shortcut-record:${row.id}`}
+                            title="Record: press the new chord, Esc to cancel"
+                          >
+                            {isRecording ? (recordHint ?? 'Press a chord…') : 'Record'}
+                          </button>
+                          <button
+                            className="hotkey-btn is-compact"
+                            disabled={sameChord(row.preferred, row.default) && live}
+                            onClick={() => saveShortcut(row.id, row.default)}
+                            data-testid={`shortcut-reset:${row.id}`}
+                            title={`Reset to ${row.default}`}
+                          >
+                            Reset
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  <tr data-testid="shortcut:pickerFavorites">
+                    <th scope="row">Picker favorites<span className="shint">inside the picker only</span></th>
+                    <td><kbd className="shortcut-chord">{modifierLabel(s.pickerFavoriteModifier)}+1–3</kbd></td>
+                    <td className="shortcut-state is-live"><span className="shint">no global registration</span></td>
+                    <td className="shortcut-actions">
+                      <span className="sseg" role="radiogroup" aria-label="Picker favorite modifier">
+                        {(['Alt', 'Control'] as const).map((m) => (
+                          <button
+                            key={m}
+                            className={`hotkey-btn is-compact ${s.pickerFavoriteModifier === m ? 'is-on' : ''}`}
+                            aria-pressed={s.pickerFavoriteModifier === m}
+                            onClick={() => window.watch.setSettings({ pickerFavoriteModifier: m }).then((next) => {
+                              setS(next)
+                              setShortcutMsg({ id: 'pickerFavorites', text: `Picker favorites: ${modifierLabel(m)}+1–3 from the next open.`, ok: true })
+                            })}
+                            data-testid={`picker-fav-mod:${m}`}
+                          >
+                            {modifierLabel(m)}
+                          </button>
+                        ))}
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              {shortcutMsg && (
+                <div className={`shortcut-msg ${shortcutMsg.ok ? 'is-ok' : 'is-warn'}`} role="status" data-testid="shortcut-msg">{shortcutMsg.text}</div>
+              )}
+            </section>
 
             <div className="srow">
               <span className="slabel">Notifications<span className="shint">desktop "needs input" alerts</span></span>

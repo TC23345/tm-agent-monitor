@@ -1231,8 +1231,9 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 }
 .settings-card {
   width: 100%;
-  /* Full screen behind it — the dialog stays a dialog. */
-  max-width: 470px;
+  /* Full screen behind it — the dialog stays a dialog. Wide enough for the
+     four-column Keyboard shortcuts table. */
+  max-width: 540px;
   background: var(--elev);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -1309,6 +1310,32 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .shint { font-size: 11px; color: var(--faint); font-weight: 400; }
 .sval { font-size: 12px; color: var(--muted); }
 .srow--info .slabel { color: var(--muted); }
+/* Settings → Keyboard shortcuts: one table, preferred chord against what registered. */
+.shortcuts { padding: 11px 0; border-bottom: 1px solid var(--hairline); border-radius: 8px; transition: box-shadow 0.4s ease; scroll-margin-top: 8px; }
+.shortcuts.is-flash { box-shadow: 0 0 0 1px var(--accent), 0 0 0 5px rgba(217, 119, 87, 0.14); }
+.shortcuts-head { margin-bottom: 8px; }
+.shortcuts-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+.shortcuts-table col, .shortcuts-table th[scope="col"] { font-size: 10px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--faint); text-align: left; padding: 0 6px 5px 0; }
+.shortcuts-table th[scope="col"]:nth-child(1) { width: 29%; }
+.shortcuts-table th[scope="col"]:nth-child(2) { width: 25%; }
+.shortcuts-table th[scope="col"]:nth-child(3) { width: 25%; }
+.shortcuts-table tbody tr { border-top: 1px solid var(--hairline); }
+.shortcuts-table tbody tr.is-recording { background: rgba(217, 119, 87, 0.07); }
+.shortcuts-table tbody th, .shortcuts-table td { padding: 6px 6px 6px 0; vertical-align: middle; text-align: left; font-weight: 400; color: var(--text); }
+.shortcuts-table tbody th { display: table-cell; }
+.shortcuts-table tbody th .shint { display: block; }
+.shortcut-chord { font: 11px/1.3 ui-monospace, "Cascadia Code", Consolas, monospace; padding: 2px 6px; border-radius: 5px; border: 1px solid var(--border); background: var(--card); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: 100%; }
+.shortcut-state { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+.shortcut-state .ic-svg { display: inline-block; width: 12px; height: 12px; margin-right: 4px; vertical-align: -2px; }
+.shortcut-state.is-live .ic-svg { color: var(--st-running); }
+.shortcut-state.is-fallback, .shortcut-state.is-missing { color: var(--st-permission); }
+.shortcut-state .shint { display: block; }
+.shortcut-actions { text-align: right; white-space: nowrap; }
+.shortcut-actions .hotkey-btn + .hotkey-btn { margin-left: 4px; }
+.shortcut-actions .hotkey-btn.is-capturing { max-width: 150px; white-space: normal; text-align: left; line-height: 1.25; }
+.shortcut-msg { margin-top: 8px; font-size: 11.5px; color: var(--muted); }
+.shortcut-msg.is-warn { color: var(--st-permission); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 /* Result line under "Check for updates". */
 .supdate { padding: 2px 0 6px; font-size: 12px; color: var(--muted); text-align: right; }
 .hotkey-btn {
@@ -2028,6 +2055,8 @@ html[data-window="picker"], html[data-window="picker"] body, html[data-window="p
 .picker-notice { margin: 0 14px 6px; padding: 6px 10px; border-radius: var(--r-control); background: rgba(233, 162, 60, 0.12); color: var(--st-permission); font-size: 12px; animation: fade-in 140ms ease; }
 .picker-foot { display: flex; gap: 14px; justify-content: center; padding: 8px 14px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--ink-5); }
 .picker-foot kbd { font-size: 10px; padding: 1px 5px; min-width: 0; margin-right: 2px; }
+.picker-keys { border: 0; background: transparent; padding: 0; font: inherit; color: var(--ink-5); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.picker-keys:hover, .picker-keys:focus-visible { color: var(--text); }
 @media (prefers-reduced-motion: reduce) {
   .picker { transition: opacity 0.12s linear; transform: none; }
   .picker-row, .picker-notice { animation: none; }

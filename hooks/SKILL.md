@@ -70,6 +70,11 @@ with where it came from (the **Clipboard** pane). It is a resource for you:
   first line (the line is only the expander trigger; a note without it is
   a plain snippet). `GET /v1/snippets` lists them; `POST /v1/snippets
   {name, text, shortcut?}` writes one into `Snippets`, never overwriting.
+- **Don't quote key chords from memory.** The user sets them in Settings →
+  **Keyboard shortcuts** (summon, half view, the Ctrl+Alt+V picker, the three
+  paste-favorite chords, the picker's Alt/Ctrl+1–3), and another app may
+  hold one; that table shows which actually registered. When a chord matters,
+  point them there (the picker's footer has a *keys* link to it).
 
 ## Routes
 
