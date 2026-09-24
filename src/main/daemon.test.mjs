@@ -162,6 +162,7 @@ test('clipboard routes: list, get, add, paste and snippets are validated and ans
     list: (opts) => { calls.push(['list', opts]); return [...clips.values()].map(({ text: _t, ...rest }) => rest) },
     get: (id) => { const c = clips.get(id); return c ? { id: c.id, kind: c.kind, title: c.title, text: c.text } : null },
     add: async (input) => { calls.push(['add', input]); return input.text === 'refuse' ? { error: 'refused' } : { id: 'new-1' } },
+    annotate: async (source) => { calls.push(['annotate', source]); return source.url.includes('taken') },
     paste: async (id, terminalId) => {
       calls.push(['paste', id, terminalId])
       const c = clips.get(id)
@@ -210,10 +211,20 @@ test('clipboard routes: list, get, add, paste and snippets are validated and ans
     assert.equal((await post('/v1/clips', { text: 'x', groups: ['ok', 7] })).status, 400)
     assert.equal((await post('/v1/clips', { text: 'x', title: 'a\nb' })).status, 400)
     assert.equal((await post('/v1/clips', { text: 'refuse' })).status, 400)
-    const added = await post('/v1/clips', { text: 'git status', title: 'Status', groups: ['Work'], terminalId: MISSING })
+    const added = await post('/v1/clips', { text: 'git status', title: 'Status', groups: ['Work'], favorite: true, terminalId: MISSING })
     assert.equal(added.status, 201)
     assert.deepEqual(await added.json(), { id: 'new-1' })
-    assert.deepEqual(calls.at(-1), ['add', { text: 'git status', title: 'Status', groups: ['Work'], terminalId: MISSING }])
+    assert.deepEqual(calls.at(-1), ['add', { text: 'git status', title: 'Status', groups: ['Work'], favorite: true, terminalId: MISSING }])
+    assert.equal((await post('/v1/clips', { text: 'x', favorite: 'yes' })).status, 400)
+    // The extension's source-only annotation: no text, an http(s) URL, an optional title.
+    const annotated = await post('/v1/clips', { source: { url: 'https://github.com/taken', title: 'GitHub' } })
+    assert.equal(annotated.status, 200)
+    assert.deepEqual(await annotated.json(), { ok: true, annotated: true })
+    assert.deepEqual(calls.at(-1), ['annotate', { url: 'https://github.com/taken', title: 'GitHub' }])
+    assert.deepEqual(await (await post('/v1/clips', { source: { url: 'https://example.com/late' } })).json(), { ok: true, annotated: false })
+    assert.equal((await post('/v1/clips', { source: { url: 'javascript:alert(1)' } })).status, 400)
+    assert.equal((await post('/v1/clips', { source: { url: 'https://x.y', text: 'never' } })).status, 400)
+    assert.equal((await post('/v1/clips', { source: { url: 'https://x.y' }, text: 'both' })).status, 400, 'text and source together is neither shape')
 
     assert.equal((await post('/v1/clips/clip-1/paste', { terminalId: 'nope' })).status, 400)
     assert.equal((await post('/v1/clips/clip-1/paste', { enter: true })).status, 400)

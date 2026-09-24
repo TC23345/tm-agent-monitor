@@ -33,6 +33,14 @@ extraResources:
       - focus-worker.mjs
       - report.mjs
       - install.mjs
+      # The Chrome extension's native-messaging host (PRD §3.3): the manifest
+      # Chrome reads points at clip-host.cmd here.
+      - clip-host.mjs
+      - clip-host.cmd
+      - clipHostCore.mjs
+  # The unpacked Chrome extension itself, loaded from resources/extension.
+  - from: extension
+    to: extension
   - from: src/native
     to: native
     filter:

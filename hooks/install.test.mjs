@@ -9,6 +9,7 @@ import {
   commandFor,
   getInstallStatus,
   isOwnedHandler,
+  reconcileHost,
   reconcileProvider
 } from './install.mjs'
 
@@ -99,6 +100,43 @@ test('repair migrates a legacy report hook from an arbitrary old checkout', () =
     const installed = JSON.parse(readFileSync(path, 'utf8'))
     const commands = Object.values(installed.hooks).flatMap((groups) => groups.flatMap((group) => group.hooks.map((hook) => hook.command)))
     assert.equal(commands.some((command) => command.includes('old-checkout')), false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the native host registers a manifest and both browser keys, reports repair for another copy, and removes cleanly', () => {
+  const { dir, path } = tempConfig('com.taylormade.clip.json')
+  try {
+    const calls = []
+    const run = (args) => { calls.push(args); return { status: 0, stdout: '', stderr: '' } }
+    const hostPath = join(dir, 'clip-host.cmd')
+    assert.deepEqual(reconcileHost('status', { manifestPath: path, hostPath, run }).installed, false)
+    const installed = reconcileHost('install', { manifestPath: path, hostPath, run })
+    assert.equal(installed.installed, true)
+    assert.equal(installed.changed, true)
+    assert.equal(installed.needsRepair, false)
+    const manifest = JSON.parse(readFileSync(path, 'utf8'))
+    assert.equal(manifest.name, 'com.taylormade.clip')
+    assert.equal(manifest.type, 'stdio')
+    assert.equal(manifest.path, hostPath)
+    assert.deepEqual(manifest.allowed_origins, [installed.extensionOrigin])
+    assert.deepEqual(calls, [
+      ['add', 'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.taylormade.clip', '/ve', '/t', 'REG_SZ', '/d', path, '/f'],
+      ['add', 'HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.taylormade.clip', '/ve', '/t', 'REG_SZ', '/d', path, '/f']
+    ])
+    assert.equal(reconcileHost('install', { manifestPath: path, hostPath, run }).changed, false, 'idempotent')
+    // Written by another checkout of the app: still ours, needs repair.
+    const other = reconcileHost('status', { manifestPath: path, hostPath: join(dir, 'elsewhere', 'clip-host.cmd'), run })
+    assert.deepEqual([other.installed, other.needsRepair], [false, true])
+    assert.equal(reconcileHost('repair', { manifestPath: path, hostPath: join(dir, 'elsewhere', 'clip-host.cmd'), run }).installed, true)
+    assert.equal(JSON.parse(readFileSync(path, 'utf8')).path, join(dir, 'elsewhere', 'clip-host.cmd'))
+    calls.length = 0
+    const removed = reconcileHost('remove', { manifestPath: path, hostPath, run })
+    assert.equal(removed.installed, false)
+    assert.equal(existsSync(path), false)
+    assert.deepEqual(calls.map((c) => c[0]), ['delete', 'delete'])
+    assert.throws(() => reconcileHost('install', { manifestPath: path, hostPath, run: () => ({ status: 1, stderr: 'ERROR: Access is denied.' }) }), /Access is denied/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

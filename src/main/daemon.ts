@@ -30,7 +30,9 @@ export interface ClipsApi {
   list(opts: { q: string; group: string; limit: number }): unknown[]
   get(id: string): { id: string; kind: string; title: string; text: string } | null
   /** Put text on the user's clipboard and in history, attributed to the session in `terminalId`. */
-  add(input: { text: string; title?: string; groups?: string[]; terminalId?: string }): Promise<{ id: string } | { error: string }>
+  add(input: { text: string; title?: string; groups?: string[]; favorite?: boolean; terminalId?: string }): Promise<{ id: string } | { error: string }>
+  /** The Chrome extension names the page the last copy came from — never the text. True when a clip took it. */
+  annotate(source: { url: string; title?: string }): Promise<boolean>
   /** Type a clip into a terminal; with no terminal, copy it only. */
   paste(id: string, terminalId?: string): Promise<'ok' | 'copied' | 'missing' | 'not-text' | 'no-terminal' | 'exited'>
   snippets(): Promise<{ name: string; shortcut?: string; text: string }[]>
@@ -151,7 +153,8 @@ const NOT_FOUND = { error: 'not found' }
  * GET  /v1/terminals/:id/output     ?lines=1..2000 → last lines, escapes stripped
  * GET  /v1/agents/:id/wait          ?until=running|waiting|complete|idle|ended&timeout=ms → long-poll
  * GET  /v1/clips                    ?q=&group=&limit=1..200 → clipboard history summaries, newest first
- * POST /v1/clips                    {text, title?, groups?, terminalId?} → on the clipboard and in history (201)
+ * POST /v1/clips                    {text, title?, groups?, favorite?, terminalId?} → on the clipboard and in history (201);
+ *                                   {source: {url, title?}} → the extension naming the last copy's page (200)
  * GET  /v1/clips/:id                one clip's full text
  * POST /v1/clips/:id/paste          {terminalId?} → typed into that terminal; without one, copied only
  * GET  /v1/snippets                 the expander list from Notes\Snippets and Notes\Prompts
@@ -381,19 +384,33 @@ export class Daemon {
 
   private async addClip(res: http.ServerResponse, value: unknown): Promise<void> {
     if (!this.clips) return this.json(res, 404, NOT_FOUND)
-    const shape = { error: `expected { text: string (≤ ${MAX_CLIP_TEXT_BYTES / 1024} KiB), title?: string, groups?: string[], terminalId?: uuid }` }
     const body = record(value)
+    // `{source}` alone: the extension annotating the copy the app already
+    // captured with the page it came from (PRD §4.1). Never carries text.
+    if (body && 'source' in body && !('text' in body)) {
+      const source = record(body.source)
+      const ok = onlyKeys(Object.keys(body), ['source']) && source
+        && onlyKeys(Object.keys(source), ['url', 'title'])
+        && typeof source.url === 'string' && source.url.length <= 2048 && /^https?:\/\/\S+$/i.test(source.url)
+        && (source.title === undefined || (typeof source.title === 'string' && source.title.length <= 200 && !/[\0\r\n]/.test(source.title)))
+      if (!ok) return this.json(res, 400, { error: 'expected { source: { url: http(s) URL, title?: string } }' })
+      const annotated = await this.clips.annotate({ url: source.url as string, ...(source.title !== undefined ? { title: source.title as string } : {}) })
+      return this.json(res, 200, { ok: true, annotated })
+    }
+    const shape = { error: `expected { text: string (≤ ${MAX_CLIP_TEXT_BYTES / 1024} KiB), title?: string, groups?: string[], favorite?: boolean, terminalId?: uuid } or { source: { url, title? } }` }
     const valid = body
-      && onlyKeys(Object.keys(body), ['text', 'title', 'groups', 'terminalId'])
+      && onlyKeys(Object.keys(body), ['text', 'title', 'groups', 'favorite', 'terminalId'])
       && typeof body.text === 'string' && body.text.trim().length > 0 && Buffer.byteLength(body.text, 'utf8') <= MAX_CLIP_TEXT_BYTES && !body.text.includes('\0')
       && (body.title === undefined || (typeof body.title === 'string' && body.title.length <= MAX_CLIP_TITLE && !/[\0\r\n]/.test(body.title)))
       && (body.groups === undefined || (Array.isArray(body.groups) && body.groups.length <= 20 && body.groups.every((g) => typeof g === 'string' && g.length > 0 && g.length <= MAX_CLIP_GROUP && !/[\0\r\n]/.test(g))))
+      && (body.favorite === undefined || typeof body.favorite === 'boolean')
       && (body.terminalId === undefined || (typeof body.terminalId === 'string' && UUID.test(body.terminalId)))
     if (!valid) return this.json(res, 400, shape)
     const result = await this.clips.add({
       text: body.text as string,
       ...(body.title !== undefined ? { title: body.title as string } : {}),
       ...(body.groups !== undefined ? { groups: body.groups as string[] } : {}),
+      ...(body.favorite !== undefined ? { favorite: body.favorite as boolean } : {}),
       ...(body.terminalId !== undefined ? { terminalId: body.terminalId as string } : {})
     })
     if ('error' in result) return this.json(res, 400, { error: result.error })

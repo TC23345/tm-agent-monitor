@@ -23,9 +23,11 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { OWNER_MARKER, defaultEndpointPath } from './bridge.mjs'
+import { EXTENSION_ID, HOST_NAME, hostManifest, inspectHostManifest, originFor, registryKeys } from './clipHostCore.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const bridgePath = resolve(__dirname, 'bridge.mjs')
+const hostShimPath = resolve(__dirname, 'clip-host.cmd')
 
 export const PROVIDER_EVENTS = {
   claude: [
@@ -243,6 +245,54 @@ export function reconcileProvider(provider, action = 'install', options = {}) {
   return { ...inspectConfig(provider, next, path), changed, action }
 }
 
+// ---- the Chrome extension's native-messaging host (PRD §3.3) ----
+
+/** Where the host manifest lives: beside the endpoint file, in the app's data folder. */
+export function hostManifestPath({ appData = process.env.APPDATA || join(homedir(), 'AppData', 'Roaming') } = {}) {
+  return join(appData, 'taylormade-agent-monitor', `${HOST_NAME}.json`)
+}
+
+/** The .cmd shim Chrome runs — this checkout's, or the staged packaged copy main names. */
+export function hostScriptPath() {
+  return process.env.TM_AGENT_MONITOR_HOST_PATH || hostShimPath
+}
+
+/**
+ * Register, repair, inspect, or remove the host: write the manifest
+ * (atomically) and point the Chrome *and* Edge HKCU keys at it. `manifestPath`,
+ * `hostPath` and `run` (the `reg` runner) are injectable so tests touch
+ * neither the user's data folder nor the registry.
+ */
+export function reconcileHost(action = 'install', options = {}) {
+  if (!['install', 'repair', 'remove', 'status'].includes(action)) throw new Error(`Unsupported action: ${action}`)
+  const manifestPath = options.manifestPath || hostManifestPath()
+  const hostPath = options.hostPath || hostScriptPath()
+  const run = options.run || ((args) => spawnSync('reg', args, { windowsHide: true, encoding: 'utf8', timeout: 5_000 }))
+  const me = { hostPath, extensionId: EXTENSION_ID }
+  const facts = { manifestPath, hostPath, extensionId: EXTENSION_ID, extensionOrigin: originFor(EXTENSION_ID), action }
+  const existing = existsSync(manifestPath) ? readJson(manifestPath) : null
+  if (action === 'status') return { ...inspectHostManifest(existing, me), ...facts }
+  if (action === 'remove') {
+    let changed = false
+    if (existsSync(manifestPath)) { unlinkSync(manifestPath); changed = true }
+    for (const key of registryKeys()) {
+      const result = run(['delete', key, '/f'])
+      if (result?.status === 0) changed = true
+    }
+    return { installed: false, needsRepair: false, changed, ...facts }
+  }
+  const manifest = hostManifest(me)
+  const changed = JSON.stringify(existing) !== JSON.stringify(manifest)
+  if (changed) atomicWriteJson(manifestPath, manifest, { backup: false })
+  for (const key of registryKeys()) {
+    const result = run(['add', key, '/ve', '/t', 'REG_SZ', '/d', manifestPath, '/f'])
+    if (result?.error || result?.status !== 0) {
+      throw new Error(`Could not register ${key}: ${result?.error?.message || String(result?.stderr || '').trim() || `reg exited ${result?.status}`}`)
+    }
+  }
+  return { installed: true, needsRepair: false, changed, ...facts }
+}
+
 export function assertNodeAvailable(run = spawnSync) {
   const probe = run('node', ['--version'], { windowsHide: true, timeout: 2_000, encoding: 'utf8' })
   if (probe?.error || probe?.status !== 0) {
@@ -270,6 +320,13 @@ function parseCli(argv) {
 
 export function runInstallerCli(argv = process.argv.slice(2)) {
   const parsed = parseCli(argv)
+  // `--host`: the Chrome extension's native-messaging host instead of provider hooks.
+  if (argv.includes('--host')) {
+    if (parsed.action === 'install' || parsed.action === 'repair') assertNodeAvailable()
+    const result = reconcileHost(parsed.action)
+    console.log(JSON.stringify(result))
+    return [result]
+  }
   if (parsed.project && parsed.providers.some((p) => p !== 'claude')) {
     throw new Error('--project is currently supported only for Claude settings.')
   }

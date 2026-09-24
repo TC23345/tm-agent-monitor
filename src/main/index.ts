@@ -1079,6 +1079,10 @@ function noteInternalCopy(hint?: { terminalId?: string; cwd?: string }): void {
   }
 }
 
+/** A page URL the extension reported before the capture it belongs to landed (PRD §5.4). */
+let pendingSource: { url: string; title?: string; at: number } | null = null
+const SOURCE_WINDOW_MS = 15_000
+
 /** One clipboard change → at most one clip (PRD §5.2). Serialized: a burst waits its turn. */
 let captureChain: Promise<void> = Promise.resolve()
 function captureClipboard(seq: number, via: 'listener' | 'poll'): void {
@@ -1124,8 +1128,15 @@ function captureClipboard(seq: number, via: 'listener' | 'poll'): void {
     } else {
       stored = await store.add({ id, kind: 'text', text: snap.text, source, bytes: Buffer.byteLength(snap.text, 'utf8'), seq }, { keepSource: ownPlainCopy })
     }
-    if (stored) clipboardLog(`[clipboard] update seq=${seq} via=${via} owner=${who} kept ${stored.kind} id=${stored.id.slice(0, 8)} copies=${stored.copies} bytes=${stored.bytes} from "${sourceLabel(stored.source)}"`)
-    else clipboardLog(`[clipboard] update seq=${seq} via=${via} owner=${who} refused by the store`)
+    if (stored) {
+      clipboardLog(`[clipboard] update seq=${seq} via=${via} owner=${who} kept ${stored.kind} id=${stored.id.slice(0, 8)} copies=${stored.copies} bytes=${stored.bytes} from "${sourceLabel(stored.source)}"`)
+      // The extension's source report beat this capture: attach it now.
+      if (pendingSource && Date.now() - pendingSource.at <= 3_000 && (stored.source.kind === 'chrome' || stored.source.kind === 'app')) {
+        store.annotate(stored.id, pendingSource)
+        clipboardLog(`[clipboard] source for ${stored.id.slice(0, 8)} (early): ${pendingSource.url}`)
+        pendingSource = null
+      }
+    } else clipboardLog(`[clipboard] update seq=${seq} via=${via} owner=${who} refused by the store`)
   }).catch((error) => {
     clipboardLog(`[clipboard] capture failed: ${error instanceof Error ? error.message : String(error)}`)
   })
@@ -2499,7 +2510,23 @@ if (!gotLock) {
           const c = clipStore?.get(id)
           return c ? { id: c.id, kind: c.kind, title: clipTitle(c), text: c.text } : null
         },
-        add: async ({ text, title, groups, terminalId }) => {
+        // The extension reports the page a copy came from a beat after the
+        // clipboard changed. A fresh browser clip takes it; otherwise it waits
+        // for the capture that is still in flight (`pendingSource`).
+        annotate: async ({ url, title }) => {
+          const store = clipStore
+          if (!store) return false
+          const latest = store.list()[0]
+          const browserish = latest && (latest.source.kind === 'chrome' || latest.source.kind === 'app')
+          if (browserish && Date.now() - latest.copiedAt <= SOURCE_WINDOW_MS) {
+            store.annotate(latest.id, { url, title })
+            clipboardLog(`[clipboard] source for ${latest.id.slice(0, 8)}: ${url}`)
+            return true
+          }
+          pendingSource = { url, title, at: Date.now() }
+          return false
+        },
+        add: async ({ text, title, groups, favorite, terminalId }) => {
           const store = clipStore
           if (!store) return { error: 'clipboard history is not ready yet' }
           const term = terminalId ? terminals.list().find((t) => t.id === terminalId) : undefined
@@ -2514,7 +2541,7 @@ if (!gotLock) {
           const known = store.settings().groups
           const clip = await store.add({
             id: randomUUID(), kind: 'text', text, source, bytes: Buffer.byteLength(text, 'utf8'),
-            ...(title ? { title } : {}), groups: (groups ?? []).filter((g) => known.includes(g))
+            ...(title ? { title } : {}), groups: (groups ?? []).filter((g) => known.includes(g)), favorite: favorite === true
           })
           if (!clip) return { error: 'that text could not be stored' }
           // Our own write follows; the capture sees it as a plain copy of ours and keeps this source.

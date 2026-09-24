@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "TaylorMade Clipboard",
+  "version": "0.1.0",
+  "description": "Text expander, right-click paste and copy-source reporting for the TaylorMade Agent Monitor clipboard history. Talks only to the local app over native messaging; nothing leaves this machine.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA9Hyjnax7DQtEP3mjacqmYRWUpSOBqv3U9c6f5W1AWlJ9lYBK5h0cXKR1L7G673zU8YvmPFeREjvzY2e2bkugZS0ut2GELz9Fc3XpY0Rm3LC18gE10WHgS2kOgF8FPa2DK8qyEjtRJXqAbQM9jYwOEBR/mRvPs9Gd1lA8FoM1rPGglTYzOtD8zY6CBb/yWlNVOCg7yg8tbJ4YSyDMv9XHrUkgB+X9sP9bma031VO+0o6/cbrUMUoyUg65y6PFjXztRhxgDNCA3s4hfU1HvsxZ2dn65KiqnJq0Zr05ogUk1AUkbW7IV+gQwbUQ4x8p2qzYo/g/8s8HXwo29WsIt2H1FwIDAQAB",
+  "minimum_chrome_version": "116",
+  "icons": { "128": "icon-128.png" },
+  "permissions": ["nativeMessaging", "contextMenus", "storage", "scripting", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'" },
+  "background": { "service_worker": "worker.js", "type": "module" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/expander-core.js", "content/page.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -40,6 +40,8 @@ export class ClipStore {
   updateSettings(patch: ClipSettingsPatch): void
   add(incoming: ClipInput, opts?: { png?: Buffer; thumb?: Buffer; keepSource?: boolean }): Promise<Clip | null>
   update(id: string, patch: { title?: string | null; text?: string; groups?: string[]; favorite?: boolean }): Clip | null
+  /** The page a clip came from, learned after the capture; the body and its seal stay. */
+  annotate(id: string, source: { url: string; title?: string }): Clip | null
   remove(ids: string[]): number
   clear(all?: boolean): number
   merge(ids: string[], source: ClipSource): Promise<Clip | null>

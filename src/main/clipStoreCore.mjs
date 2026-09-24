@@ -267,6 +267,21 @@ export class ClipStore {
     }
   }
 
+  /** Where a clip came from, learned after the capture (the extension's page URL). Body untouched, so the seal stays. */
+  annotate(id, { url, title }) {
+    const idx = this.clips.findIndex((c) => c.id === id)
+    if (idx === -1 || typeof url !== 'string') return null
+    const prev = this.clips[idx]
+    const source = { ...prev.source, kind: 'chrome', app: prev.source.app ?? 'Chrome', url, ...(typeof title === 'string' && title.trim() ? { title: title.trim() } : {}) }
+    const clean = sanitizeClip({ ...prev, source })
+    if (!clean) return null
+    this.clips = [...this.clips.slice(0, idx), clean, ...this.clips.slice(idx + 1)]
+    this.dirty = true
+    this.schedule()
+    this.emit()
+    return clean
+  }
+
   /** Title, text (text clips only — marks it edited), groups (existing names only), star. */
   update(id, patch) {
     const idx = this.clips.findIndex((c) => c.id === id)
