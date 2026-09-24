@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { NoteMeta, NoteOrder } from '../shared/notes.mjs'
-import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, DailyUsageDay, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SizeMode, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights, WorkspaceCommand } from '../shared/types.js'
+import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, ClipCaptureSettings, ClipsListing, DailyUsageDay, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SizeMode, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights, WorkspaceCommand } from '../shared/types.js'
 
 const api = {
   getStatus: (): Promise<StatusSnapshot> => ipcRenderer.invoke('status:get'),
@@ -137,6 +137,33 @@ const api = {
     ipcRenderer.on('notes:changed', listener)
     return () => {
       ipcRenderer.removeListener('notes:changed', listener)
+    }
+  },
+  /** Clipboard history (the Clipboard pane). Bodies are fetched one at a time. */
+  listClips: (): Promise<ClipsListing> => ipcRenderer.invoke('clips:list'),
+  getClip: (id: string): Promise<{ text: string } | null> => ipcRenderer.invoke('clips:get', id),
+  /** Put a clip back on the clipboard (text, file list as text, or the image). */
+  copyClip: (id: string): Promise<boolean> => ipcRenderer.invoke('clips:copy', id),
+  updateClip: (id: string, patch: { title?: string | null; text?: string; groups?: string[]; favorite?: boolean }): Promise<boolean> => ipcRenderer.invoke('clips:update', id, patch),
+  deleteClips: (ids: string[]): Promise<number> => ipcRenderer.invoke('clips:delete', ids),
+  /** Everything unpinned, or everything when `all`. Answers how many went. */
+  clearClips: (all?: boolean): Promise<number> => ipcRenderer.invoke('clips:clear', all === true),
+  mergeClips: (ids: string[]): Promise<string | null> => ipcRenderer.invoke('clips:merge', ids),
+  addClip: (input: { text: string; title?: string; groups?: string[] }): Promise<string | null> => ipcRenderer.invoke('clips:add', input),
+  /** The full list of named groups; a dropped name leaves every clip that carried it. */
+  setClipGroups: (names: string[]): Promise<string[] | null> => ipcRenderer.invoke('clips:groups', names),
+  setFavoritesOrder: (ids: string[]): Promise<boolean> => ipcRenderer.invoke('clips:favorites-order', ids),
+  /** `minutes` > 0 pauses for that long, 0 pauses until resumed, null resumes. */
+  pauseClips: (minutes: number | null): Promise<boolean> => ipcRenderer.invoke('clips:pause', minutes),
+  setClipSettings: (patch: Partial<ClipCaptureSettings>): Promise<boolean> => ipcRenderer.invoke('clips:settings', patch),
+  /** A data URL for an image clip: the thumbnail (default) or the full PNG. */
+  clipImage: (id: string, thumb = true): Promise<string | null> => ipcRenderer.invoke('clips:image', id, thumb),
+  /** The history changed (a capture, an edit, a pause). Re-list to follow it. */
+  onClipsChanged: (cb: () => void) => {
+    const listener = () => cb()
+    ipcRenderer.on('clips:changed', listener)
+    return () => {
+      ipcRenderer.removeListener('clips:changed', listener)
     }
   },
   /** A command a second instance sent (`tm open …`); the renderer re-validates it. */

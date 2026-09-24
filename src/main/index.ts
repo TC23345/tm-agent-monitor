@@ -30,9 +30,9 @@ import { mockSnapshot, mockHistory, mockUsageInsights, mockWindows, mockEvents }
 import { parseWorkspaceArgs } from '../shared/workspaceCommand.mjs'
 import { focusHwnd, focusByPid, listDesktopWindows, clipboardOwner, foregroundWindowInfo, available as winAvailable } from '../native/win32.mjs'
 import { startClipboardWatch, type ClipboardWatch } from './clipboardWatch.js'
-import { clipboardHasImage, makeThumbnail, protectText, protectionAvailable, readClipboardSnapshot, readClipboardText, unprotectText, writeClipboardText } from './clipboardIo.js'
-import { ClipStore } from './clipStore.js'
-import { describeSource, shouldCapture, sourceLabel, MAX_IMAGE_BYTES } from '../shared/clips.mjs'
+import { clipboardHasImage, makeThumbnail, protectText, protectionAvailable, readClipboardSnapshot, readClipboardText, unprotectText, writeClipboardImage, writeClipboardText } from './clipboardIo.js'
+import { ClipStore, type ClipSettingsPatch } from './clipStoreCore.mjs'
+import { describeSource, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, MAX_TITLE } from '../shared/clips.mjs'
 import { agentForTerminal } from '../shared/attention.mjs'
 import { buildWindowList } from '../shared/windows.mjs'
 import { parseProjectCommands } from '../shared/projectCommands.mjs'
@@ -42,7 +42,7 @@ import { estimateCostUsd } from '../shared/pricing.mjs'
 // export 'autoUpdater' not found"), so import the default export and destructure.
 import electronUpdater from 'electron-updater'
 import { validateMutableSettingsPatch } from './store.js'
-import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type WindowMaterial, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights } from '../shared/types.js'
+import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type WindowMaterial, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights, type ClipsListing } from '../shared/types.js'
 
 const { autoUpdater } = electronUpdater
 
@@ -1002,12 +1002,19 @@ let clipStore: ClipStore | null = null
  * attributed to that pane's session rather than to "TaylorMade Agents". */
 let lastInternalCopy: { at: number; terminalId?: string; cwd?: string; project?: string } | null = null
 
+/** Only a copy that names its pane is a pane's copy. Anything else our window
+ * writes (the pane path button, a palette snippet) is plain "TaylorMade
+ * Agents", and clears a stale hint so it cannot explain a later copy. */
 function noteInternalCopy(hint?: { terminalId?: string; cwd?: string }): void {
+  if (typeof hint?.terminalId !== 'string' || !hint.terminalId || hint.terminalId.length > 128) {
+    lastInternalCopy = null
+    return
+  }
   lastInternalCopy = {
     at: Date.now(),
-    terminalId: typeof hint?.terminalId === 'string' && hint.terminalId.length <= 128 ? hint.terminalId : undefined,
-    cwd: typeof hint?.cwd === 'string' && hint.cwd.length <= 4096 ? hint.cwd : undefined,
-    project: typeof hint?.cwd === 'string' && hint.cwd ? basename(hint.cwd) : undefined
+    terminalId: hint.terminalId,
+    cwd: typeof hint.cwd === 'string' && hint.cwd.length <= 4096 ? hint.cwd : undefined,
+    project: typeof hint.cwd === 'string' && hint.cwd ? basename(hint.cwd) : undefined
   }
 }
 
@@ -2078,6 +2085,128 @@ function registerIpc(): void {
     return (await shell.openPath(where ? notePathAbs(where) : ensureNotesDir())) === ''
   })
   ipcMain.handle('notes:open-folder', async (): Promise<string> => shell.openPath(ensureNotesDir()))
+
+  // ---- clipboard history (PRD §5.1): every argument validated, nothing throws to the renderer ----
+  const CLIP_ID = /^[A-Za-z0-9_-]{1,64}$/
+  const clipId = (v: unknown): string | null => (typeof v === 'string' && CLIP_ID.test(v) ? v : null)
+  const clipIds = (v: unknown): string[] | null => {
+    if (!Array.isArray(v) || v.length > 500) return null
+    const out: string[] = []
+    for (const id of v) { const ok = clipId(id); if (!ok) return null; out.push(ok) }
+    return out
+  }
+  const groupNames = (v: unknown): string[] | null =>
+    Array.isArray(v) && v.length <= 60 && v.every((g) => typeof g === 'string' && g.length <= 40) ? (v as string[]) : null
+  ipcMain.handle('clips:list', async (): Promise<ClipsListing> => {
+    const store = clipStore
+    if (!store) return { clips: [], groups: [], favoritesOrder: [], paused: false, pausedUntil: 0, settings: { blockedExes: [], redactSecrets: true, captureImages: true, maxItems: 0, maxAgeDays: 0 }, mode: 'off', unprotected: false, loaded: false }
+    const meta = store.settings()
+    return {
+      clips: store.list().slice(0, 2000).map((c) => summarize(c)),
+      groups: meta.groups,
+      favoritesOrder: meta.favoritesOrder,
+      paused: store.isPaused(),
+      pausedUntil: meta.pausedUntil,
+      settings: { blockedExes: meta.blockedExes, redactSecrets: meta.redactSecrets, captureImages: meta.captureImages, maxItems: meta.maxItems, maxAgeDays: meta.maxAgeDays },
+      mode: clipboardWatch?.mode ?? 'off',
+      unprotected: store.unprotected,
+      loaded: true
+    }
+  })
+  ipcMain.handle('clips:get', async (_e, id: unknown): Promise<{ text: string } | null> => {
+    const key = clipId(id)
+    const clip = key ? clipStore?.get(key) : undefined
+    return clip ? { text: clip.text } : null
+  })
+  // Put a clip back on the clipboard. The capture that follows is our own
+  // plain copy, so the clip keeps its original source (keepSource).
+  ipcMain.handle('clips:copy', async (_e, id: unknown): Promise<boolean> => {
+    const key = clipId(id)
+    const clip = key ? clipStore?.get(key) : undefined
+    if (!clip || !clipStore) return false
+    noteInternalCopy(undefined)
+    if (clip.kind === 'image') {
+      const png = await clipStore.imageBytes(clip.id)
+      if (!png) return false
+      await writeClipboardImage(png)
+      return true
+    }
+    await writeClipboardText(clip.text)
+    return true
+  })
+  ipcMain.handle('clips:update', async (_e, id: unknown, patch: unknown): Promise<boolean> => {
+    const key = clipId(id)
+    if (!key || !clipStore || typeof patch !== 'object' || patch === null || Array.isArray(patch)) return false
+    const p = patch as Record<string, unknown>
+    const clean: { title?: string | null; text?: string; groups?: string[]; favorite?: boolean } = {}
+    if (p.title === null) clean.title = null
+    else if (typeof p.title === 'string' && p.title.length <= MAX_TITLE) clean.title = p.title
+    if (typeof p.text === 'string' && Buffer.byteLength(p.text, 'utf8') <= MAX_CLIP_BYTES) clean.text = p.text
+    if (p.groups !== undefined) { const g = groupNames(p.groups); if (!g) return false; clean.groups = g }
+    if (typeof p.favorite === 'boolean') clean.favorite = p.favorite
+    return clipStore.update(key, clean) !== null
+  })
+  ipcMain.handle('clips:delete', async (_e, ids: unknown): Promise<number> => {
+    const list = clipIds(ids)
+    return list && clipStore ? clipStore.remove(list) : 0
+  })
+  ipcMain.handle('clips:clear', async (_e, all: unknown): Promise<number> => (clipStore ? clipStore.clear(all === true) : 0))
+  ipcMain.handle('clips:merge', async (_e, ids: unknown): Promise<string | null> => {
+    const list = clipIds(ids)
+    if (!list || !clipStore) return null
+    const clip = await clipStore.merge(list, { kind: 'manual' })
+    return clip?.id ?? null
+  })
+  ipcMain.handle('clips:add', async (_e, input: unknown): Promise<string | null> => {
+    if (!clipStore || typeof input !== 'object' || input === null || Array.isArray(input)) return null
+    const i = input as Record<string, unknown>
+    if (typeof i.text !== 'string' || !i.text.trim() || Buffer.byteLength(i.text, 'utf8') > MAX_CLIP_BYTES) return null
+    const groups = i.groups === undefined ? [] : groupNames(i.groups)
+    if (!groups) return null
+    const clip = await clipStore.add({
+      id: randomUUID(), kind: 'text', text: i.text, source: { kind: 'manual' }, bytes: Buffer.byteLength(i.text, 'utf8'), manual: true, groups,
+      ...(typeof i.title === 'string' && i.title.trim() && i.title.length <= MAX_TITLE ? { title: i.title.trim() } : {})
+    })
+    return clip?.id ?? null
+  })
+  ipcMain.handle('clips:groups', async (_e, names: unknown): Promise<string[] | null> => {
+    const list = groupNames(names)
+    return list && clipStore ? clipStore.setGroups(list) : null
+  })
+  ipcMain.handle('clips:favorites-order', async (_e, ids: unknown): Promise<boolean> => {
+    const list = clipIds(ids)
+    if (!list || !clipStore) return false
+    clipStore.setFavoritesOrder(list)
+    return true
+  })
+  // `minutes` > 0 pauses for that long, 0 pauses until resumed, null resumes.
+  ipcMain.handle('clips:pause', async (_e, minutes: unknown): Promise<boolean> => {
+    if (!clipStore) return false
+    if (minutes === null) clipStore.pause(null)
+    else if (typeof minutes === 'number' && Number.isInteger(minutes) && minutes >= 0 && minutes <= 24 * 60) clipStore.pause(minutes)
+    else return false
+    clipboardLog(`[clipboard] capture ${clipStore.isPaused() ? 'paused' : 'resumed'}`)
+    return true
+  })
+  ipcMain.handle('clips:settings', async (_e, patch: unknown): Promise<boolean> => {
+    if (!clipStore || typeof patch !== 'object' || patch === null || Array.isArray(patch)) return false
+    const p = patch as Record<string, unknown>
+    const clean: ClipSettingsPatch = {}
+    if (p.blockedExes !== undefined) {
+      if (!Array.isArray(p.blockedExes) || p.blockedExes.length > 100 || !p.blockedExes.every((e) => typeof e === 'string' && e.length <= 128)) return false
+      clean.blockedExes = p.blockedExes as string[]
+    }
+    if (typeof p.redactSecrets === 'boolean') clean.redactSecrets = p.redactSecrets
+    if (typeof p.captureImages === 'boolean') clean.captureImages = p.captureImages
+    if (typeof p.maxItems === 'number' && Number.isInteger(p.maxItems) && p.maxItems >= 50 && p.maxItems <= 10_000) clean.maxItems = p.maxItems
+    if (typeof p.maxAgeDays === 'number' && Number.isInteger(p.maxAgeDays) && p.maxAgeDays >= 1 && p.maxAgeDays <= 3650) clean.maxAgeDays = p.maxAgeDays
+    clipStore.updateSettings(clean)
+    return true
+  })
+  ipcMain.handle('clips:image', async (_e, id: unknown, thumb: unknown): Promise<string | null> => {
+    const key = clipId(id)
+    return key && clipStore ? clipStore.imageDataUrl(key, thumb !== false) : null
+  })
   // A link in a note's preview. Only web/mail schemes leave the sandbox.
   ipcMain.handle('shell:open-external', async (_e, url: unknown): Promise<boolean> => {
     if (typeof url !== 'string' || url.length > 2048 || !/^(https?:\/\/|mailto:)/i.test(url)) return false
@@ -2213,15 +2342,20 @@ if (!gotLock) {
       setInterval(publishEndpoint, 15_000)
     }
 
+    // The clipboard store loads beside window creation, not before it: load()
+    // awaits one decrypt per line. Capture starts once the list is in memory;
+    // the IPC routes answer from whatever is loaded so far.
+    const store = new ClipStore(join(app.getPath('userData'), 'clips'), { available: protectionAvailable, protect: protectText, unprotect: unprotectText }, clipboardLog)
+    clipStore = store
+    store.onChange(() => { if (win && !win.isDestroyed()) win.webContents.send('clips:changed') })
+    const clipsLoaded = store.load().then(() => startClipboardCapture())
+
     createWindow()
     registerHotkey()
     createTray()
     registerIpc()
     if (app.isPackaged) setupAutoUpdate()
-    clipStore = new ClipStore(join(app.getPath('userData'), 'clips'), { available: protectionAvailable, protect: protectText, unprotect: unprotectText }, clipboardLog)
-    await clipStore.load()
-    clipStore.onChange(() => { if (win && !win.isDestroyed()) win.webContents.send('clips:changed') })
-    startClipboardCapture()
+    void clipsLoaded
 
     // Subscription windows (real, OAuth), API usage (admin), and the local
     // today-tokens scan all refresh in the background on their own cadence.

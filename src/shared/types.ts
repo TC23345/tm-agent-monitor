@@ -64,6 +64,33 @@ export interface ActivityEvent {
 /** A command a second instance hands the running workspace (`tm …`). */
 export type { WorkspaceCommand } from './workspaceCommand.mjs'
 
+/** Clipboard history as the renderer lists it (`clips:list`); bodies come one at a time through `clips:get`. */
+export type { Clip, ClipSummary, ClipSource, ClipKind, ClipSourceKind } from './clips.mjs'
+
+export interface ClipCaptureSettings {
+  blockedExes: string[]
+  redactSecrets: boolean
+  captureImages: boolean
+  maxItems: number
+  maxAgeDays: number
+}
+
+export interface ClipsListing {
+  clips: import('./clips.mjs').ClipSummary[]
+  groups: string[]
+  favoritesOrder: string[]
+  paused: boolean
+  /** 0 = capturing; -1 = paused until resumed; else when the pause ends. */
+  pausedUntil: number
+  settings: ClipCaptureSettings
+  /** How changes are detected: the Win32 listener, the sequence poll, or nothing (no Win32). */
+  mode: 'listener' | 'poll' | 'off'
+  /** DPAPI was unavailable, so bodies are on disk in plain text. */
+  unprotected: boolean
+  /** False until the store has read its file; the list is empty until then. */
+  loaded: boolean
+}
+
 /** Per-folder facts served on demand (`project:commands`, `git:status`). */
 export type { ProjectCommand } from './projectCommands.mjs'
 export type { GitStatus } from './gitStatus.mjs'
