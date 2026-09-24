@@ -35,6 +35,7 @@ import { ClipStore, type ClipSettingsPatch } from './clipStoreCore.mjs'
 import { clipTitle, describeSource, filterClips, orderFavorites, parseSnippetNote, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, MAX_TITLE, type ClipSource } from '../shared/clips.mjs'
 import { createPicker, destroyPicker, hidePicker, pickClip, pickerWindow, showPicker, togglePicker } from './picker.js'
 import { noteNameFor as snippetFileName } from '../shared/notes.mjs'
+import { EXTENSION_ID, HOST_NAME, inspectHostManifest } from '../../hooks/clipHostCore.mjs'
 import { parseClipImport, snippetNote, MAX_IMPORT_BYTES } from '../shared/clipImport.mjs'
 import { agentForTerminal } from '../shared/attention.mjs'
 import { buildWindowList } from '../shared/windows.mjs'
@@ -45,7 +46,7 @@ import { estimateCostUsd } from '../shared/pricing.mjs'
 // export 'autoUpdater' not found"), so import the default export and destructure.
 import electronUpdater from 'electron-updater'
 import { validateMutableSettingsPatch } from './store.js'
-import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type WindowMaterial, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights, type ClipsListing } from '../shared/types.js'
+import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type WindowMaterial, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights, type ClipsListing, type ExtensionStatus } from '../shared/types.js'
 
 const { autoUpdater } = electronUpdater
 
@@ -932,8 +933,34 @@ function stagePackagedHookRuntime(): string {
   mkdirSync(join(root, 'hooks'), { recursive: true })
   cpSync(join(process.resourcesPath, 'hooks', 'bridge.mjs'), bridge, { force: true })
   cpSync(join(process.resourcesPath, 'hooks', 'focus-worker.mjs'), join(root, 'hooks', 'focus-worker.mjs'), { force: true })
+  // The Chrome native-messaging host lives beside the bridge for the same reason: the registry points at it.
+  for (const name of ['clip-host.mjs', 'clip-host.cmd', 'clipHostCore.mjs', 'bridge.mjs']) {
+    cpSync(join(process.resourcesPath, 'hooks', name), join(root, 'hooks', name), { force: true })
+  }
   cpSync(join(process.resourcesPath, 'native'), join(root, 'native'), { recursive: true, force: true })
   return bridge
+}
+
+/** The .cmd shim Chrome runs for the native host: staged beside the bridge when packaged, the checkout's otherwise. */
+function hostShimPath(): string {
+  return app.isPackaged ? join(packagedHookRoot(), 'hooks', 'clip-host.cmd') : join(__dirname, '../../hooks/clip-host.cmd')
+}
+
+/** The unpacked extension folder the user loads in chrome://extensions. */
+function extensionDir(): string {
+  return app.isPackaged ? join(process.resourcesPath, 'extension') : join(__dirname, '../../extension')
+}
+
+function hostManifestFile(): string {
+  return join(app.getPath('appData'), 'taylormade-agent-monitor', `${HOST_NAME}.json`)
+}
+
+/** Read the registered host manifest, if any, and say whether it points at this copy of the app. */
+function extensionStatus(): ExtensionStatus {
+  let manifest: unknown = null
+  try { manifest = JSON.parse(readFileSync(hostManifestFile(), 'utf8')) } catch { /* not registered */ }
+  const state = inspectHostManifest(manifest, { hostPath: hostShimPath(), extensionId: EXTENSION_ID })
+  return { hostInstalled: state.installed, needsRepair: state.needsRepair, extensionDir: extensionDir(), extensionId: EXTENSION_ID, manifestPath: hostManifestFile() }
 }
 
 function hookConfigPath(provider: ProviderId): string {
@@ -1508,6 +1535,7 @@ function settingsView() {
     pushAfterMin,
     repoDir: config.repoDir,
     providers: buildSnapshot().providers,
+    extension: extensionStatus(),
     historySync: history.status(),
     apiConfigs: [
       { id: 'anthropic-admin', label: 'Anthropic Admin API', value: ADMIN_KEY ? 'configured' : 'not configured', detail: 'ANTHROPIC_ADMIN_KEY · organization usage and actual API spend', configured: !!ADMIN_KEY },
@@ -1644,6 +1672,42 @@ function registerIpc(): void {
     }
     return { ...result, settings: settingsView() }
   })
+  // The Chrome extension's native host: the same installer, `--host`, the same
+  // spawn-and-report shape as the provider hooks. The registry write is `reg add`
+  // under HKCU, no elevation.
+  ipcMain.handle('extension:manage', async (_e, action: unknown) => {
+    if (action !== 'install' && action !== 'repair' && action !== 'remove') throw new Error('Invalid extension operation')
+    const script = app.isPackaged ? join(process.resourcesPath, 'hooks', 'install.mjs') : join(__dirname, '../../hooks/install.mjs')
+    let hostPath: string
+    try {
+      stagePackagedHookRuntime()
+      hostPath = hostShimPath()
+    } catch (error) {
+      return { ok: false, message: `Could not stage the host: ${error instanceof Error ? error.message : String(error)}`, settings: settingsView() }
+    }
+    const result = await new Promise<{ ok: boolean; message: string }>((resolve) => {
+      const child = spawn(process.execPath, [script, '--host', ...(action === 'install' ? [] : [`--${action}`])], {
+        windowsHide: true,
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', TM_AGENT_MONITOR_HOST_PATH: hostPath, TM_AGENT_MONITOR_ENDPOINT_FILE: config.endpointFile },
+        stdio: ['ignore', 'pipe', 'pipe']
+      })
+      let output = ''
+      let settled = false
+      const finish = (value: { ok: boolean; message: string }) => { if (!settled) { settled = true; clearTimeout(timer); resolve(value) } }
+      const append = (data: unknown) => { if (output.length < 65_536) output += String(data).slice(0, 65_536 - output.length) }
+      child.stdout?.on('data', append)
+      child.stderr?.on('data', append)
+      child.on('error', (error) => finish({ ok: false, message: error.message }))
+      child.on('close', (code) => finish({ ok: code === 0, message: output.trim() || `installer exited ${code}` }))
+      const timer = setTimeout(() => { child.kill(); finish({ ok: false, message: 'Host registration timed out.' }) }, 8_000)
+    })
+    const status = extensionStatus()
+    const message = result.ok
+      ? action === 'remove' ? 'Native host unregistered.' : `Native host registered for Chrome and Edge. Load the unpacked extension from ${status.extensionDir}.`
+      : result.message
+    return { ok: result.ok, message, settings: settingsView() }
+  })
+  ipcMain.on('extension:open-folder', () => { void shell.openPath(extensionDir()) })
   // Codex intentionally owns the trust decision. We can guide the user to its
   // interactive reviewer, but must not edit or spoof Codex's persisted trust.
   ipcMain.handle('hooks:review-codex-trust', () => {

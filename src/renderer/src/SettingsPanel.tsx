@@ -35,7 +35,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [capturing, setCapturing] = useState<'hotkey' | 'pickerHotkey' | null>(null)
   const [updateMsg, setUpdateMsg] = useState<string | null>(null)
   const [hookMsg, setHookMsg] = useState<string | null>(null)
-  const [hookBusy, setHookBusy] = useState<ProviderId | null>(null)
+  const [hookBusy, setHookBusy] = useState<ProviderId | 'extension' | null>(null)
   const [view, setView] = useState<'general' | 'api' | 'system'>('general')
   const [diagnostics, setDiagnostics] = useState<Record<string, SystemDiagnostic>>({})
   const [diagnosticBusy, setDiagnosticBusy] = useState<string | null>(null)
@@ -80,6 +80,17 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       const resultVerb = action === 'install' ? 'installed' : action === 'repair' ? 'repaired' : 'removed'
       setHookMsg(result.ok ? `${provider} hooks ${resultVerb}.` : result.message)
     }).catch((error) => setHookMsg(String(error))).finally(() => setHookBusy(null))
+  }
+
+  const [extensionMsg, setExtensionMsg] = useState<string | null>(null)
+  const manageExtension = (action: 'install' | 'repair' | 'remove') => {
+    if (hookBusy) return
+    setHookBusy('extension')
+    setExtensionMsg(action === 'remove' ? 'Unregistering the native host…' : 'Registering the native host…')
+    window.watch.manageExtension(action).then((result) => {
+      setS(result.settings)
+      setExtensionMsg(result.message)
+    }).catch((error) => setExtensionMsg(String(error))).finally(() => setHookBusy(null))
   }
 
   const reviewCodexTrust = () => {
@@ -314,6 +325,23 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
               })}
               {hookMsg && <div className="supdate">{hookMsg}</div>}
+
+              <div className="section-head section-head--spaced"><span>Chrome extension</span><button className="icon-text-btn" onClick={() => window.watch.openExtensionFolder()} title="The unpacked extension folder — load it from chrome://extensions with Developer mode on">Open extension folder</button></div>
+              <div className="hook-block">
+                <div className="srow">
+                  <span className="slabel">Native messaging host<span className="shint">{s.extension.needsRepair ? 'Registered by another copy of this app — repair to point it here' : s.extension.hostInstalled ? 'Registered for Chrome and Edge (HKCU)' : 'Not registered — the extension cannot reach the app until it is'}</span></span>
+                  <span className="sactions">
+                    <button className="hotkey-btn is-compact" disabled={hookBusy !== null} onClick={() => manageExtension(s.extension.needsRepair ? 'repair' : s.extension.hostInstalled ? 'remove' : 'install')} data-testid="extension-host-action">
+                      {hookBusy === 'extension' ? 'Working…' : s.extension.needsRepair ? 'Repair' : s.extension.hostInstalled ? 'Remove' : 'Register'}
+                    </button>
+                  </span>
+                </div>
+                <div className="srow srow--info">
+                  <span className="slabel">Load unpacked from<span className="shint">chrome://extensions → Developer mode → Load unpacked. Its id is fixed: {s.extension.extensionId}</span></span>
+                  <button className="hotkey-btn is-compact" onClick={() => window.watch.copyText(s.extension.extensionDir)} title={s.extension.extensionDir}>Copy path</button>
+                </div>
+              </div>
+              {extensionMsg && <div className="supdate">{extensionMsg}</div>}
 
               <div className="section-head section-head--spaced"><span>Connected files & data</span><button className="icon-text-btn" onClick={() => window.watch.openConfigDir()}>Open folder</button></div>
               <div className="settings-note">This folder mixes app-owned configuration with Electron runtime caches. The paths below are the files the watcher actively reads or writes; Cache, GPUCache, Network, and Session Storage are Chromium internals and can normally be ignored.</div>

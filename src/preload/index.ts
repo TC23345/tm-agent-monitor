@@ -84,6 +84,11 @@ const api = {
     ipcRenderer.invoke('hooks:manage', provider, action),
   reviewCodexHookTrust: (): Promise<{ ok: boolean; message: string }> =>
     ipcRenderer.invoke('hooks:review-codex-trust'),
+  /** The Chrome extension's native host: register (Chrome and Edge keys), repair, or remove. */
+  manageExtension: (action: 'install' | 'repair' | 'remove'): Promise<{ ok: boolean; message: string; settings: AppSettings }> =>
+    ipcRenderer.invoke('extension:manage', action),
+  /** Open the unpacked extension folder in Explorer, to load it from chrome://extensions. */
+  openExtensionFolder: () => ipcRenderer.send('extension:open-folder'),
   createProject: (name: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
     ipcRenderer.invoke('project:create', name),
   hide: () => ipcRenderer.send('window:hide'),

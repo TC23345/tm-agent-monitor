@@ -384,9 +384,22 @@ export interface AppSettings {
   /** Local source checkout used by "Rebuild & relaunch" (CLAUDE_WATCH_REPO). */
   repoDir: string
   providers: Record<ProviderId, ProviderHealth>
+  /** The Chrome extension's native-messaging host (PRD §3.3) and where to load the extension from. */
+  extension: ExtensionStatus
   historySync: { state: 'off' | 'connecting' | 'ok' | 'error'; detail?: string; lastFlushAt?: number }
   apiConfigs: ApiConfigItem[]
   systemPaths: SystemPathItem[]
+}
+
+export interface ExtensionStatus {
+  /** The host manifest is registered and points at this copy of the app. */
+  hostInstalled: boolean
+  /** Registered by another copy of the app (a dev checkout, an old install): still works, repair to point here. */
+  needsRepair: boolean
+  /** The unpacked extension folder to load in chrome://extensions (Developer mode). */
+  extensionDir: string
+  extensionId: string
+  manifestPath: string
 }
 
 export interface ApiConfigItem {
