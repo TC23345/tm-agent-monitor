@@ -65,10 +65,11 @@ with where it came from (the **Clipboard** pane). It is a resource for you:
   or were asked to drive; with no `terminalId` it only copies.
 - Password-manager copies and anything that looks like a secret are never in
   history; do not try to route secrets through it.
-- **Snippets are notes**: `Notes\Snippets\*.md` (and `Notes\Prompts\*.md`) with
-  an optional `shortcut: ;sig` first line are the text-expander list.
-  `GET /v1/snippets` lists them; `POST /v1/snippets {name, text, shortcut?}`
-  writes one, never overwriting.
+- **Snippets are notes**: every top-level `Notes\Snippets\*.md` and
+  `Notes\Prompts\*.md` is a snippet, with or without a `shortcut: ;sig`
+  first line (the line is only the expander trigger; a note without it is
+  a plain snippet). `GET /v1/snippets` lists them; `POST /v1/snippets
+  {name, text, shortcut?}` writes one into `Snippets`, never overwriting.
 
 ## Routes
 

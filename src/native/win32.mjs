@@ -75,6 +75,9 @@ function load() {
       OpenClipboard: user32.func('int __stdcall OpenClipboard(uintptr_t owner)'),
       CloseClipboard: user32.func('int __stdcall CloseClipboard()'),
       GetClipboardData: user32.func('uintptr_t __stdcall GetClipboardData(uint32 format)'),
+      // Synthetic keys for paste-back (the picker and Shift+Alt+n). keybd_event
+      // is the old API, but four calls need no INPUT union layout.
+      keybd_event: user32.func('void __stdcall keybd_event(uint8 vk, uint8 scan, uint32 flags, uintptr_t extra)'),
       GlobalLock: kernel32.func('void * __stdcall GlobalLock(uintptr_t h)'),
       GlobalUnlock: kernel32.func('int __stdcall GlobalUnlock(uintptr_t h)'),
       GlobalSize: kernel32.func('size_t __stdcall GlobalSize(uintptr_t h)')
@@ -568,6 +571,31 @@ export function clipboardData(format) {
     return null
   } finally {
     try { fns.CloseClipboard() } catch { /* best effort */ }
+  }
+}
+
+const VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_MENU = 0x12, VK_LWIN = 0x5b, VK_RWIN = 0x5c, VK_V = 0x56
+const KEYEVENTF_KEYUP = 0x0002
+
+/**
+ * Send Ctrl+V to the foreground window. Any modifier the user still holds
+ * from the hotkey that got us here (Shift+Alt+1, Ctrl+Alt+V) is released
+ * first, or the paste would arrive as Ctrl+Shift+Alt+V. Never throws.
+ */
+export function sendPasteKeys() {
+  const a = load()
+  if (!a) return false
+  const { fns } = a
+  try {
+    for (const vk of [VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN, VK_CONTROL]) fns.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+    fns.keybd_event(VK_CONTROL, 0, 0, 0)
+    fns.keybd_event(VK_V, 0, 0, 0)
+    fns.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
+    fns.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+    return true
+  } catch (err) {
+    if (process.env.CLAUDE_WATCH_DEBUG) console.error('[win32] paste keys failed:', err.message)
+    return false
   }
 }
 

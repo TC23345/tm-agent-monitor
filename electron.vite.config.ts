@@ -18,7 +18,8 @@ export default defineConfig({
   preload: {
     build: {
       rollupOptions: {
-        input: { index: resolve('src/preload/index.ts') },
+        // The quick picker window has its own, smaller preload (out/preload/picker.cjs).
+        input: { index: resolve('src/preload/index.ts'), picker: resolve('src/preload/picker.ts') },
         // Sandboxed Electron preloads execute as CommonJS; ESM imports fail in
         // the sandbox bundle even when the application package is type=module.
         output: { format: 'cjs', entryFileNames: '[name].cjs' }

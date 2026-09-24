@@ -28,11 +28,12 @@ import type { scanCodexUsage, CodexRateLimits } from './codexUsage.mjs'
 import { PendingCalls, WORKER_TIMEOUT_MS, type WorkerKind } from '../shared/usageWorkerProtocol.mjs'
 import { mockSnapshot, mockHistory, mockUsageInsights, mockWindows, mockEvents } from './mock.js'
 import { parseWorkspaceArgs } from '../shared/workspaceCommand.mjs'
-import { focusHwnd, focusByPid, listDesktopWindows, clipboardOwner, foregroundWindowInfo, available as winAvailable } from '../native/win32.mjs'
+import { focusHwnd, focusByPid, listDesktopWindows, clipboardOwner, foregroundWindowInfo, sendPasteKeys, available as winAvailable } from '../native/win32.mjs'
 import { startClipboardWatch, type ClipboardWatch } from './clipboardWatch.js'
 import { clipboardHasImage, makeThumbnail, protectText, protectionAvailable, readClipboardSnapshot, readClipboardText, unprotectText, writeClipboardImage, writeClipboardText } from './clipboardIo.js'
 import { ClipStore, type ClipSettingsPatch } from './clipStoreCore.mjs'
-import { clipTitle, describeSource, filterClips, parseSnippetNote, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, MAX_TITLE, type ClipSource } from '../shared/clips.mjs'
+import { clipTitle, describeSource, filterClips, orderFavorites, parseSnippetNote, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, MAX_TITLE, type ClipSource } from '../shared/clips.mjs'
+import { createPicker, destroyPicker, hidePicker, pickClip, pickerWindow, showPicker, togglePicker } from './picker.js'
 import { noteNameFor as snippetFileName } from '../shared/notes.mjs'
 import { parseClipImport, snippetNote, MAX_IMPORT_BYTES } from '../shared/clipImport.mjs'
 import { agentForTerminal } from '../shared/attention.mjs'
@@ -77,6 +78,7 @@ const CODEX_USAGE_POLL_MS = 5 * 60_000
 // Persisted user settings (override env/defaults), edited via the in-app panel.
 interface Settings {
   hotkey?: string
+  pickerHotkey?: string
   notifications?: boolean
   mock?: boolean
   sizeMode?: SizeMode
@@ -132,6 +134,14 @@ let tray: Tray | null = null
 // patterns so at least one is likely free of an existing global binding.
 const HOTKEY_FALLBACKS = ['Alt+Shift+C', 'Control+Shift+Space', 'Alt+Shift+A', 'Alt+Shift+S']
 let activeHotkey: string | null = null
+/** The quick picker's chord (PRD §5.3): Ctrl+Alt+V, else the first free alternate. */
+const PICKER_HOTKEY_DEFAULT = 'Control+Alt+V'
+const PICKER_HOTKEY_FALLBACKS = ['Control+Alt+V', 'Control+Shift+Alt+V', 'Alt+Shift+V', 'Control+Alt+Insert']
+let pickerHotkeyPref = PICKER_HOTKEY_DEFAULT
+let activePickerHotkey: string | null = null
+/** Shift+Alt+1..3 paste favorites 1–3 into the foreground window; each registers on its own. */
+const FAVORITE_HOTKEYS = ['Shift+Alt+1', 'Shift+Alt+2', 'Shift+Alt+3']
+let activeFavoriteHotkeys: string[] = []
 let updateReady: string | null = null // version string once an update is downloaded
 let installingUpdate = false
 
@@ -748,6 +758,55 @@ function registerHotkey(): void {
   )
 }
 
+/** The picker's chord, the same way: register() *and* isRegistered(), then the fallbacks. */
+function registerPickerHotkey(): void {
+  const candidates = [pickerHotkeyPref, ...PICKER_HOTKEY_FALLBACKS.filter((h) => h !== pickerHotkeyPref)]
+  for (const acc of candidates) {
+    if (acc === activeHotkey || acc === HALF_HOTKEY) continue
+    let ok = false
+    try {
+      ok = globalShortcut.register(acc, togglePicker)
+    } catch {
+      ok = false
+    }
+    if (ok && globalShortcut.isRegistered(acc)) {
+      activePickerHotkey = acc
+      console.log(`[hotkey] picker: ${acc}${acc === pickerHotkeyPref ? '' : ` (fallback — ${pickerHotkeyPref} was unavailable)`}`)
+      return
+    }
+    globalShortcut.unregister(acc)
+    console.warn(`[hotkey] could not register ${acc} for the picker`)
+  }
+  activePickerHotkey = null
+  console.error(`[hotkey] no picker hotkey registered (tried ${candidates.join(', ')})`)
+}
+
+/** Shift+Alt+1..3: each on its own, so one taken chord does not cost the others. */
+function registerFavoriteHotkeys(): void {
+  activeFavoriteHotkeys = []
+  FAVORITE_HOTKEYS.forEach((acc, index) => {
+    let ok = false
+    try {
+      ok = globalShortcut.register(acc, () => { void pasteFavorite(index) })
+    } catch {
+      ok = false
+    }
+    if (ok && globalShortcut.isRegistered(acc)) activeFavoriteHotkeys.push(acc)
+    else {
+      globalShortcut.unregister(acc)
+      console.warn(`[hotkey] could not register ${acc} for favorite ${index + 1}`)
+    }
+  })
+  if (activeFavoriteHotkeys.length) console.log(`[hotkey] favorites: ${activeFavoriteHotkeys.join(', ')}`)
+}
+
+/** Every global chord, in one place, so a hotkey change re-registers them all. */
+function registerAllHotkeys(): void {
+  registerHotkey()
+  registerPickerHotkey()
+  registerFavoriteHotkeys()
+}
+
 function registerHalfHotkey(): void {
   if (HALF_HOTKEY === activeHotkey) return
   try {
@@ -1072,6 +1131,35 @@ function captureClipboard(seq: number, via: 'listener' | 'poll'): void {
   })
 }
 
+/** Put a clip back on the clipboard — the picker's and the favorites hotkeys' path. Our own
+ * write follows, which the capture treats as a plain copy of ours (the clip keeps its source). */
+async function copyClipToClipboard(id: string): Promise<boolean> {
+  const store = clipStore
+  const clip = store?.get(id)
+  if (!store || !clip) return false
+  noteInternalCopy(undefined)
+  if (clip.kind === 'image') {
+    const png = await store.imageBytes(clip.id)
+    if (!png) return false
+    await writeClipboardImage(png)
+    return true
+  }
+  await writeClipboardText(clip.text)
+  return true
+}
+
+/** Shift+Alt+n: favorite n onto the clipboard, then Ctrl+V into whatever has the foreground. */
+async function pasteFavorite(index: number): Promise<void> {
+  const store = clipStore
+  if (!store) return
+  const favorite = orderFavorites(store.list(), store.settings().favoritesOrder)[index]
+  if (!favorite) { clipboardLog(`[clipboard] favorite ${index + 1}: nothing starred there`); return }
+  if (!(await copyClipToClipboard(favorite.id))) return
+  // The chord's own modifiers are still down; sendPasteKeys releases them first.
+  setTimeout(() => { if (!sendPasteKeys()) clipboardLog('[clipboard] favorite paste: Ctrl+V could not be sent') }, 40)
+  clipboardLog(`[clipboard] favorite ${index + 1} pasted: "${clipTitle(favorite)}"`)
+}
+
 function startClipboardCapture(): void {
   if (process.platform !== 'win32' || clipboardWatch) return
   clipboardWatch = startClipboardWatch({
@@ -1394,6 +1482,8 @@ function settingsView() {
   const home = app.getPath('home')
   return {
     hotkey: activeHotkey ?? hotkeyPref,
+    pickerHotkey: activePickerHotkey ?? '',
+    favoriteHotkeys: [...activeFavoriteHotkeys],
     notifications: notify,
     launchAtLogin: app.getLoginItemSettings().openAtLogin,
     mock: mockMode,
@@ -1556,11 +1646,11 @@ function registerIpc(): void {
   ipcMain.handle('settings:set', (_e, rawPatch: AppSettingsPatch) => {
     const patch = validateMutableSettingsPatch(rawPatch)
     if (!patch) throw new Error('Invalid settings patch')
-    if (patch.hotkey && patch.hotkey !== hotkeyPref) {
-      hotkeyPref = patch.hotkey
-      settings.hotkey = patch.hotkey
+    if ((patch.hotkey && patch.hotkey !== hotkeyPref) || (patch.pickerHotkey && patch.pickerHotkey !== pickerHotkeyPref)) {
+      if (patch.hotkey) { hotkeyPref = patch.hotkey; settings.hotkey = patch.hotkey }
+      if (patch.pickerHotkey) { pickerHotkeyPref = patch.pickerHotkey; settings.pickerHotkey = patch.pickerHotkey }
       globalShortcut.unregisterAll()
-      registerHotkey()
+      registerAllHotkeys()
     }
     if (typeof patch.notifications === 'boolean') { notify = patch.notifications; settings.notifications = patch.notifications }
     if (patch.sizeMode) { applySizeMode(patch.sizeMode); settings.sizeMode = patch.sizeMode }
@@ -2130,17 +2220,7 @@ function registerIpc(): void {
   // plain copy, so the clip keeps its original source (keepSource).
   ipcMain.handle('clips:copy', async (_e, id: unknown): Promise<boolean> => {
     const key = clipId(id)
-    const clip = key ? clipStore?.get(key) : undefined
-    if (!clip || !clipStore) return false
-    noteInternalCopy(undefined)
-    if (clip.kind === 'image') {
-      const png = await clipStore.imageBytes(clip.id)
-      if (!png) return false
-      await writeClipboardImage(png)
-      return true
-    }
-    await writeClipboardText(clip.text)
-    return true
+    return key ? copyClipToClipboard(key) : false
   })
   ipcMain.handle('clips:update', async (_e, id: unknown, patch: unknown): Promise<boolean> => {
     const key = clipId(id)
@@ -2280,6 +2360,12 @@ function registerIpc(): void {
     if (typeof url !== 'string' || url.length > 2048 || !/^(https?:\/\/|mailto:)/i.test(url)) return false
     try { await shell.openExternal(url); return true } catch { return false }
   })
+  // The quick picker's two verbs (its preload exposes nothing else).
+  ipcMain.on('picker:pick', (_e, id: unknown, mode: unknown) => {
+    if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(id) || (mode !== 'paste' && mode !== 'copy')) return
+    void pickClip(id, mode)
+  })
+  ipcMain.on('picker:close', () => hidePicker())
   ipcMain.on('window:hide', () => hideWindow())
   ipcMain.on('window:edge-drag', (_event, edge: unknown, delta: unknown) => {
     if ((edge !== 'left' && edge !== 'right') || typeof delta !== 'number' || !Number.isFinite(delta) || Math.abs(delta) > 10_000) return
@@ -2295,6 +2381,7 @@ function buildTrayMenu(): Menu {
   const items: Electron.MenuItemConstructorOptions[] = [
     { label: activeHotkey ? `Show / Hide  (${activeHotkey})` : 'Show / Hide', click: toggleWindow },
     { label: `Half view  (${HALF_HOTKEY})`, click: () => toggleWindowMode('half') },
+    { label: activePickerHotkey ? `Clipboard picker  (${activePickerHotkey})` : 'Clipboard picker', click: () => showPicker() },
     { type: 'separator' },
     { label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (i) => app.setLoginItemSettings({ openAtLogin: i.checked, args: ['--hidden'] }) },
     { label: 'Mock data', type: 'checkbox', checked: mockMode, click: (i) => { mockMode = i.checked; pushStatus() } }
@@ -2359,6 +2446,7 @@ if (!gotLock) {
     setInterval(whenActive(checkPush), 60_000)
     loadUsageHistory()
     if (settings.hotkey) hotkeyPref = settings.hotkey
+    if (typeof settings.pickerHotkey === 'string' && settings.pickerHotkey.trim()) pickerHotkeyPref = settings.pickerHotkey.trim()
     // Capture tooling pins the boot view; the persisted mode must not override it.
     if (!process.env.CLAUDE_WATCH_CAPTURE_HALF && (settings.sizeMode === 'full' || settings.sizeMode === 'left' || settings.sizeMode === 'right')) applySizeMode(settings.sizeMode)
     if (settings.windowMaterial === 'none' || settings.windowMaterial === 'mica' || settings.windowMaterial === 'acrylic') materialPref = settings.windowMaterial
@@ -2496,11 +2584,24 @@ if (!gotLock) {
     // the IPC routes answer from whatever is loaded so far.
     const store = new ClipStore(join(app.getPath('userData'), 'clips'), { available: protectionAvailable, protect: protectText, unprotect: unprotectText }, clipboardLog)
     clipStore = store
-    store.onChange(() => { if (win && !win.isDestroyed()) win.webContents.send('clips:changed') })
+    // Both windows read the list back through IPC; neither holds a copy.
+    store.onChange(() => {
+      if (win && !win.isDestroyed()) win.webContents.send('clips:changed')
+      pickerWindow()?.webContents.send('clips:changed')
+    })
     const clipsLoaded = store.load().then(() => startClipboardCapture())
 
     createWindow()
-    registerHotkey()
+    createPicker({
+      preload: join(__dirname, '../preload/picker.cjs'),
+      load: (w) => {
+        if (process.env.ELECTRON_RENDERER_URL) w.loadURL(`${process.env.ELECTRON_RENDERER_URL}?window=picker`)
+        else w.loadFile(join(__dirname, '../renderer/index.html'), { query: { window: 'picker' } })
+      },
+      copyClip: copyClipToClipboard,
+      log: clipboardLog
+    })
+    registerAllHotkeys()
     createTray()
     registerIpc()
     if (app.isPackaged) setupAutoUpdate()
@@ -2636,6 +2737,7 @@ if (!gotLock) {
 
   app.on('will-quit', () => {
     globalShortcut.unregisterAll()
+    destroyPicker()
     clipboardWatch?.stop()
     terminals.disposeAll()
     daemon?.stop()

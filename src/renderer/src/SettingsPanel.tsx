@@ -31,7 +31,8 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [s, setS] = useState<AppSettings | null>(null)
-  const [capturing, setCapturing] = useState(false)
+  /** Which chord is being captured: the summon hotkey or the quick picker's. */
+  const [capturing, setCapturing] = useState<'hotkey' | 'pickerHotkey' | null>(null)
   const [updateMsg, setUpdateMsg] = useState<string | null>(null)
   const [hookMsg, setHookMsg] = useState<string | null>(null)
   const [hookBusy, setHookBusy] = useState<ProviderId | null>(null)
@@ -118,13 +119,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       e.preventDefault()
       e.stopPropagation()
       if (e.key === 'Escape') {
-        setCapturing(false)
+        setCapturing(null)
         return
       }
       const accel = accelFromEvent(e)
       if (accel) {
-        setCapturing(false)
-        apply({ hotkey: accel })
+        const which = capturing
+        setCapturing(null)
+        apply({ [which]: accel })
       }
     }
     window.addEventListener('keydown', onKey, true)
@@ -152,12 +154,31 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <div className="srow">
               <span className="slabel">Hotkey</span>
               <button
-                className={`hotkey-btn ${capturing ? 'is-capturing' : ''}`}
-                onClick={() => setCapturing(true)}
+                className={`hotkey-btn ${capturing === 'hotkey' ? 'is-capturing' : ''}`}
+                onClick={() => setCapturing('hotkey')}
                 title="Click, then press a key combo (with a modifier). Esc to cancel."
               >
-                {capturing ? 'Press a combo…' : s.hotkey}
+                {capturing === 'hotkey' ? 'Press a combo…' : s.hotkey}
               </button>
+            </div>
+
+            <div className="srow">
+              <span className="slabel">Clipboard picker<span className="shint">{s.pickerHotkey ? 'the chord that registered' : 'no free chord — set one'}</span></span>
+              <button
+                className={`hotkey-btn ${capturing === 'pickerHotkey' ? 'is-capturing' : ''}`}
+                onClick={() => setCapturing('pickerHotkey')}
+                title="Click, then press a key combo (with a modifier). Esc to cancel."
+                data-testid="picker-hotkey"
+              >
+                {capturing === 'pickerHotkey' ? 'Press a combo…' : s.pickerHotkey || 'none'}
+              </button>
+            </div>
+
+            <div className="srow srow--info">
+              <span className="slabel">Paste favorites<span className="shint">Shift+Alt+1, 2, 3 paste the top three starred clips into whatever is focused</span></span>
+              <span className="shint" data-testid="favorite-hotkeys">
+                {s.favoriteHotkeys.length === 3 ? 'all three registered' : s.favoriteHotkeys.length ? `${s.favoriteHotkeys.join(', ')} registered` : 'none registered — another app holds them'}
+              </span>
             </div>
 
             <div className="srow">

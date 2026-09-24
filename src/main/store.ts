@@ -8,14 +8,17 @@ export type StoreEventV1 = AgentEventV1
 export function validateMutableSettingsPatch(value: unknown): AppSettingsPatch | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const input = value as Record<string, unknown>
-  const allowed = new Set(['hotkey', 'notifications', 'launchAtLogin', 'mock', 'sizeMode', 'windowMaterial', 'pushUrl', 'pushAfterMin'])
+  const allowed = new Set(['hotkey', 'pickerHotkey', 'notifications', 'launchAtLogin', 'mock', 'sizeMode', 'windowMaterial', 'pushUrl', 'pushAfterMin'])
   if (Object.keys(input).some((key) => !allowed.has(key))) return null
 
   const result: AppSettingsPatch = {}
-  if ('hotkey' in input) {
-    if (typeof input.hotkey !== 'string' || input.hotkey.length < 1 || input.hotkey.length > 80 || /[\r\n\0]/.test(input.hotkey)) return null
-    result.hotkey = input.hotkey.trim()
-    if (!result.hotkey) return null
+  for (const key of ['hotkey', 'pickerHotkey'] as const) {
+    if (key in input) {
+      const v = input[key]
+      if (typeof v !== 'string' || v.length < 1 || v.length > 80 || /[\r\n\0]/.test(v)) return null
+      result[key] = v.trim()
+      if (!result[key]) return null
+    }
   }
   if ('sizeMode' in input) {
     if (input.sizeMode !== 'full' && input.sizeMode !== 'left' && input.sizeMode !== 'right') return null

@@ -350,6 +350,8 @@ export type WindowMaterial = 'none' | 'mica' | 'acrylic'
 
 export interface AppSettingsPatch {
   hotkey?: string
+  /** The quick picker's chord (default Control+Alt+V); falls back like the summon hotkey. */
+  pickerHotkey?: string
   notifications?: boolean
   launchAtLogin?: boolean
   mock?: boolean
@@ -363,6 +365,10 @@ export interface AppSettingsPatch {
 
 export interface AppSettings {
   hotkey: string
+  /** The chord the picker actually got (its preference, or the fallback that registered), or '' when none did. */
+  pickerHotkey: string
+  /** Which of Shift+Alt+1..3 registered — another app may hold one. */
+  favoriteHotkeys: string[]
   notifications: boolean
   launchAtLogin: boolean
   mock: boolean
