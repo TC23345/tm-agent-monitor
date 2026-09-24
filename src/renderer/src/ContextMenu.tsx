@@ -194,7 +194,11 @@ export function ContextMenu({ x, y, entries, onClose, header, children, testId }
   })
 
   const flyout = entries.find((e): e is Extract<ContextEntry, { kind: 'submenu' }> => e.kind === 'submenu' && e.id === openSub)
-  const host = document.querySelector('.app') ?? document.body
+  // The workspace's `.app` card, or — in a window without one, like the quick
+  // picker — whatever element carries `data-menu-host` (positioned, so the
+  // overlay's `inset: 0` is that card and the menu never spills into the
+  // window's transparent shadow margin).
+  const host = document.querySelector('[data-menu-host]') ?? document.querySelector('.app') ?? document.body
   return createPortal(
     <div
       ref={overlayRef}

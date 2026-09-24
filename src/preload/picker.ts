@@ -1,7 +1,7 @@
 // The quick picker's bridge: the smallest surface that lists, picks and
-// closes (and opens its keys in Settings). Nothing else from the workspace
-// preload — a popup that can only read history and hand a clip back has
-// nothing to expose.
+// closes, edits a row (star, title, text, groups, delete) and opens its keys
+// in Settings. Nothing else from the workspace preload — no merge, no clear,
+// no group management, no settings.
 import { contextBridge, ipcRenderer } from 'electron'
 import type { ClipsListing } from '../shared/types.js'
 
@@ -14,6 +14,22 @@ const api = {
   pick: (id: string, mode: 'paste' | 'copy') => ipcRenderer.send('picker:pick', id, mode),
   /** Escape or a click on the margin. */
   close: () => ipcRenderer.send('picker:close'),
+  /**
+   * Star, rename, edit or regroup one clip from its row. Only these four
+   * fields leave the page; main validates each again (`clips:update`).
+   */
+  updateClip: (id: string, patch: { favorite?: boolean; title?: string | null; text?: string; groups?: string[] }): Promise<boolean> => {
+    const clean: Record<string, unknown> = {}
+    if (typeof patch?.favorite === 'boolean') clean.favorite = patch.favorite
+    if (patch?.title === null || typeof patch?.title === 'string') clean.title = patch.title
+    if (typeof patch?.text === 'string') clean.text = patch.text
+    if (Array.isArray(patch?.groups)) clean.groups = patch.groups
+    return ipcRenderer.invoke('clips:update', id, clean)
+  },
+  /** The row menu's Delete. */
+  deleteClips: (ids: string[]): Promise<number> => ipcRenderer.invoke('clips:delete', ids),
+  /** One text clip's full body, for Edit text — the listing carries only a 200-character preview. */
+  clipText: (id: string): Promise<{ text: string } | null> => ipcRenderer.invoke('clips:get', id),
   /** The footer's "keys" link: close, and open the workspace at Settings → Keyboard shortcuts. */
   openKeySettings: () => ipcRenderer.send('picker:settings'),
   /** Open/close cue from main, with the pop-in's origin corner and the favorite keys' modifier on `enter`. */
