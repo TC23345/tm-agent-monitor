@@ -120,7 +120,7 @@ const MAX_TEXT = 256 * 1024
  *   {type:'source', url, title?}                    → annotate the last copy
  *   {type:'clips', limit?}                          → summaries for the menu
  *   {type:'clip', id, req}                          → one clip's text (req echoes back)
- *   {type:'save', text, favorite?, req?}            → a new clip (right-click on a selection)
+ *   {type:'save', text, favorite?, req?, url?, title?} → a new clip (right-click on a selection), from that page
  *   {type:'snippets'}                               → the expander list
  */
 export function validateExtensionMessage(value) {
@@ -145,10 +145,18 @@ export function validateExtensionMessage(value) {
       if (!Number.isInteger(value.req) || value.req < 0) return null
       return { type: 'clip', id: value.id, req: value.req }
     case 'save':
-      if (!only('type', 'text', 'favorite', 'req') || !str(value.text, MAX_TEXT) || !value.text.trim()) return null
+      if (!only('type', 'text', 'favorite', 'req', 'url', 'title') || !str(value.text, MAX_TEXT) || !value.text.trim()) return null
       if (value.favorite !== undefined && typeof value.favorite !== 'boolean') return null
       if (value.req !== undefined && !(Number.isInteger(value.req) && value.req >= 0)) return null
-      return { type: 'save', text: value.text, favorite: value.favorite === true, ...(value.req !== undefined ? { req: value.req } : {}) }
+      // The page the selection was saved from, checked like 'source'. A title needs a url.
+      if (value.url !== undefined && !(str(value.url, 2048) && /^https?:\/\//i.test(value.url))) return null
+      if (value.title !== undefined && (value.url === undefined || !str(value.title, 300))) return null
+      return {
+        type: 'save', text: value.text, favorite: value.favorite === true,
+        ...(value.req !== undefined ? { req: value.req } : {}),
+        ...(value.url !== undefined ? { url: value.url } : {}),
+        ...(value.url !== undefined && value.title?.trim() ? { title: value.title.trim().slice(0, 200) } : {})
+      }
     case 'snippets':
       return only('type') ? { type: 'snippets' } : null
     default:

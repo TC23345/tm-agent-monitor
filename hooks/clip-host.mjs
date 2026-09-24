@@ -78,7 +78,9 @@ async function handle(message) {
       return
     }
     case 'save': {
-      const res = await call('POST', '/v1/clips', { text: message.text, favorite: message.favorite })
+      // With the page it came from, so the app files it as a Chrome clip, not an agent's add.
+      const source = message.url ? { source: { url: message.url, ...(message.title ? { title: message.title } : {}) } } : {}
+      const res = await call('POST', '/v1/clips', { text: message.text, favorite: message.favorite, ...source })
       reply(res.error ? { type: 'saved', req: message.req, error: res.error } : { type: 'saved', req: message.req, id: res.id })
       return
     }

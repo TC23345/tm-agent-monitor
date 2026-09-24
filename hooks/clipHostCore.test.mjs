@@ -71,6 +71,19 @@ test('every extension message shape is validated, extra keys and bad values refu
   assert.deepEqual(validateExtensionMessage({ type: 'save', text: 'hi', req: 2 }), { type: 'save', text: 'hi', favorite: false, req: 2 })
   assert.equal(validateExtensionMessage({ type: 'save', text: '  ' }), null)
   assert.equal(validateExtensionMessage({ type: 'save', text: 'a\0b' }), null)
+  // A right-click save carries its page, checked like 'source', so the app files it under Chrome.
+  assert.deepEqual(
+    validateExtensionMessage({ type: 'save', text: 'hi', favorite: true, url: 'https://github.com/x/y', title: '  x/y · GitHub ' }),
+    { type: 'save', text: 'hi', favorite: true, url: 'https://github.com/x/y', title: 'x/y · GitHub' }
+  )
+  assert.deepEqual(validateExtensionMessage({ type: 'save', text: 'hi', url: 'http://a.b/' }), { type: 'save', text: 'hi', favorite: false, url: 'http://a.b/' })
+  assert.deepEqual(validateExtensionMessage({ type: 'save', text: 'hi', url: 'https://a.b/', title: '   ' }), { type: 'save', text: 'hi', favorite: false, url: 'https://a.b/' })
+  assert.equal(validateExtensionMessage({ type: 'save', text: 'hi', url: 'javascript:alert(1)' }), null)
+  assert.equal(validateExtensionMessage({ type: 'save', text: 'hi', url: 'chrome://settings' }), null)
+  assert.equal(validateExtensionMessage({ type: 'save', text: 'hi', url: `https://a.b/${'x'.repeat(2048)}` }), null)
+  assert.equal(validateExtensionMessage({ type: 'save', text: 'hi', url: 'https://a.b/', title: 7 }), null)
+  assert.equal(validateExtensionMessage({ type: 'save', text: 'hi', title: 'no page' }), null, 'a title needs a url')
+  assert.equal(validateExtensionMessage({ type: 'save', text: 'hi', url: 'https://a.b/', terminalId: 'x' }), null)
   assert.deepEqual(validateExtensionMessage({ type: 'snippets' }), { type: 'snippets' })
   assert.equal(validateExtensionMessage({ type: 'paste', id: 'x' }), null, 'pasting is the page side, never a host verb')
   assert.equal(validateExtensionMessage('hello'), null)

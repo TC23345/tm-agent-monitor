@@ -224,7 +224,21 @@ test('clipboard routes: list, get, add, paste and snippets are validated and ans
     assert.deepEqual(await (await post('/v1/clips', { source: { url: 'https://example.com/late' } })).json(), { ok: true, annotated: false })
     assert.equal((await post('/v1/clips', { source: { url: 'javascript:alert(1)' } })).status, 400)
     assert.equal((await post('/v1/clips', { source: { url: 'https://x.y', text: 'never' } })).status, 400)
-    assert.equal((await post('/v1/clips', { source: { url: 'https://x.y' }, text: 'both' })).status, 400, 'text and source together is neither shape')
+    // Text with a source is a selection saved from that page (the extension's right-click):
+    // handed to add as a page, never as a terminal session's clip.
+    const saved = await post('/v1/clips', { text: 'from a page', favorite: true, source: { url: 'https://docs.example.com/a', title: 'Docs' } })
+    assert.equal(saved.status, 201)
+    assert.deepEqual(calls.at(-1), ['add', { text: 'from a page', favorite: true, source: { url: 'https://docs.example.com/a', title: 'Docs' } }])
+    await post('/v1/clips', { text: 'untitled page', source: { url: 'https://x.y' } })
+    assert.deepEqual(calls.at(-1), ['add', { text: 'untitled page', source: { url: 'https://x.y' } }])
+    const before = calls.length
+    assert.equal((await post('/v1/clips', { text: 'x', source: { url: 'https://x.y' }, terminalId: MISSING })).status, 400, 'a page or a pane, never both')
+    assert.equal((await post('/v1/clips', { text: 'x', source: { url: 'javascript:alert(1)' } })).status, 400)
+    assert.equal((await post('/v1/clips', { text: 'x', source: { url: 'https://x.y', title: 'a\nb' } })).status, 400)
+    assert.equal((await post('/v1/clips', { text: 'x', source: { url: 'https://x.y', exe: 'chrome.exe' } })).status, 400)
+    assert.equal((await post('/v1/clips', { text: 'x', source: 'https://x.y' })).status, 400)
+    assert.equal((await post('/v1/clips', { text: 'x', source: null })).status, 400)
+    assert.equal(calls.length, before, 'a refused save never reaches the adapter')
 
     assert.equal((await post('/v1/clips/clip-1/paste', { terminalId: 'nope' })).status, 400)
     assert.equal((await post('/v1/clips/clip-1/paste', { enter: true })).status, 400)

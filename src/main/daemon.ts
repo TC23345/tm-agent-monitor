@@ -29,8 +29,8 @@ export interface ClipsApi {
   /** Summaries (no bodies), newest first, filtered like the pane. */
   list(opts: { q: string; group: string; limit: number }): unknown[]
   get(id: string): { id: string; kind: string; title: string; text: string } | null
-  /** Put text on the user's clipboard and in history, attributed to the session in `terminalId`. */
-  add(input: { text: string; title?: string; groups?: string[]; favorite?: boolean; terminalId?: string }): Promise<{ id: string } | { error: string }>
+  /** Put text on the user's clipboard and in history, attributed to the session in `terminalId`, or to the page in `source` (the extension's save). */
+  add(input: { text: string; title?: string; groups?: string[]; favorite?: boolean; terminalId?: string; source?: { url: string; title?: string } }): Promise<{ id: string } | { error: string }>
   /** The Chrome extension names the page the last copy came from — never the text. True when a clip took it. */
   annotate(source: { url: string; title?: string }): Promise<boolean>
   /** Type a clip into a terminal; with no terminal, copy it only. */
@@ -129,6 +129,17 @@ function onlyKeys(keys: Iterable<string>, allowed: string[]): boolean {
   return true
 }
 
+/** A page a clip came from, as the extension reports it: an http(s) URL and an optional one-line title. Null when off. */
+function clipSource(value: unknown): { url: string; title?: string } | null {
+  const source = record(value)
+  const ok = source
+    && onlyKeys(Object.keys(source), ['url', 'title'])
+    && typeof source.url === 'string' && source.url.length <= 2048 && /^https?:\/\/\S+$/i.test(source.url)
+    && (source.title === undefined || (typeof source.title === 'string' && source.title.length <= 200 && !/[\0\r\n]/.test(source.title)))
+  if (!ok) return null
+  return { url: source.url as string, ...(source.title !== undefined ? { title: source.title as string } : {}) }
+}
+
 function intParam(raw: string | null, fallback: number, min: number, max: number): number | null {
   if (raw === null) return fallback
   if (!/^\d{1,7}$/.test(raw)) return null
@@ -153,7 +164,7 @@ const NOT_FOUND = { error: 'not found' }
  * GET  /v1/terminals/:id/output     ?lines=1..2000 → last lines, escapes stripped
  * GET  /v1/agents/:id/wait          ?until=running|waiting|complete|idle|ended&timeout=ms → long-poll
  * GET  /v1/clips                    ?q=&group=&limit=1..200 → clipboard history summaries, newest first
- * POST /v1/clips                    {text, title?, groups?, favorite?, terminalId?} → on the clipboard and in history (201);
+ * POST /v1/clips                    {text, title?, groups?, favorite?, terminalId? | source?} → on the clipboard and in history (201);
  *                                   {source: {url, title?}} → the extension naming the last copy's page (200)
  * GET  /v1/clips/:id                one clip's full text
  * POST /v1/clips/:id/paste          {terminalId?} → typed into that terminal; without one, copied only
@@ -388,18 +399,18 @@ export class Daemon {
     // `{source}` alone: the extension annotating the copy the app already
     // captured with the page it came from (PRD §4.1). Never carries text.
     if (body && 'source' in body && !('text' in body)) {
-      const source = record(body.source)
-      const ok = onlyKeys(Object.keys(body), ['source']) && source
-        && onlyKeys(Object.keys(source), ['url', 'title'])
-        && typeof source.url === 'string' && source.url.length <= 2048 && /^https?:\/\/\S+$/i.test(source.url)
-        && (source.title === undefined || (typeof source.title === 'string' && source.title.length <= 200 && !/[\0\r\n]/.test(source.title)))
-      if (!ok) return this.json(res, 400, { error: 'expected { source: { url: http(s) URL, title?: string } }' })
-      const annotated = await this.clips.annotate({ url: source.url as string, ...(source.title !== undefined ? { title: source.title as string } : {}) })
+      const source = clipSource(body.source)
+      if (!onlyKeys(Object.keys(body), ['source']) || !source) return this.json(res, 400, { error: 'expected { source: { url: http(s) URL, title?: string } }' })
+      const annotated = await this.clips.annotate(source)
       return this.json(res, 200, { ok: true, annotated })
     }
-    const shape = { error: `expected { text: string (≤ ${MAX_CLIP_TEXT_BYTES / 1024} KiB), title?: string, groups?: string[], favorite?: boolean, terminalId?: uuid } or { source: { url, title? } }` }
+    const shape = { error: `expected { text: string (≤ ${MAX_CLIP_TEXT_BYTES / 1024} KiB), title?: string, groups?: string[], favorite?: boolean, terminalId?: uuid | source?: { url, title? } } or { source: { url, title? } }` }
+    // `{text, source}` is a selection saved from a page (the extension's right-click):
+    // a Chrome clip, never an agent's. A session names its pane instead — never both.
+    const source = body && body.source !== undefined ? clipSource(body.source) : undefined
     const valid = body
-      && onlyKeys(Object.keys(body), ['text', 'title', 'groups', 'favorite', 'terminalId'])
+      && onlyKeys(Object.keys(body), ['text', 'title', 'groups', 'favorite', 'terminalId', 'source'])
+      && source !== null && !(source && body.terminalId !== undefined)
       && typeof body.text === 'string' && body.text.trim().length > 0 && Buffer.byteLength(body.text, 'utf8') <= MAX_CLIP_TEXT_BYTES && !body.text.includes('\0')
       && (body.title === undefined || (typeof body.title === 'string' && body.title.length <= MAX_CLIP_TITLE && !/[\0\r\n]/.test(body.title)))
       && (body.groups === undefined || (Array.isArray(body.groups) && body.groups.length <= 20 && body.groups.every((g) => typeof g === 'string' && g.length > 0 && g.length <= MAX_CLIP_GROUP && !/[\0\r\n]/.test(g))))
@@ -411,7 +422,8 @@ export class Daemon {
       ...(body.title !== undefined ? { title: body.title as string } : {}),
       ...(body.groups !== undefined ? { groups: body.groups as string[] } : {}),
       ...(body.favorite !== undefined ? { favorite: body.favorite as boolean } : {}),
-      ...(body.terminalId !== undefined ? { terminalId: body.terminalId as string } : {})
+      ...(body.terminalId !== undefined ? { terminalId: body.terminalId as string } : {}),
+      ...(source ? { source } : {})
     })
     if ('error' in result) return this.json(res, 400, { error: result.error })
     return this.json(res, 201, { id: result.id })

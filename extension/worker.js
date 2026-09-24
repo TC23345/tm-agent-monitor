@@ -146,7 +146,12 @@ function rebuildMenus() {
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === MENU_SAVE) {
     const text = String(info.selectionText ?? '')
-    if (text.trim()) send({ type: 'save', text, favorite: true })
+    // The page goes with it, so the clip reads "Chrome · <host>", not an agent's add.
+    // Bounded here too: a save the host refuses as malformed would be lost.
+    const pageUrl = String(info.pageUrl ?? '')
+    const url = /^https?:\/\//i.test(pageUrl) && pageUrl.length <= 2048 ? pageUrl : undefined
+    const title = url && typeof tab?.title === 'string' && tab.title.trim() ? tab.title.replace(/\s+/g, ' ').trim().slice(0, 200) : undefined
+    if (text.trim()) send({ type: 'save', text, favorite: true, ...(url ? { url } : {}), ...(title ? { title } : {}) })
     return
   }
   const id = String(info.menuItemId)

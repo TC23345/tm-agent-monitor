@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   applyRetention, blockedExe, blocklistEntry, clipPreview, clipTitle, dedupeKey, describeSource, domainBlocked, filterClips, groupNameOk, inGroup,
   looksLikeCode, looksSecret, mergeText, orderFavorites, parseDropFiles, parseSnippetNote, sanitizeClip, sanitizeGroups, shouldCapture, sizeLabel,
-  sourceLabel, summarize, upsertClip, CF_HDROP, EXCLUSION_FORMATS, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, INTERNAL_COPY_WINDOW_MS, BURST_MS
+  sanitizeSource, sourceLabel, summarize, upsertClip, CF_HDROP, EXCLUSION_FORMATS, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, INTERNAL_COPY_WINDOW_MS, BURST_MS
 } from './clips.mjs'
 
 /** Build a DROPFILES payload the way Explorer does: 20-byte header, then paths. */
@@ -228,6 +228,11 @@ test('describeSource: our own copy within the pane window is that pane, else own
   assert.equal(sourceLabel({ kind: 'chrome', app: 'Chrome', url: 'https://github.com/x/y' }), 'Chrome · github.com')
   assert.equal(sourceLabel({ kind: 'agent', provider: 'codex', project: 'p' }), 'added by Codex · p')
   assert.equal(sourceLabel({ kind: 'manual' }), 'added by you')
+  // A selection saved through the extension's right-click is filed as its page, never as an agent's add.
+  const saved = sanitizeSource({ kind: 'chrome', app: 'Chrome', url: 'https://docs.example.com/a?b=1', title: 'Docs' })
+  assert.deepEqual(saved, { kind: 'chrome', app: 'Chrome', title: 'Docs', url: 'https://docs.example.com/a?b=1' })
+  assert.equal(sourceLabel(saved), 'Chrome · docs.example.com')
+  assert.doesNotMatch(sourceLabel(saved), /added by/)
 })
 
 test('parseSnippetNote reads the shortcut line and leaves the expansion clean', () => {

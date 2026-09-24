@@ -2613,18 +2613,27 @@ if (!gotLock) {
           pendingSource = { url, title, at: Date.now() }
           return false
         },
-        add: async ({ text, title, groups, favorite, terminalId }) => {
+        add: async ({ text, title, groups, favorite, terminalId, source: page }) => {
           const store = clipStore
           if (!store) return { error: 'clipboard history is not ready yet' }
-          const term = terminalId ? terminals.list().find((t) => t.id === terminalId) : undefined
+          // A selection saved from a page (the extension's right-click) is filed
+          // under that page, like a copy the extension annotated; a blocked site
+          // keeps nothing, exactly as `attachSource` drops its copies.
+          if (page && domainBlocked(page.url, store.settings().blockedDomains)) {
+            clipboardLog(`[clipboard] refused a save from blocked site ${safeHost(page.url)}`)
+            return { error: 'that site is on the capture blocklist' }
+          }
+          const term = !page && terminalId ? terminals.list().find((t) => t.id === terminalId) : undefined
           const agent = term ? agentForTerminal(daemon.store.snapshot(), { launch: term.launch, cwd: term.cwd, sessionId: term.id }) : null
           const project = agent?.project ?? (term ? basename(term.cwd) : undefined)
-          const source: ClipSource = {
-            kind: 'agent',
-            ...(agent ? { provider: agent.provider, agentId: agent.id } : {}),
-            ...(project ? { project } : {}),
-            ...(terminalId ? { terminalId } : {})
-          }
+          const source: ClipSource = page
+            ? { kind: 'chrome', app: 'Chrome', url: page.url, ...(page.title ? { title: page.title } : {}) }
+            : {
+                kind: 'agent',
+                ...(agent ? { provider: agent.provider, agentId: agent.id } : {}),
+                ...(project ? { project } : {}),
+                ...(terminalId ? { terminalId } : {})
+              }
           const known = store.settings().groups
           const clip = await store.add({
             id: randomUUID(), kind: 'text', text, source, bytes: Buffer.byteLength(text, 'utf8'),
@@ -2641,7 +2650,7 @@ if (!gotLock) {
               cwd: agent?.cwd ?? term?.cwd, text: `put “${clipTitle(clip)}” on your clipboard`
             })
           }
-          clipboardLog(`[clipboard] agent added clip id=${clip.id.slice(0, 8)} bytes=${clip.bytes} from "${sourceLabel(source)}"`)
+          clipboardLog(`[clipboard] ${page ? 'extension saved' : 'agent added'} clip id=${clip.id.slice(0, 8)} bytes=${clip.bytes} from "${sourceLabel(source)}"`)
           return { id: clip.id }
         },
         paste: async (id, terminalId) => {
