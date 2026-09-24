@@ -88,6 +88,8 @@ export interface ProcessInfo { hwnd?: string; pid: number; exe: string; title?: 
 export function looksSecret(text: string): string | null
 export function parseDropFiles(buf: Uint8Array | Buffer | null | undefined): string[]
 export function blockedExe(exe: string | undefined, list: readonly string[]): boolean
+/** A typed blocklist entry normalised (an exe name, or a host name), or null when it is not one. */
+export function blocklistEntry(kind: 'app' | 'site', raw: string): string | null
 export function domainBlocked(url: string, domains: readonly string[]): boolean
 export function shouldCapture(snap: CaptureSnapshot, ctx?: CaptureContext): CaptureDecision
 export function dedupeKey(clip: Partial<Clip> | null | undefined): string

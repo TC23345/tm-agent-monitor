@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  applyRetention, blockedExe, clipPreview, clipTitle, dedupeKey, describeSource, domainBlocked, filterClips, groupNameOk, inGroup,
+  applyRetention, blockedExe, blocklistEntry, clipPreview, clipTitle, dedupeKey, describeSource, domainBlocked, filterClips, groupNameOk, inGroup,
   looksLikeCode, looksSecret, mergeText, orderFavorites, parseDropFiles, parseSnippetNote, sanitizeClip, sanitizeGroups, shouldCapture, sizeLabel,
   sourceLabel, summarize, upsertClip, CF_HDROP, EXCLUSION_FORMATS, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, INTERNAL_COPY_WINDOW_MS, BURST_MS
 } from './clips.mjs'
@@ -62,6 +62,21 @@ test('looksSecret catches the fix-evals families and nothing ordinary', () => {
   assert.equal(looksSecret('The password field is empty.'), null)
   assert.equal(looksSecret(''), null)
   assert.equal(looksSecret(null), null)
+})
+
+test('blocklistEntry normalises what the user types into an exe name or a host name', () => {
+  assert.equal(blocklistEntry('app', '  Slack  '), 'slack.exe')
+  assert.equal(blocklistEntry('app', 'C:\\Program Files\\1Password\\1Password.exe'), '1password.exe')
+  assert.equal(blocklistEntry('app', 'KeePassXC.EXE'), 'keepassxc.exe')
+  assert.equal(blocklistEntry('app', 'some app.exe'), null, 'no spaces in an exe name')
+  assert.equal(blocklistEntry('app', ''), null)
+  assert.equal(blocklistEntry('site', 'https://Mail.Google.com/mail/u/0/'), 'mail.google.com')
+  assert.equal(blocklistEntry('site', '.Bank.Example.'), 'bank.example')
+  assert.equal(blocklistEntry('site', 'localhost'), 'localhost')
+  assert.equal(blocklistEntry('site', 'example.com/path?q=1'), 'example.com')
+  assert.equal(blocklistEntry('site', 'not a host'), null)
+  assert.equal(blocklistEntry('site', '-bad.com'), null)
+  assert.equal(blocklistEntry('other', 'x'), null)
 })
 
 test('blockedExe compares basenames case-insensitively; domainBlocked covers subdomains', () => {

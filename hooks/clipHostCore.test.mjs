@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   EXTENSION_ID, HOST_NAME, MAX_FRAME_BYTES, decodeFrames, encodeFrame, extensionIdFromKey, hostManifest, inspectHostManifest,
-  originFor, registryKeys, validateExtensionMessage
+  originFor, originProblem, registryKeys, validateExtensionMessage
 } from './clipHostCore.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -15,6 +15,13 @@ test('the extension id is what Chrome derives from the manifest key, and the hos
   assert.equal(extensionIdFromKey(manifest.key), EXTENSION_ID)
   assert.match(EXTENSION_ID, /^[a-p]{32}$/)
   assert.equal(originFor(EXTENSION_ID), `chrome-extension://${EXTENSION_ID}/`)
+  const ours = originFor(EXTENSION_ID)
+  assert.equal(originProblem([ours, '--parent-window=1234'], EXTENSION_ID), null, 'Chrome on Windows: origin plus the parent window')
+  assert.equal(originProblem(['--parent-window=1234', ours], EXTENSION_ID), null, 'order does not matter')
+  assert.match(originProblem(['chrome-extension://other/'], EXTENSION_ID), /refused origin chrome-extension:\/\/other\//)
+  assert.match(originProblem([], EXTENSION_ID), /no chrome-extension:\/\/ origin/, 'a launch with no origin argument is not Chrome')
+  assert.match(originProblem(['--parent-window=1234'], EXTENSION_ID), /no chrome-extension:\/\/ origin/)
+  assert.match(originProblem(undefined, EXTENSION_ID), /no chrome-extension:\/\/ origin/)
   const m = hostManifest({ hostPath: 'C:\\app\\hooks\\clip-host.cmd', extensionId: EXTENSION_ID })
   assert.deepEqual(m, { name: HOST_NAME, description: 'TaylorMade Agent Monitor clipboard bridge', path: 'C:\\app\\hooks\\clip-host.cmd', type: 'stdio', allowed_origins: [`chrome-extension://${EXTENSION_ID}/`] })
   assert.deepEqual(registryKeys(), [`HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\${HOST_NAME}`, `HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\${HOST_NAME}`])

@@ -4,6 +4,8 @@ export const MAX_FRAME_BYTES: number
 export const MAX_REPLY_BYTES: number
 export function extensionIdFromKey(keyBase64: string): string
 export function originFor(extensionId: string): string
+/** Why the launching process is refused (no origin argument, or another extension's), or null for ours. */
+export function originProblem(args: readonly string[], extensionId: string): string | null
 export function hostManifest(input: { hostPath: string; extensionId: string; description?: string }): { name: string; description: string; path: string; type: 'stdio'; allowed_origins: string[] }
 export function registryKeys(): string[]
 export function inspectHostManifest(manifest: unknown, me: { hostPath: string; extensionId: string }): { installed: boolean; needsRepair: boolean }

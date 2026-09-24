@@ -107,6 +107,32 @@ export function blockedExe(exe, list) {
   return list.some((e) => exeName(e) === name)
 }
 
+/**
+ * What a typed blocklist entry becomes, or null when it is not one. An app is
+ * an executable name (a path loses its folders, a bare name gains `.exe`);
+ * a site is a host name — a pasted URL keeps only its host, a leading dot
+ * goes, and the result must look like one (`mail.google.com`, `localhost`).
+ */
+export function blocklistEntry(kind, raw) {
+  if (typeof raw !== 'string') return null
+  const text = raw.trim().toLowerCase()
+  if (!text || text.length > 253) return null
+  if (kind === 'app') {
+    let name = exeName(text)
+    if (!name || /[<>:"|?*\s]/.test(name)) return null
+    if (!/\.[a-z0-9]{1,4}$/.test(name)) name = `${name}.exe`
+    return name
+  }
+  if (kind !== 'site') return null
+  let host = text
+  if (/^[a-z][a-z0-9+.-]*:\/\//.test(host)) {
+    try { host = new URL(host).hostname } catch { return null }
+  } else host = host.replace(/[/?#].*$/, '')
+  host = host.replace(/^\.+/, '').replace(/\.+$/, '')
+  if (!host || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host)) return null
+  return host
+}
+
 /** Whether a URL's host is one of the blocked domains or under one of them. */
 export function domainBlocked(url, domains) {
   if (typeof url !== 'string' || !Array.isArray(domains) || !domains.length) return false

@@ -32,7 +32,7 @@ import { focusHwnd, focusByPid, listDesktopWindows, clipboardOwner, foregroundWi
 import { startClipboardWatch, type ClipboardWatch } from './clipboardWatch.js'
 import { clipboardHasImage, makeThumbnail, protectText, protectionAvailable, readClipboardSnapshot, readClipboardText, unprotectText, writeClipboardImage, writeClipboardText } from './clipboardIo.js'
 import { ClipStore, type ClipSettingsPatch } from './clipStoreCore.mjs'
-import { clipTitle, describeSource, filterClips, orderFavorites, parseSnippetNote, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, MAX_TITLE, type ClipSource } from '../shared/clips.mjs'
+import { clipTitle, describeSource, domainBlocked, filterClips, orderFavorites, parseSnippetNote, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, MAX_TITLE, type ClipSource } from '../shared/clips.mjs'
 import { createPicker, destroyPicker, hidePicker, pickClip, pickerWindow, showPicker, togglePicker } from './picker.js'
 import { noteNameFor as snippetFileName } from '../shared/notes.mjs'
 import { EXTENSION_ID, HOST_NAME, inspectHostManifest } from '../../hooks/clipHostCore.mjs'
@@ -1110,6 +1110,26 @@ function noteInternalCopy(hint?: { terminalId?: string; cwd?: string }): void {
 let pendingSource: { url: string; title?: string; at: number } | null = null
 const SOURCE_WINDOW_MS = 15_000
 
+/**
+ * The extension's page URL meets the clip it belongs to. A page on a blocked
+ * site (PRD §5.2: domains and their subdomains) means the copy should never
+ * have been kept — the clip goes, the URL is never stored. Both the late path
+ * (the report arrives after the capture) and the early one (`pendingSource`)
+ * come through here, so they cannot disagree.
+ */
+function attachSource(store: ClipStore, id: string, source: { url: string; title?: string }, when: 'early' | 'late'): void {
+  if (domainBlocked(source.url, store.settings().blockedDomains)) {
+    const gone = store.remove([id])
+    clipboardLog(`[clipboard] dropped ${id.slice(0, 8)} (${when}): blocked site ${safeHost(source.url)}${gone ? '' : ' (already gone)'}`)
+    return
+  }
+  store.annotate(id, source)
+  clipboardLog(`[clipboard] source for ${id.slice(0, 8)} (${when}): ${source.url}`)
+}
+function safeHost(url: string): string {
+  try { return new URL(url).hostname } catch { return '?' }
+}
+
 /** One clipboard change → at most one clip (PRD §5.2). Serialized: a burst waits its turn. */
 let captureChain: Promise<void> = Promise.resolve()
 function captureClipboard(seq: number, via: 'listener' | 'poll'): void {
@@ -1159,8 +1179,7 @@ function captureClipboard(seq: number, via: 'listener' | 'poll'): void {
       clipboardLog(`[clipboard] update seq=${seq} via=${via} owner=${who} kept ${stored.kind} id=${stored.id.slice(0, 8)} copies=${stored.copies} bytes=${stored.bytes} from "${sourceLabel(stored.source)}"`)
       // The extension's source report beat this capture: attach it now.
       if (pendingSource && Date.now() - pendingSource.at <= 3_000 && (stored.source.kind === 'chrome' || stored.source.kind === 'app')) {
-        store.annotate(stored.id, pendingSource)
-        clipboardLog(`[clipboard] source for ${stored.id.slice(0, 8)} (early): ${pendingSource.url}`)
+        attachSource(store, stored.id, pendingSource, 'early')
         pendingSource = null
       }
     } else clipboardLog(`[clipboard] update seq=${seq} via=${via} owner=${who} refused by the store`)
@@ -2266,7 +2285,7 @@ function registerIpc(): void {
     Array.isArray(v) && v.length <= 60 && v.every((g) => typeof g === 'string' && g.length <= 40) ? (v as string[]) : null
   ipcMain.handle('clips:list', async (): Promise<ClipsListing> => {
     const store = clipStore
-    if (!store) return { clips: [], groups: [], favoritesOrder: [], paused: false, pausedUntil: 0, settings: { blockedExes: [], redactSecrets: true, captureImages: true, maxItems: 0, maxAgeDays: 0 }, mode: 'off', unprotected: false, loaded: false }
+    if (!store) return { clips: [], groups: [], favoritesOrder: [], paused: false, pausedUntil: 0, settings: { blockedExes: [], blockedDomains: [], redactSecrets: true, captureImages: true, maxItems: 0, maxAgeDays: 0 }, mode: 'off', unprotected: false, loaded: false }
     const meta = store.settings()
     return {
       clips: store.list().slice(0, 2000).map((c) => summarize(c)),
@@ -2274,7 +2293,7 @@ function registerIpc(): void {
       favoritesOrder: meta.favoritesOrder,
       paused: store.isPaused(),
       pausedUntil: meta.pausedUntil,
-      settings: { blockedExes: meta.blockedExes, redactSecrets: meta.redactSecrets, captureImages: meta.captureImages, maxItems: meta.maxItems, maxAgeDays: meta.maxAgeDays },
+      settings: { blockedExes: meta.blockedExes, blockedDomains: meta.blockedDomains, redactSecrets: meta.redactSecrets, captureImages: meta.captureImages, maxItems: meta.maxItems, maxAgeDays: meta.maxAgeDays },
       mode: clipboardWatch?.mode ?? 'off',
       unprotected: store.unprotected,
       loaded: true
@@ -2358,6 +2377,10 @@ function registerIpc(): void {
     if (p.blockedExes !== undefined) {
       if (!Array.isArray(p.blockedExes) || p.blockedExes.length > 100 || !p.blockedExes.every((e) => typeof e === 'string' && e.length <= 128)) return false
       clean.blockedExes = p.blockedExes as string[]
+    }
+    if (p.blockedDomains !== undefined) {
+      if (!Array.isArray(p.blockedDomains) || p.blockedDomains.length > 100 || !p.blockedDomains.every((d) => typeof d === 'string' && d.length <= 253)) return false
+      clean.blockedDomains = p.blockedDomains as string[]
     }
     if (typeof p.redactSecrets === 'boolean') clean.redactSecrets = p.redactSecrets
     if (typeof p.captureImages === 'boolean') clean.captureImages = p.captureImages
@@ -2575,16 +2598,16 @@ if (!gotLock) {
           return c ? { id: c.id, kind: c.kind, title: clipTitle(c), text: c.text } : null
         },
         // The extension reports the page a copy came from a beat after the
-        // clipboard changed. A fresh browser clip takes it; otherwise it waits
-        // for the capture that is still in flight (`pendingSource`).
+        // clipboard changed. A fresh browser clip takes it (or is dropped, on
+        // a blocked site); otherwise it waits for the capture that is still
+        // in flight (`pendingSource`).
         annotate: async ({ url, title }) => {
           const store = clipStore
           if (!store) return false
           const latest = store.list()[0]
           const browserish = latest && (latest.source.kind === 'chrome' || latest.source.kind === 'app')
           if (browserish && Date.now() - latest.copiedAt <= SOURCE_WINDOW_MS) {
-            store.annotate(latest.id, { url, title })
-            clipboardLog(`[clipboard] source for ${latest.id.slice(0, 8)}: ${url}`)
+            attachSource(store, latest.id, { url, title }, 'late')
             return true
           }
           pendingSource = { url, title, at: Date.now() }

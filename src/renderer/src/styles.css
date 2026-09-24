@@ -1954,6 +1954,37 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .clip-edit { flex: 1 1 auto; min-height: 120px; margin: 0; padding: 10px 12px; border: 0; outline: none; resize: none; background: transparent; color: var(--text); font: 12.5px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace; }
 .clip-detail-img { max-width: 100%; max-height: 100%; object-fit: contain; margin: 10px auto; border-radius: var(--r-control); }
 
+/* Capture settings: the card where the detail sits (More → Capture settings…).
+   One blocklist of apps and sites, then the toggles and retention as rows. */
+.clip-settings { max-height: 62%; }
+.clip-settings-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 8px; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+.clip-settings-label { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; font-weight: 600; color: var(--text); }
+.clip-settings-label .shint { font-weight: 400; line-height: 1.4; }
+.clip-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid var(--hairline); }
+.clip-settings-limits { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.clip-settings-num { width: 64px; height: 26px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface-2); color: var(--text); font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; outline: none; }
+.clip-settings-num:focus { border-color: var(--accent); }
+.clip-block-table { display: flex; flex-direction: column; border: 1px solid var(--hairline); border-radius: var(--r-control); overflow: hidden; }
+.clip-block-empty { padding: 8px 10px; font-size: 12px; color: var(--faint); }
+.clip-block-row { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 8px; padding: 5px 8px 5px 10px; font-size: 12.5px; border-top: 1px solid var(--hairline); }
+.clip-block-row:first-child { border-top: 0; }
+.clip-block-row .clip-ic { grid-area: auto; }
+.clip-block-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.clip-block-kind { font-size: 11px; color: var(--ink-4); white-space: nowrap; }
+.clip-block-x { color: var(--ink-4); }
+.clip-block-add { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.clip-block-seg { display: inline-flex; padding: 2px; border-radius: var(--r-pill); background: var(--tint); flex: 0 0 auto; }
+.clip-block-seg button { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 9px; border: 0; border-radius: var(--r-pill); background: transparent; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: background 0.14s ease, color 0.14s ease; }
+.clip-block-seg button svg { width: 12px; height: 12px; }
+.clip-block-seg button.is-on { background: var(--surface-0); color: var(--text); box-shadow: var(--shadow-card); }
+.clip-block-input { flex: 1 1 120px; min-width: 0; height: 26px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface-2); color: var(--text); font: inherit; font-size: 12px; outline: none; }
+.clip-block-input:focus { border-color: var(--accent); }
+.clip-block-input[aria-invalid="true"] { border-color: var(--st-permission); }
+.clip-block-go { display: inline-flex; align-items: center; gap: 4px; }
+.clip-block-go svg { width: 12px; height: 12px; }
+.clip-block-go:disabled { opacity: 0.5; cursor: default; }
+.clip-block-problem { flex: 1 1 100%; font-size: 11px; color: var(--st-permission); }
+
 /* ---- quick picker window (index.html?window=picker) ----------------------
    A solid --surface-0 card (Bencho command bar: 28px panel, pill field,
    --shadow-overlay) inside a transparent frameless window sized to the card

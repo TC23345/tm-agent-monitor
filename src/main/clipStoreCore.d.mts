@@ -13,13 +13,15 @@ export interface ClipMeta {
   /** 0 = capturing; -1 = paused until resumed; else a timestamp the pause ends at. */
   pausedUntil: number
   blockedExes: string[]
+  /** Host names (lowercase, no leading dot) whose pages never feed a source URL — the clip is dropped instead. */
+  blockedDomains: string[]
   redactSecrets: boolean
   captureImages: boolean
   maxItems: number
   maxAgeDays: number
 }
 
-export type ClipSettingsPatch = Partial<Pick<ClipMeta, 'blockedExes' | 'redactSecrets' | 'captureImages' | 'maxItems' | 'maxAgeDays'>>
+export type ClipSettingsPatch = Partial<Pick<ClipMeta, 'blockedExes' | 'blockedDomains' | 'redactSecrets' | 'captureImages' | 'maxItems' | 'maxAgeDays'>>
 
 export type ClipInput = Omit<Clip, 'createdAt' | 'copiedAt' | 'copies' | 'groups' | 'favorite'> & Partial<Clip>
 

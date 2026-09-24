@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AppWindow, Bot, Check, ChevronRight, ChevronsDownUp, Clipboard, ClipboardPaste, Copy, Download, Files, FolderPlus, Globe, Image, Layers,
-  Merge, MoreHorizontal, Pause, Pencil, Play, Plus, Star, Terminal, Trash2, Upload, X
+  Merge, MoreHorizontal, Pause, Pencil, Play, Plus, SlidersHorizontal, Star, Terminal, Trash2, Upload, X
 } from 'lucide-react'
 import type { ClipSummary, ClipsListing } from '@shared/types'
 import { appLabel, fromSource, groupNameOk, inGroup, looksLikeCode, orderFavorites, sizeLabel, sourceLabel } from '@shared/clips.mjs'
@@ -10,6 +10,7 @@ import { ContextMenu, tidyEntries, type ContextEntry } from '../ContextMenu'
 import { Collapse } from '../Collapse'
 import { useTreeDrag, type DragPress } from '../useTreeDrag'
 import { tid } from '../testid'
+import { CaptureSettings } from './CaptureSettings'
 
 /** Expanded sidebar sections. */
 const OPEN_KEY = 'tm.clips.open.v1'
@@ -114,6 +115,8 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
   const [openSections, setOpenSections] = useState<string[]>(readOpen)
   const [now, setNow] = useState(Date.now())
   const [adding, setAdding] = useState<string | null>(null)
+  /** The capture settings card, shown where the detail card sits. */
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const listRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -475,6 +478,8 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
       { kind: 'item', id: 'import', label: 'Import backup…', icon: <Upload />, hint: 'A JSON export from this app or from Clipboard History Pro; duplicates are skipped', onSelect: () => void importFile() },
       { kind: 'item', id: 'export', label: 'Export to JSON…', icon: <Download />, hint: 'Writes every clip in the clear to a file you choose', onSelect: () => void exportAll() },
       { kind: 'sep' },
+      { kind: 'item', id: 'settings', label: 'Capture settings…', icon: <SlidersHorizontal />, hint: 'Blocked apps and sites, secrets, images, retention', onSelect: () => { setSettingsOpen(true); setSelected(null); setEditing(null) } },
+      { kind: 'sep' },
       { kind: 'item', id: 'clear', label: 'Clear history…', icon: <Trash2 />, hint: 'Favorites and grouped clips stay', onSelect: () => setConfirm('clear') },
       { kind: 'item', id: 'clear-all', label: 'Clear everything…', icon: <Trash2 />, onSelect: () => setConfirm('clear-all') }
     ])
@@ -554,7 +559,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
       <button
         className="notes-tool"
         onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ kind: 'root', x: r.left, y: r.bottom + 4 }) }}
-        title="More: add, import, export, clear"
+        title="More: add, import, export, capture settings, clear"
         data-testid="clip-tool:more"
       >
         <MoreHorizontal strokeWidth={2} />
@@ -595,6 +600,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
           setPicked(new Set())
           setSelected(c.id)
           setEditing(null)
+          setSettingsOpen(false)
         }}
         onDoubleClick={() => void copy(c.id)}
         onKeyDown={(e) => { if (e.key === 'F2') { e.preventDefault(); setTitleEdit({ id: c.id, value: c.custom ? c.title : '' }) } }}
@@ -749,7 +755,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
             <button className="clip-pickbar-x" onClick={() => setPicked(new Set())} title="Clear selection"><X strokeWidth={2} /></button>
           </div>
         )}
-        {detail}
+        {settingsOpen ? <CaptureSettings settings={listing.settings} onClose={() => setSettingsOpen(false)} /> : detail}
       </div>
       {drag && (
         <div ref={ghostRef} className="notes-ghost" style={{ left: drag.x + 12, top: drag.y + 10 }} data-escape-close="" data-testid="clip-ghost">

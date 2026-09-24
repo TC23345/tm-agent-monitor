@@ -29,6 +29,19 @@ export function originFor(extensionId) {
 }
 
 /**
+ * Why the host must refuse the process that started it, or null when it is
+ * our extension. Chrome on Windows always passes the caller's origin as an
+ * argument (beside `--parent-window=…`), so a launch with none is not Chrome
+ * talking to us — a shell, a script, or another browser's convention — and
+ * is refused like a wrong origin.
+ */
+export function originProblem(args, extensionId) {
+  const origin = (Array.isArray(args) ? args : []).find((a) => typeof a === 'string' && a.startsWith('chrome-extension://'))
+  if (origin === undefined) return 'no chrome-extension:// origin argument'
+  return origin === originFor(extensionId) ? null : `refused origin ${origin}`
+}
+
+/**
  * The native host manifest Chrome reads from the registry: name, description,
  * `path` (the .cmd shim next to clip-host.mjs), stdio, and exactly one
  * allowed origin — no wildcards.

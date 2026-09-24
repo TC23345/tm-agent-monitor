@@ -69,7 +69,10 @@ export type { WorkspaceCommand } from './workspaceCommand.mjs'
 export type { Clip, ClipSummary, ClipSource, ClipKind, ClipSourceKind } from './clips.mjs'
 
 export interface ClipCaptureSettings {
+  /** Executable names whose copies are never captured. */
   blockedExes: string[]
+  /** Host names (with their subdomains) whose pages never feed a source URL: such a clip is dropped. */
+  blockedDomains: string[]
   redactSecrets: boolean
   captureImages: boolean
   maxItems: number

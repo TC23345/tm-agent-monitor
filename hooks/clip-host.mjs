@@ -11,18 +11,18 @@
 // stdin closing. stdout gets Buffers only — never console.log — so Windows
 // cannot turn a \n into \r\n inside a frame.
 import { defaultEndpointPath, readEndpoint } from './bridge.mjs'
-import { EXTENSION_ID, decodeFrames, encodeFrame, originFor, validateExtensionMessage } from './clipHostCore.mjs'
+import { EXTENSION_ID, decodeFrames, encodeFrame, originProblem, validateExtensionMessage } from './clipHostCore.mjs'
 
 const CLIPS_POLL_MS = 10_000
 const SNIPPETS_POLL_MS = 30_000
 const FETCH_TIMEOUT_MS = 3_000
 const MENU_LIMIT = 13
 
-// Chrome passes the caller's origin as the first argument on Windows (plus
-// --parent-window=…). A different origin, or one we cannot see, is refused.
-const origin = process.argv.slice(2).find((a) => a.startsWith('chrome-extension://'))
-if (origin !== undefined && origin !== originFor(EXTENSION_ID)) {
-  process.stderr.write(`[clip-host] refused origin ${origin}\n`)
+// Chrome on Windows always passes the caller's origin as an argument (plus
+// --parent-window=…). A different origin, or none at all, is refused.
+const originIssue = originProblem(process.argv.slice(2), EXTENSION_ID)
+if (originIssue) {
+  process.stderr.write(`[clip-host] ${originIssue}\n`)
   process.exit(1)
 }
 
