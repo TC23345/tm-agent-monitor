@@ -90,6 +90,20 @@ export async function writeClipboardImage(png: Buffer): Promise<void> {
   if (!img.isEmpty()) clipboard.writeImage(img)
 }
 
+/** A PNG no larger than `maxEdge` on its longer side, for a list row. Null when the bytes are not an image. */
+export function makeThumbnail(png: Buffer, maxEdge = 192): Buffer | null {
+  try {
+    const img = nativeImage.createFromBuffer(png)
+    if (img.isEmpty()) return null
+    const { width, height } = img.getSize()
+    if (width <= maxEdge && height <= maxEdge) return png
+    const scale = maxEdge / Math.max(width, height)
+    return img.resize({ width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)), quality: 'good' }).toPNG()
+  } catch {
+    return null
+  }
+}
+
 function safeFormats(): string[] {
   try {
     return clipboard.availableFormats()

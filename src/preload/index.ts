@@ -13,7 +13,8 @@ const api = {
   },
   focusAgent: (id: string) => ipcRenderer.send('agent:focus', id),
   openPath: (p: string) => ipcRenderer.send('path:open', p),
-  copyText: (t: string) => ipcRenderer.send('text:copy', t),
+  /** `hint` names the terminal pane a copy-on-select came from, for the clip's provenance. */
+  copyText: (t: string, hint?: { terminalId?: string; cwd?: string }) => ipcRenderer.send('text:copy', t, hint),
   /** What Ctrl+V in a terminal pane should do: the clipboard's text, or whether
    * it holds an image the CLI should be asked to fetch itself. */
   readClipboard: (): Promise<{ text: string; hasImage: boolean }> => ipcRenderer.invoke('clipboard:read'),

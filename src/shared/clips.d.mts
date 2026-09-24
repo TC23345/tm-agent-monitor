@@ -90,7 +90,7 @@ export function blockedExe(exe: string | undefined, list: readonly string[]): bo
 export function domainBlocked(url: string, domains: readonly string[]): boolean
 export function shouldCapture(snap: CaptureSnapshot, ctx?: CaptureContext): CaptureDecision
 export function dedupeKey(clip: Partial<Clip> | null | undefined): string
-export function upsertClip(clips: Clip[], incoming: Omit<Clip, 'createdAt' | 'copiedAt' | 'copies' | 'groups' | 'favorite'> & Partial<Clip>, now?: number): { clips: Clip[]; clip: Clip; existed: boolean }
+export function upsertClip(clips: Clip[], incoming: Omit<Clip, 'createdAt' | 'copiedAt' | 'copies' | 'groups' | 'favorite'> & Partial<Clip>, now?: number, opts?: { keepSource?: boolean }): { clips: Clip[]; clip: Clip; existed: boolean }
 export function isPinned(clip: Clip | null | undefined): boolean
 export function applyRetention(clips: Clip[], opts?: { maxItems?: number; maxAgeMs?: number; now?: number }): Clip[]
 export function sortClips<T extends { copiedAt?: number }>(clips: T[]): T[]

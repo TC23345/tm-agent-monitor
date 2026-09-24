@@ -28,9 +28,12 @@ import type { scanCodexUsage, CodexRateLimits } from './codexUsage.mjs'
 import { PendingCalls, WORKER_TIMEOUT_MS, type WorkerKind } from '../shared/usageWorkerProtocol.mjs'
 import { mockSnapshot, mockHistory, mockUsageInsights, mockWindows, mockEvents } from './mock.js'
 import { parseWorkspaceArgs } from '../shared/workspaceCommand.mjs'
-import { focusHwnd, focusByPid, listDesktopWindows, clipboardOwner, available as winAvailable } from '../native/win32.mjs'
+import { focusHwnd, focusByPid, listDesktopWindows, clipboardOwner, foregroundWindowInfo, available as winAvailable } from '../native/win32.mjs'
 import { startClipboardWatch, type ClipboardWatch } from './clipboardWatch.js'
-import { clipboardHasImage, readClipboardSnapshot, readClipboardText, writeClipboardText } from './clipboardIo.js'
+import { clipboardHasImage, makeThumbnail, protectText, protectionAvailable, readClipboardSnapshot, readClipboardText, unprotectText, writeClipboardText } from './clipboardIo.js'
+import { ClipStore } from './clipStore.js'
+import { describeSource, shouldCapture, sourceLabel, MAX_IMAGE_BYTES } from '../shared/clips.mjs'
+import { agentForTerminal } from '../shared/attention.mjs'
 import { buildWindowList } from '../shared/windows.mjs'
 import { parseProjectCommands } from '../shared/projectCommands.mjs'
 import { parseGitStatus, type GitStatus } from '../shared/gitStatus.mjs'
@@ -992,21 +995,74 @@ function clipboardLog(line: string): void {
   }
 }
 
+/** History on disk (userData/clips), encrypted through the adapter. Created in whenReady. */
+let clipStore: ClipStore | null = null
+
+/** The last `text:copy` a pane asked for, so the clipboard update it causes is
+ * attributed to that pane's session rather than to "TaylorMade Agents". */
+let lastInternalCopy: { at: number; terminalId?: string; cwd?: string; project?: string } | null = null
+
+function noteInternalCopy(hint?: { terminalId?: string; cwd?: string }): void {
+  lastInternalCopy = {
+    at: Date.now(),
+    terminalId: typeof hint?.terminalId === 'string' && hint.terminalId.length <= 128 ? hint.terminalId : undefined,
+    cwd: typeof hint?.cwd === 'string' && hint.cwd.length <= 4096 ? hint.cwd : undefined,
+    project: typeof hint?.cwd === 'string' && hint.cwd ? basename(hint.cwd) : undefined
+  }
+}
+
+/** One clipboard change → at most one clip (PRD §5.2). Serialized: a burst waits its turn. */
+let captureChain: Promise<void> = Promise.resolve()
+function captureClipboard(seq: number, via: 'listener' | 'poll'): void {
+  const store = clipStore
+  if (!store) return
+  captureChain = captureChain.then(async () => {
+    const owner = clipboardOwner()
+    const foreground = foregroundWindowInfo()
+    const meta = store.settings()
+    const snap = await readClipboardSnapshot({ withImage: meta.captureImages, maxImageBytes: MAX_IMAGE_BYTES })
+    const decision = shouldCapture(
+      { text: snap.text, files: snap.files, hasImage: !!snap.image, imageBytes: snap.image?.png.length, excluded: snap.excluded },
+      { ownerExe: owner?.exe || foreground?.exe, blockedExes: meta.blockedExes, redactSecrets: meta.redactSecrets, paused: store.isPaused() }
+    )
+    const who = `${owner?.exe || '?'}${owner?.pid ? `#${owner.pid}` : ''}`
+    if (!decision.keep) {
+      clipboardLog(`[clipboard] update seq=${seq} via=${via} owner=${who} skipped: ${decision.reason}`)
+      return
+    }
+    const internal = lastInternalCopy
+    const agent = internal?.terminalId && !mockMode ? agentForTerminal(daemon.store.snapshot(), { launch: 'shell', sessionId: internal.terminalId }) : null
+    const source = describeSource({ owner, foreground, selfPid: process.pid, internal, agent: agent ? { provider: agent.provider, id: agent.id, project: agent.project } : null })
+    // A copy our own window made with no pane hint is the user re-copying a
+    // clip from the pane: keep where that clip originally came from.
+    const ownPlainCopy = source.kind === 'app' && source.app === 'TaylorMade Agents'
+    const id = randomUUID()
+    let stored = null
+    if (decision.kind === 'image' && snap.image) {
+      const thumb = makeThumbnail(snap.image.png) ?? undefined
+      stored = await store.add(
+        { id, kind: 'image', text: '', image: { width: snap.image.width, height: snap.image.height, bytes: snap.image.png.length, hash: '' }, source, bytes: snap.image.png.length, seq },
+        { png: snap.image.png, thumb, keepSource: ownPlainCopy }
+      )
+    } else if (decision.kind === 'files') {
+      stored = await store.add({ id, kind: 'files', text: snap.files.join('\n'), files: snap.files, source, bytes: Buffer.byteLength(snap.files.join('\n'), 'utf8'), seq }, { keepSource: ownPlainCopy })
+    } else {
+      stored = await store.add({ id, kind: 'text', text: snap.text, source, bytes: Buffer.byteLength(snap.text, 'utf8'), seq }, { keepSource: ownPlainCopy })
+    }
+    if (stored) clipboardLog(`[clipboard] update seq=${seq} via=${via} owner=${who} kept ${stored.kind} id=${stored.id.slice(0, 8)} copies=${stored.copies} bytes=${stored.bytes} from "${sourceLabel(stored.source)}"`)
+    else clipboardLog(`[clipboard] update seq=${seq} via=${via} owner=${who} refused by the store`)
+  }).catch((error) => {
+    clipboardLog(`[clipboard] capture failed: ${error instanceof Error ? error.message : String(error)}`)
+  })
+}
+
 function startClipboardCapture(): void {
   if (process.platform !== 'win32' || clipboardWatch) return
   clipboardWatch = startClipboardWatch({
     mode: process.env.CLAUDE_WATCH_CLIPBOARD === 'poll' ? 'poll' : 'auto',
     log: clipboardLog,
     gate: whenActive,
-    onChange: (seq, via) => {
-      const owner = clipboardOwner()
-      void readClipboardSnapshot().then((snap) => {
-        clipboardLog(
-          `[clipboard] update seq=${seq} via=${via} owner=${owner?.exe || '?'}${owner?.pid ? `#${owner.pid}` : ''} ` +
-          `formats=${snap.formats.join(',') || '-'}${snap.excluded ? ' excluded' : ''}${snap.files.length ? ` files=${snap.files.length}` : ''}${snap.text ? ` chars=${snap.text.length}` : ''}`
-        )
-      })
-    }
+    onChange: captureClipboard
   })
 }
 
@@ -1603,7 +1659,13 @@ function registerIpc(): void {
       reinstalling = false
     }
   })
-  ipcMain.on('text:copy', (_e, t: string) => { if (typeof t === 'string' && t.length <= 100_000) void writeClipboardText(t) })
+  // `hint` names the terminal pane a copy-on-select came from (its PTY id and
+  // folder), so the clip is attributed to that pane's session.
+  ipcMain.on('text:copy', (_e, t: string, hint?: { terminalId?: string; cwd?: string }) => {
+    if (typeof t !== 'string' || t.length > 100_000) return
+    noteInternalCopy(typeof hint === 'object' && hint !== null ? hint : undefined)
+    void writeClipboardText(t)
+  })
   // Ctrl+V in a terminal pane (TerminalPane.tsx). The 1 MB cap matches
   // term:input; a larger clipboard pastes nothing rather than half a script.
   ipcMain.handle('clipboard:read', async () => {
@@ -2149,6 +2211,9 @@ if (!gotLock) {
     createTray()
     registerIpc()
     if (app.isPackaged) setupAutoUpdate()
+    clipStore = new ClipStore(join(app.getPath('userData'), 'clips'), { available: protectionAvailable, protect: protectText, unprotect: unprotectText }, clipboardLog)
+    await clipStore.load()
+    clipStore.onChange(() => { if (win && !win.isDestroyed()) win.webContents.send('clips:changed') })
     startClipboardCapture()
 
     // Subscription windows (real, OAuth), API usage (admin), and the local
@@ -2267,6 +2332,7 @@ if (!gotLock) {
         await Promise.race([Promise.all([refreshLocalUsage(), refreshCodexUsage()]), timeout(5_000)])
         await Promise.race([flushHistory(), timeout(1_500)])
         await Promise.race([history.close(), timeout(500)])
+        if (clipStore) await Promise.race([clipStore.flush(), timeout(1_500)])
         stopUsageWorker()
       } catch (error) {
         console.error(`[shutdown] final flush failed: ${error instanceof Error ? error.message : String(error)}`)

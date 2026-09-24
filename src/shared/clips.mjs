@@ -164,7 +164,7 @@ export function dedupeKey(clip) {
  * and keeps its title, groups and star (its `copies` count grows and the
  * newest source wins); anything else goes in front. Never mutates.
  */
-export function upsertClip(clips, incoming, now = Date.now()) {
+export function upsertClip(clips, incoming, now = Date.now(), { keepSource = false } = {}) {
   const list = Array.isArray(clips) ? clips : []
   const key = dedupeKey(incoming)
   const idx = key ? list.findIndex((c) => dedupeKey(c) === key) : -1
@@ -173,7 +173,10 @@ export function upsertClip(clips, incoming, now = Date.now()) {
     return { clips: [clip, ...list], clip, existed: false }
   }
   const prev = list[idx]
-  const clip = { ...prev, copiedAt: now, copies: (prev.copies ?? 1) + 1, source: incoming.source ?? prev.source, seq: incoming.seq ?? prev.seq }
+  // `keepSource`: the re-copy came from our own pane (the user picked the clip
+  // again), so where it *originally* came from stays the interesting fact.
+  const source = keepSource ? prev.source : incoming.source ?? prev.source
+  const clip = { ...prev, copiedAt: now, copies: (prev.copies ?? 1) + 1, source, seq: incoming.seq ?? prev.seq }
   return { clips: [clip, ...list.slice(0, idx), ...list.slice(idx + 1)], clip, existed: true }
 }
 

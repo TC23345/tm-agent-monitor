@@ -152,7 +152,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(function Termi
     // mousemove; an emptied selection leaves the clipboard alone.
     let copyTimer = 0
     const copySelection = () => {
-      if (!disposed && term.hasSelection()) window.watch.copyText(term.getSelection())
+      if (!disposed && term.hasSelection()) window.watch.copyText(term.getSelection(), { terminalId: sessionId ?? undefined, cwd: configRef.current.cwd })
     }
     const offSelection = term.onSelectionChange(() => {
       window.clearTimeout(copyTimer)

@@ -113,6 +113,9 @@ test('dedupeKey distinguishes kinds; upsert moves a re-copy to the top and keeps
   assert.equal(again.clip.source.kind, 'chrome', 'the newest source wins')
   assert.equal(again.clip.createdAt, 1000, 'first-seen time is kept')
   assert.equal(first.clips.length, 3, 'inputs are not mutated')
+  const own = upsertClip(again.clips, { id: 'q', kind: 'text', text: 'alpha', source: { kind: 'app', app: 'TaylorMade Agents' }, bytes: 5 }, 5000, { keepSource: true })
+  assert.equal(own.clip.source.kind, 'chrome', 'a re-copy from our own pane keeps the original source')
+  assert.equal(own.clip.copies, 3)
 })
 
 test('applyRetention drops old and surplus unpinned clips only', () => {
