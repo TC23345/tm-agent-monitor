@@ -1866,6 +1866,9 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
    pane reuses the notes tree's classes (toolbar, collapse, row action, ghost,
    drop line, notice) so a group and a folder move identically. */
 :root {
+  /* The clip table's columns, shared by the quick picker and the Clipboard pane:
+     kind · clip · source · when · key · star. */
+  --picker-cols: 20px minmax(0, 1fr) minmax(0, 34%) 48px 46px 24px;
   --surface-0: #101114;
   --surface-2: #222428;
   --surface-3: #2a2c31;
@@ -1896,6 +1899,7 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .clips.is-paused .clip-list { color: var(--ink-3); }
 .clips.is-paused .clip-row { opacity: 0.72; }
 .notes-tool.is-warn { color: var(--st-permission); background: rgba(233, 162, 60, 0.14); }
+.notes-tool.is-on { color: var(--accent-bright); background: rgba(217, 119, 87, 0.14); }
 
 /* sidebar: built-in views, groups, sources */
 .clip-nav-list { padding-top: 4px; }
@@ -1935,41 +1939,68 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .clip-add-row { display: flex; align-items: center; gap: 6px; }
 .clip-list { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 8px 24px; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
 
-.clip-row { position: relative; display: grid; grid-template-columns: auto 1fr auto auto; grid-template-areas: "icon title when act" ". meta meta act"; align-items: center; gap: 1px 8px; padding: 6px 6px 6px 8px; border-radius: 10px; color: var(--text); cursor: default; touch-action: none; outline: none; transition: background 0.14s ease, box-shadow 0.14s ease, scale 0.2s var(--spring-press); animation: clip-fade-up 200ms var(--ease-out) both; }
+/* Rows. Narrow (< 520 px of list): two lines — icon · title · key · when · star
+   over the source line. The favorites badge has its own column left of the
+   time (6 px apart) so the two never overlap; in the Favorites view that column
+   is a fixed 20 px (0 elsewhere); icon, time and star are fixed too, so every
+   row shares its column edges. Hairlines between rows, 10 px padding. */
+.clip-row { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr) 0 40px 22px; grid-template-areas: "icon title key when act" ". meta meta meta act"; align-items: center; gap: 1px 6px; padding: 6px 10px; border-radius: 10px; color: var(--text); cursor: default; touch-action: none; outline: none; transition: background 0.14s ease, box-shadow 0.14s ease, scale 0.2s var(--spring-press); animation: clip-fade-up 200ms var(--ease-out) both; }
+.clip-list.is-favorites .clip-row { grid-template-columns: 28px minmax(0, 1fr) 20px 40px 22px; }
+.clip-row + .clip-row::before { content: ''; position: absolute; left: 10px; right: 10px; top: 0; border-top: 1px solid var(--line); pointer-events: none; }
+.clip-row.is-active::before, .clip-row.is-active + .clip-row::before, .clip-row:hover::before, .clip-row:hover + .clip-row::before,
+.clip-row.is-picked::before, .clip-row.is-picked + .clip-row::before { border-top-color: transparent; }
 .clip-row:hover { background: var(--surface-2); }
 .clip-row.is-active { background: var(--surface-3); box-shadow: inset 2px 0 0 var(--accent); }
-.clip-row.is-picked { box-shadow: inset 0 0 0 1px var(--accent); }
+.clip-row.is-picked { background: rgba(217, 119, 87, 0.07); box-shadow: inset 0 0 0 1px var(--accent); }
 .clip-row:focus-visible { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px rgba(236, 235, 231, 0.35); }
 .clip-row:active { scale: 0.995; }
 .clip-row.is-dragging { opacity: 0.4; }
-.clip-ic { grid-area: icon; width: 14px; height: 14px; color: var(--ink-4); }
+.clip-list.is-selecting .clip-row { cursor: pointer; }
+.clip-ic { grid-area: icon; justify-self: center; width: 14px; height: 14px; color: var(--ink-4); }
 .clip-row.is-active .clip-ic { color: var(--accent); }
-.clip-thumb { grid-area: icon; width: 28px; height: 28px; object-fit: cover; border-radius: var(--r-chip); background: var(--surface-0); }
+.clip-thumb { grid-area: 1 / 1 / 3 / 2; align-self: center; width: 28px; height: 28px; object-fit: cover; border-radius: var(--r-chip); background: var(--surface-0); }
+/* Select mode: the icon column is a checkbox, the accent check when picked. */
+.clip-check { grid-area: icon; justify-self: center; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; color: var(--ink-4); }
+.clip-check svg { width: 16px; height: 16px; }
+.clip-check.is-on { background: var(--accent); color: #fff; }
+.clip-check.is-on svg { width: 11px; height: 11px; }
 .clip-title { grid-area: title; min-width: 0; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .clip-title.is-custom { color: var(--accent-bright); }
 .clip-title-input { grid-area: title; min-width: 0; padding: 2px 6px; border: 1px solid var(--accent); border-radius: var(--r-chip); background: var(--surface-0); color: var(--text); font: inherit; font-size: 12.5px; outline: none; }
-.clip-when { grid-area: when; font-size: 10.5px; color: var(--ink-5); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.clip-copied { color: var(--st-complete); background: rgba(68, 196, 128, 0.14); padding: 1px 6px; border-radius: var(--r-pill); font-weight: 600; animation: fade-in 120ms ease; }
-.clip-meta { grid-area: meta; min-width: 0; font-size: 11px; color: var(--ink-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.clip-when { grid-area: when; font-size: 10.5px; color: var(--ink-5); white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+.clip-copied { color: var(--st-complete); background: rgba(68, 196, 128, 0.14); padding: 1px 5px; border-radius: var(--r-pill); font-size: 10.5px; font-weight: 600; animation: fade-in 120ms ease; }
+.clip-meta { grid-area: meta; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; color: var(--ink-4); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.clip-meta-rest { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The source chip (Filter Table status chip): a dot and a 14% tint of the kind's colour. */
+.clip-kind { --tone: var(--st-idle); display: inline-flex; align-items: center; gap: 5px; flex: 0 1 auto; min-width: 0; max-width: 100%; height: 18px; padding: 0 7px 0 6px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--ink-2); font-size: 11px; font-weight: 500; }
+.clip-kind-dot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--tone); }
+.clip-kind-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .clip-star { grid-area: act; align-self: center; margin: 0; }
 .clip-row:hover .clip-star, .clip-star.is-on, .clip-star:focus-visible { opacity: 1; }
 .clip-star.is-on { color: var(--st-permission); }
 .clip-star.is-on svg { fill: currentColor; }
-.clip-favkey { grid-area: when; justify-self: end; margin-right: 26px; font-size: 10px; padding: 0 5px; min-width: 0; color: var(--accent-bright); border-color: rgba(217, 119, 87, 0.4); }
-/* A wide list reads as the picker's table: the same columns on one line
-   (kind · clip · source · when · key · star), hairlines between rows. A
-   narrow pane keeps the two-line rows above. */
-.clip-list { container-type: inline-size; }
+.clip-favkey { grid-area: key; justify-self: end; margin: 0; font-size: 10px; padding: 0 5px; min-width: 0; color: var(--accent-bright); border-color: rgba(217, 119, 87, 0.4); }
+/* The table header: its own row above the scroller (never over a row), only in
+   the wide layout; the same thin scrollbar gutter as the list keeps the columns on the rows. */
+.clip-head-wrap { display: none; }
+/* Filter chips above the list (the Filter Table's tabs), the picker's component. */
+.clip-chips.picker-chips { padding: 8px 10px; border-bottom: 1px solid var(--hairline); }
+.picker-chip-ic { display: grid; place-items: center; margin-right: -1px; }
+.picker-chip-ic svg { width: 12px; height: 12px; color: var(--ink-4); }
+/* A wide list reads as the picker's table: the same --picker-cols on one
+   34 px line (kind · clip · source · when · key · star) under a sticky header. */
+.clip-main { container-type: inline-size; }
+.clip-list { scrollbar-gutter: stable; }
 @container (min-width: 520px) {
-  .clip-row { grid-template-columns: 20px minmax(0, 1fr) minmax(0, 34%) 34px 46px 24px; grid-template-areas: "icon title meta when key act"; gap: 0 10px; height: 34px; padding: 0 10px; border-radius: 8px; }
-  .clip-row + .clip-row::before { content: ''; position: absolute; left: 10px; right: 10px; top: 0; border-top: 1px solid var(--line); pointer-events: none; }
-  .clip-row.is-active::before, .clip-row.is-active + .clip-row::before, .clip-row:hover::before, .clip-row:hover + .clip-row::before { border-top-color: transparent; }
+  .clip-head-wrap { display: block; overflow: hidden; scrollbar-gutter: stable; scrollbar-width: thin; padding: 6px 8px 0; border-bottom: 1px solid var(--line); }
+  .clip-head { display: grid; grid-template-columns: var(--picker-cols); align-items: end; gap: 0 10px; height: 22px; padding: 0 10px 5px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-5); }
+  .clip-head-when, .clip-head-key { text-align: right; }
+  .clip-row, .clip-list.is-favorites .clip-row { grid-template-columns: var(--picker-cols); grid-template-areas: "icon title meta when key act"; gap: 0 10px; height: 34px; padding: 0 10px; border-radius: 8px; }
   .clip-ic { justify-self: center; width: 15px; height: 15px; }
-  .clip-thumb { width: 20px; height: 20px; border-radius: 4px; }
+  .clip-thumb { grid-area: icon; width: 20px; height: 20px; border-radius: 4px; }
   .clip-title { font-size: 13.5px; }
   .clip-meta { font-size: 11.5px; }
-  .clip-when { font-size: 11px; text-align: right; }
-  .clip-favkey { grid-area: key; margin-right: 0; }
+  .clip-when { font-size: 11px; }
 }
 .clip-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 8px; font-size: 13px; color: var(--muted); text-align: center; line-height: 1.5; }
 .clip-link { border: 0; background: transparent; color: var(--accent-bright); font: inherit; font-size: 12.5px; cursor: pointer; text-decoration: underline; }
@@ -1981,6 +2012,10 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .clip-pickbar button:hover { background: var(--surface-3); }
 .clip-pickbar button:active { scale: 0.96; }
 .clip-pickbar button svg { width: 13px; height: 13px; }
+.clip-pickbar button:disabled { opacity: 0.45; cursor: default; }
+.clip-pickbar button:disabled:hover { background: var(--tint); }
+.clip-pickbar button:disabled:active { scale: 1; }
+.clip-pickbar button .clip-pickbar-chev { width: 11px; height: 11px; margin-left: -2px; color: var(--ink-4); }
 .clip-pickbar-x { margin-left: auto; }
 
 .clip-detail { flex: 0 0 auto; max-height: 45%; display: flex; flex-direction: column; min-height: 0; margin: 0 8px 8px; border-radius: var(--r-card); background: var(--surface-0); box-shadow: var(--shadow-card); animation: clip-fade-up 200ms var(--ease-out); }
@@ -2062,7 +2097,7 @@ html[data-window="picker"], html[data-window="picker"] body, html[data-window="p
 .picker-chip .clip-dot { margin-right: -1px; }
 
 /* The list is a table: one grid for the header and every row, so columns line up. */
-.picker-list { --picker-cols: 20px minmax(0, 1fr) minmax(0, 34%) 34px 46px 24px; position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px 8px; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+.picker-list { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px 8px; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
 .picker-head { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: var(--picker-cols); align-items: end; gap: 0 10px; height: 24px; padding: 0 10px 5px; background: var(--surface-0); border-bottom: 1px solid var(--line); font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-5); }
 .picker-head-when, .picker-head-key { text-align: right; }
 .picker-glide { position: absolute; left: 8px; right: 8px; border-radius: 8px; background: var(--surface-3); transition: top 140ms var(--ease-out), height 140ms var(--ease-out); pointer-events: none; }

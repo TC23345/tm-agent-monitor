@@ -5,6 +5,7 @@ import { appDisplayName, fromSource, inGroup, orderFavorites, sizeLabel, sourceL
 import { fuzzyScore } from '@shared/palette.mjs'
 import { isPickerFavoriteModifier, modifierLabel } from '@shared/hotkeys.mjs'
 import { ContextMenu, tidyEntries, type ContextEntry } from '../ContextMenu'
+import { FilterChips } from '../clipboard/FilterChips'
 import { tid } from '../testid'
 
 /** How many rows the enter animation staggers (Beautiful UI: 20 ms each, at most 8). */
@@ -322,23 +323,11 @@ export function Picker() {
           />
           <span className="picker-count">{rows.length}</span>
         </div>
-        <div className="picker-chips" role="tablist" aria-label="Filter">
-          {chips.map((chip) => (
-            <button
-              key={chip.id}
-              role="tab"
-              aria-selected={filter === chip.id}
-              className={`picker-chip ${filter === chip.id ? 'is-active' : ''}`}
-              onClick={() => { setFilter(chip.id); inputRef.current?.focus() }}
-              data-testid={tid('picker-chip', chip.id)}
-            >
-              {chip.dot && <span className="clip-dot" style={{ background: chip.dot }} />}
-              {chip.star && <Star className="picker-chip-star" strokeWidth={2} />}
-              <span className="picker-chip-label">{chip.label}</span>
-              <span className="picker-chip-n">{chip.count}</span>
-            </button>
-          ))}
-        </div>
+        <FilterChips
+          chips={chips.map((c) => ({ ...c, active: filter === c.id }))}
+          onPick={(chip) => { setFilter(chip.id); inputRef.current?.focus() }}
+          testPrefix="picker-chip"
+        />
         <div className="picker-list" ref={listRef} role="listbox" aria-label="Clips" data-testid="picker-list">
           <div className="picker-head" aria-hidden="true">
             <span />

@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AppWindow, Bot, Check, ChevronRight, ChevronsDownUp, Clipboard, ClipboardPaste, Copy, Download, Files, FolderPlus, Globe, Image, Layers,
-  Merge, MoreHorizontal, Pause, Pencil, Play, Plus, SlidersHorizontal, Star, Terminal, Trash2, Upload, X
+  ListChecks, Merge, MoreHorizontal, Pause, Pencil, Play, Plus, SlidersHorizontal, Square, Star, Terminal, Trash2, Upload, X
 } from 'lucide-react'
 import type { ClipSummary, ClipsListing } from '@shared/types'
 import { appDisplayName, fromSource, groupNameOk, inGroup, looksLikeCode, orderFavorites, sizeLabel, sourceLabel } from '@shared/clips.mjs'
@@ -11,6 +11,7 @@ import { Collapse } from '../Collapse'
 import { useTreeDrag, type DragPress } from '../useTreeDrag'
 import { tid } from '../testid'
 import { CaptureSettings } from './CaptureSettings'
+import { FilterChips, nextChip, type FilterChip } from './FilterChips'
 
 /** Expanded sidebar sections. */
 const OPEN_KEY = 'tm.clips.open.v1'
@@ -76,12 +77,44 @@ function SourceGlyph({ clip }: { clip: ClipSummary }) {
   }
 }
 
+/**
+ * The colour of a row's source chip (the Filter Table's status chip): the
+ * provider's dot colour for a pane or an agent, blue for the browser, the
+ * accent for your own adds, grey for any other app. A dot and a 14% tint,
+ * never a filled row.
+ */
+const PROVIDER_TONES: Record<string, string> = { claude: '#e8906b', codex: '#6ab0e8', cursor: '#b58cff' }
+function sourceTone(source: ClipSummary['source']): string {
+  switch (source.kind) {
+    case 'chrome': return 'var(--st-running)'
+    case 'terminal': case 'agent': return PROVIDER_TONES[source.provider ?? ''] ?? 'var(--st-idle)'
+    case 'manual': return 'var(--accent)'
+    default: return 'var(--st-idle)'
+  }
+}
+
+/** The source cell: a chip naming what made the copy, then the detail (host, project, size…). */
+function SourceCell({ clip, extras }: { clip: ClipSummary; extras: string[] }) {
+  const [name, ...rest] = sourceLabel(clip.source).split(' · ')
+  const detail = [...rest, ...extras].join(' · ')
+  return (
+    <span className="clip-meta" title={[name, detail].filter(Boolean).join(' · ')}>
+      <span className={`clip-kind clip-kind--${clip.source.kind}`} style={{ ['--tone' as string]: sourceTone(clip.source) }}>
+        <span className="clip-kind-dot" />
+        <span className="clip-kind-name">{name || 'Unknown app'}</span>
+      </span>
+      {detail && <span className="clip-meta-rest">{detail}</span>}
+    </span>
+  )
+}
+
 type MenuSpec =
   | { kind: 'clip'; id: string }
   | { kind: 'group'; name: string }
   | { kind: 'root' }
   | { kind: 'pause' }
   | { kind: 'picked' }
+  | { kind: 'picked-groups' }
 type Menu = MenuSpec & { x: number; y: number }
 
 interface DropTarget { index: number; lineY: number; problem?: string }
@@ -117,6 +150,8 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
   const [adding, setAdding] = useState<string | null>(null)
   /** The capture settings card, shown where the detail card sits. */
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /** Select mode (the Diff Table's click-to-toggle): a plain click picks a row instead of opening it. */
+  const [selecting, setSelecting] = useState(false)
 
   const listRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -221,6 +256,46 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
     for (const [e, n] of [...exes].sort((a, b) => b[1] - a[1]).slice(0, 8)) out.push({ id: `exe:${e}`, label: appDisplayName(e) || e, icon: <AppWindow strokeWidth={2} />, count: n })
     return out
   }, [clips])
+
+  /**
+   * The Filter Table's tabs above the list: the sidebar's entries as chips,
+   * on the same state (`group`, `source`), so the two always agree — a click
+   * here is a click there. The sidebar stays for managing groups and dragging.
+   */
+  const chips = useMemo<FilterChip[]>(() => [
+    { id: 'all', label: 'All', count: counts.all, active: group === 'all' },
+    ...(counts.favorites ? [{ id: 'favorites', label: 'Favorites', count: counts.favorites, star: true, active: group === 'favorites' }] : []),
+    ...(counts.images ? [{ id: 'images', label: 'Images', count: counts.images, icon: <Image strokeWidth={2} />, active: group === 'images' }] : []),
+    ...groups.filter((g) => counts.group(g)).map((g) => ({ id: g, label: g, count: counts.group(g), dot: `hsl(${groupHue(g)} 60% 62%)`, active: group === g })),
+    ...sources.map((s) => ({ id: `src:${s.id}`, label: s.label, count: s.count, icon: s.icon, active: source === s.id }))
+  ], [counts, groups, sources, group, source])
+  /** A chip click does what the matching sidebar entry does: a view replaces the view, a source toggles on top of it. */
+  const pickChip = (chip: FilterChip) => {
+    if (chip.id.startsWith('src:')) setSource(source === chip.id.slice(4) ? '' : chip.id.slice(4))
+    else setGroup(chip.id)
+    setPicked(new Set())
+  }
+  /** Tab / Shift+Tab walks the chips one at a time, like the picker: each one alone is the filter. */
+  const stepChip = (back: boolean) => {
+    const primary = source ? `src:${source}` : group
+    const next = nextChip(chips.map((c) => ({ ...c, active: c.id === primary })), back)
+    if (!next) return
+    if (next.id.startsWith('src:')) { setGroup('all'); setSource(next.id.slice(4)) } else { setGroup(next.id); setSource('') }
+    setPicked(new Set())
+  }
+
+  // ---- select mode ----
+  const leaveSelect = useCallback(() => { setSelecting(false); setPicked(new Set()) }, [])
+  const toggleSelect = () => { if (selecting) leaveSelect(); else { setSelecting(true); setSelected(null); setEditing(null) } }
+  const togglePick = (id: string) => setPicked((p) => { const next = new Set(p); if (next.has(id)) next.delete(id); else next.add(id); return next })
+  // Escape leaves select mode: the pick bar carries data-escape-close, App sends it tm-escape.
+  const pickbarRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = pickbarRef.current
+    if (!el || !selecting) return
+    el.addEventListener('tm-escape', leaveSelect)
+    return () => el.removeEventListener('tm-escape', leaveSelect)
+  }, [selecting, leaveSelect])
 
   // ---- the selected clip's body and image ----
   useEffect(() => {
@@ -378,7 +453,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
     listRef,
     hitTest,
     ignoreSelector: '.notes-rowact',
-    enabled: group === 'favorites' && !query && !renaming && !titleEdit,
+    enabled: group === 'favorites' && !query && !renaming && !titleEdit && !selecting,
     onDrop: (press, target) => {
       if (!target) return
       const ids = shown.map((c) => c.id).filter((id) => id !== press.key)
@@ -402,6 +477,9 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
       if (!target) return
       if (e.ctrlKey) void pasteInto(target.id, focusedTerminal)
       else void copy(target.id)
+    } else if (e.key === 'Tab' && !e.ctrlKey && !e.altKey) {
+      e.preventDefault()
+      stepChip(e.shiftKey)
     }
   }
 
@@ -464,6 +542,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
         { kind: 'item', id: 'pause', label: 'Pause until resumed', icon: <Pause />, onSelect: () => void window.watch.pauseClips(0) }
       ])
     }
+    if (m.kind === 'picked-groups') return tidyEntries(groupEntries([...picked]))
     if (m.kind === 'picked') {
       return tidyEntries([
         { kind: 'item', id: 'merge', label: `Merge ${picked.size}`, icon: <Merge />, onSelect: () => void merge([...picked]) },
@@ -554,6 +633,15 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
       >
         {paused ? <Play strokeWidth={2} /> : <Pause strokeWidth={2} />}
       </button>
+      <button
+        className={`notes-tool ${selecting ? 'is-on' : ''}`}
+        onClick={toggleSelect}
+        title={selecting ? 'Leave select mode (Esc)' : 'Select rows — a click picks a row (Shift+S)'}
+        aria-pressed={selecting}
+        data-testid="clip-tool:select"
+      >
+        <ListChecks strokeWidth={2} />
+      </button>
       <span className="notes-toolbar-where" data-testid="clip-count">{paused ? 'paused' : `${clips.length} clip${clips.length === 1 ? '' : 's'}`}</span>
       <button className="notes-tool" onClick={() => { setOpenSections([]); writeOpen([]) }} title="Collapse sections" data-testid="clip-tool:collapse"><ChevronsDownUp strokeWidth={2} /></button>
       <button
@@ -579,8 +667,12 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
   const row = (c: ClipSummary, index: number) => {
     const isSel = selected === c.id
     const isPicked = picked.has(c.id)
-    const meta = [sourceLabel(c.source), c.bytes >= SIZE_BADGE_FROM ? sizeLabel(c.bytes) : null, c.copies > 1 ? `×${c.copies}` : null, c.kind === 'image' && c.image ? `${c.image.width}×${c.image.height}` : null].filter(Boolean).join(' · ')
+    const extras = [c.bytes >= SIZE_BADGE_FROM ? sizeLabel(c.bytes) : null, c.copies > 1 ? `×${c.copies}` : null, c.kind === 'image' && c.image ? `${c.image.width}×${c.image.height}` : null].filter((x): x is string => !!x)
     const thumb = c.kind === 'image' ? thumbs.get(c.id) : undefined
+    // In select mode the icon column is a checkbox: empty, or the accent check when picked.
+    const icon = selecting
+      ? <span className={`clip-check ${isPicked ? 'is-on' : ''}`} aria-hidden="true">{isPicked ? <Check strokeWidth={3} /> : <Square strokeWidth={2} />}</span>
+      : thumb ? <img className="clip-thumb" src={thumb} alt="" draggable={false} /> : <SourceGlyph clip={c} />
     return (
       <div
         key={c.id}
@@ -593,8 +685,9 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
         onContextMenu={(e) => { if (!picked.has(c.id)) setPicked(new Set()); openMenu(e, { kind: 'clip', id: c.id }) }}
         onClick={(e) => {
           if (justDragged.current) return
-          if (e.ctrlKey || e.metaKey) {
-            setPicked((p) => { const next = new Set(p); if (next.has(c.id)) next.delete(c.id); else next.add(c.id); return next })
+          // Ctrl+click always toggles; in select mode a plain click does too.
+          if (selecting || e.ctrlKey || e.metaKey) {
+            togglePick(c.id)
             return
           }
           setPicked(new Set())
@@ -602,13 +695,13 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
           setEditing(null)
           setSettingsOpen(false)
         }}
-        onDoubleClick={() => void copy(c.id)}
+        onDoubleClick={() => { if (!selecting) void copy(c.id) }}
         onKeyDown={(e) => { if (e.key === 'F2') { e.preventDefault(); setTitleEdit({ id: c.id, value: c.custom ? c.title : '' }) } }}
         tabIndex={0}
         role="option"
-        aria-selected={isSel}
+        aria-selected={selecting ? isPicked : isSel}
       >
-        {thumb ? <img className="clip-thumb" src={thumb} alt="" draggable={false} /> : <SourceGlyph clip={c} />}
+        {icon}
         {titleEdit?.id === c.id ? (
           <input
             autoFocus
@@ -627,8 +720,8 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
           <span className={`clip-title ${c.custom ? 'is-custom' : ''}`}>{c.title || '(blank)'}</span>
         )}
         <span className="clip-when">{copied === c.id ? <span className="clip-copied">Copied</span> : ago(c.copiedAt, now)}</span>
-        <span className="clip-meta">{meta}</span>
-        {group === 'favorites' && index < 3 && !query && <kbd className="clip-favkey" title={`Shift+Alt+${index + 1} (M2)`}>{index + 1}</kbd>}
+        <SourceCell clip={c} extras={extras} />
+        {group === 'favorites' && index < 3 && !query && <kbd className="clip-favkey" title={`Paste favorite ${index + 1} (Settings → Keyboard shortcuts)`} data-testid={tid('clip-favkey', c.id)}>{index + 1}</kbd>}
         <button
           className={`notes-rowact clip-star ${c.favorite ? 'is-on' : ''}`}
           onClick={(e) => { e.stopPropagation(); star(c.id, !c.favorite) }}
@@ -687,7 +780,18 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
       : shown.length === 0 ? 'Nothing here yet.' : null
 
   return (
-    <div className={`notes clips ${paused ? 'is-paused' : ''}`} data-testid="clips">
+    <div
+      className={`notes clips ${paused ? 'is-paused' : ''}`}
+      // Shift+S toggles select mode — not while typing in a field.
+      onKeyDown={(e) => {
+        const t = e.target as HTMLElement
+        if (e.key.toLowerCase() === 's' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !t.closest('input, textarea, [contenteditable]')) {
+          e.preventDefault()
+          toggleSelect()
+        }
+      }}
+      data-testid="clips"
+    >
       <div className="notes-side">
         {toolbar}
         {confirmRow}
@@ -726,6 +830,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
           />
           <span className="clip-search-hint"><kbd>↵</kbd> copy · <kbd>Ctrl</kbd><kbd>↵</kbd> paste into pane</span>
         </div>
+        <FilterChips chips={chips} onPick={pickChip} testPrefix="clip-chip" className="clip-chips" />
         {adding !== null && (
           <div className="clip-add" data-testid="clip-add">
             <textarea autoFocus className="clip-add-text" value={adding} placeholder="Text to keep on the clipboard history" spellCheck={false} onChange={(e) => setAdding(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); void addText() } if (e.key === 'Escape') { e.preventDefault(); setAdding(null) } }} data-escape-close="" />
@@ -736,7 +841,27 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
             </div>
           </div>
         )}
-        <div ref={listRef} className="clip-list" role="listbox" onContextMenu={(e) => { if (e.target === e.currentTarget) openMenu(e, { kind: 'root' }) }} data-testid="clip-list">
+        {/* The table's header: outside the scroller so it never covers a row, shown only in the wide layout. */}
+        {shown.length > 0 && (
+          <div className="clip-head-wrap" aria-hidden="true">
+            <div className="clip-head">
+              <span />
+              <span>Clip</span>
+              <span>Source</span>
+              <span className="clip-head-when">When</span>
+              <span className="clip-head-key">Key</span>
+              <span />
+            </div>
+          </div>
+        )}
+        <div
+          ref={listRef}
+          className={`clip-list ${group === 'favorites' && !query ? 'is-favorites' : ''} ${selecting ? 'is-selecting' : ''}`}
+          role="listbox"
+          aria-multiselectable={selecting || undefined}
+          onContextMenu={(e) => { if (e.target === e.currentTarget) openMenu(e, { kind: 'root' }) }}
+          data-testid="clip-list"
+        >
           {shown.map(row)}
           {drag?.target && <div className="notes-dropline" style={{ top: drag.target.lineY - 1, left: 8 }} />}
           {emptyLine && (
@@ -746,13 +871,19 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
             </div>
           )}
         </div>
-        {picked.size > 1 && (
-          <div className="clip-pickbar" data-testid="clip-pickbar">
-            <span>{picked.size} selected</span>
-            <button onClick={() => void merge([...picked])}><Merge strokeWidth={2} />Merge</button>
-            <button onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ kind: 'picked', x: r.left, y: r.top - 4 }) }}><Layers strokeWidth={2} />More</button>
-            <button onClick={() => void remove([...picked])}><Trash2 strokeWidth={2} />Delete</button>
-            <button className="clip-pickbar-x" onClick={() => setPicked(new Set())} title="Clear selection"><X strokeWidth={2} /></button>
+        {(selecting || picked.size > 1) && (
+          <div
+            ref={pickbarRef}
+            className={`clip-pickbar ${selecting ? 'is-selecting' : ''}`}
+            // In select mode Escape leaves it — unless a menu or drag owns Escape first.
+            {...(selecting && !menu && !drag ? { 'data-escape-close': '' } : {})}
+            data-testid="clip-pickbar"
+          >
+            <span data-testid="clip-pickbar-count">{picked.size ? `${picked.size} selected` : 'Click rows to select'}</span>
+            <button disabled={picked.size < 2} title={picked.size < 2 ? 'Pick two or more text clips' : undefined} onClick={() => void merge([...picked])} data-testid="clip-pickbar:merge"><Merge strokeWidth={2} />Merge</button>
+            <button disabled={!picked.size} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ kind: 'picked-groups', x: r.left, y: r.top - 4 }) }} data-testid="clip-pickbar:groups"><Layers strokeWidth={2} />Add to group<ChevronRight className="clip-pickbar-chev" strokeWidth={2} /></button>
+            <button disabled={!picked.size} onClick={() => void remove([...picked])} data-testid="clip-pickbar:delete"><Trash2 strokeWidth={2} />Delete</button>
+            <button className="clip-pickbar-x" onClick={leaveSelect} title={selecting ? 'Leave select mode (Esc)' : 'Clear selection'} data-testid="clip-pickbar:close"><X strokeWidth={2} /></button>
           </div>
         )}
         {settingsOpen ? <CaptureSettings settings={listing.settings} onClose={() => setSettingsOpen(false)} /> : detail}
