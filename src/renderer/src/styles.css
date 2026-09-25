@@ -919,7 +919,7 @@ kbd {
 .notes-side { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-right: 1px solid var(--hairline); }
 /* The tree's own menu bar: new note / folder / template on the left, where they
    will land in the middle, collapse-all and open-in-Explorer on the right. */
-.notes-toolbar { flex: 0 0 auto; display: flex; align-items: center; gap: 1px; padding: 5px 6px; border-bottom: 1px solid var(--hairline); }
+.notes-toolbar { flex: 0 0 auto; display: flex; align-items: center; gap: 3px; padding: 7px 8px; border-bottom: 1px solid var(--hairline); }
 .notes-tool { width: 26px; height: 24px; display: grid; place-items: center; flex: 0 0 auto; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; transition: background 0.12s ease, color 0.12s ease; }
 .notes-tool svg { width: 15px; height: 15px; }
 .notes-tool:hover, .notes-tool:focus-visible { background: var(--elev); color: var(--text); outline: none; }
@@ -1928,7 +1928,7 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 
 /* main column: search, list, selection bar, detail */
 .clip-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.clip-searchrow { display: flex; align-items: center; gap: 8px; padding: 8px 10px 6px; border-bottom: 1px solid var(--hairline); }
+.clip-searchrow { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
 .clip-search { flex: 1 1 auto; min-width: 0; height: 30px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-pill); background: var(--tint); box-shadow: var(--shadow-field); color: var(--text); font: inherit; font-size: 13px; outline: none; transition: background 0.16s ease, border-color 0.16s ease; }
 .clip-search::placeholder { color: var(--ink-5); }
 .clip-search:focus { border-color: var(--line-strong); background: var(--surface-2); }
@@ -1984,7 +1984,7 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
    the wide layout; the same thin scrollbar gutter as the list keeps the columns on the rows. */
 .clip-head-wrap { display: none; }
 /* Filter chips above the list (the Filter Table's tabs), the picker's component. */
-.clip-chips.picker-chips { padding: 8px 10px; border-bottom: 1px solid var(--hairline); }
+.clip-chips.picker-chips { padding: 0 12px 10px; border-bottom: 1px solid var(--hairline); }
 .picker-chip-ic { display: grid; place-items: center; margin-right: -1px; }
 .picker-chip-ic svg { width: 12px; height: 12px; color: var(--ink-4); }
 /* A wide list reads as the picker's table: the same --picker-cols on one
@@ -2071,20 +2071,20 @@ html[data-window="picker"], html[data-window="picker"] body, html[data-window="p
 .picker-root { position: fixed; inset: 0; padding: 28px; }
 .picker {
   position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; min-height: 0;
-  background: var(--surface-0); border-radius: var(--r-panel); box-shadow: var(--shadow-overlay); color: var(--text);
+  background: var(--surface-0); border-radius: var(--r-card); box-shadow: var(--shadow-overlay); color: var(--text);
   opacity: 0; transform: scale(0.95);
   transition: transform 180ms var(--ease-out-strong), opacity 140ms ease-out;
   will-change: transform, opacity;
 }
 .picker.is-open { opacity: 1; transform: none; }
-.picker-search { display: flex; align-items: center; gap: 10px; margin: 14px 14px 8px; height: 46px; padding: 0 16px; border-radius: var(--r-pill); background: var(--tint); box-shadow: var(--shadow-field); border: 1px solid transparent; transition: border-color 0.16s ease, background 0.16s ease; }
+.picker-search { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; margin: 14px 14px 10px; height: 46px; padding: 0 16px; border-radius: var(--r-pill); background: var(--tint); box-shadow: var(--shadow-field); border: 1px solid transparent; transition: border-color 0.16s ease, background 0.16s ease; }
 .picker-search:focus-within { border-color: var(--line-strong); background: var(--surface-2); }
 .picker-search-ic { width: 17px; height: 17px; color: var(--ink-4); flex: 0 0 auto; }
 .picker-input { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 17px; outline: none; }
 .picker-input::placeholder { color: var(--ink-5); }
 .picker-count { font-size: 11px; color: var(--ink-5); font-variant-numeric: tabular-nums; }
 /* Filter chips: one height, even gaps, the count as a small badge inside each chip. */
-.picker-chips { display: flex; align-items: center; gap: 6px; padding: 0 14px 10px; overflow-x: auto; scrollbar-width: none; }
+.picker-chips { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 2px 14px 12px; overflow-x: auto; scrollbar-width: none; }
 .picker-chip { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; height: 26px; padding: 0 5px 0 10px; border: 1px solid transparent; border-radius: var(--r-pill); background: transparent; color: var(--ink-3); font: inherit; font-size: 12px; font-weight: 500; line-height: 1; cursor: pointer; transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, scale 0.2s var(--spring-press); }
 .picker-chip:hover { background: var(--surface-2); color: var(--text); }
 .picker-chip.is-active { background: var(--surface-3); border-color: var(--line-strong); color: var(--text); }
@@ -2097,7 +2097,7 @@ html[data-window="picker"], html[data-window="picker"] body, html[data-window="p
 .picker-chip .clip-dot { margin-right: -1px; }
 
 /* The list is a table: one grid for the header and every row, so columns line up. */
-.picker-list { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px 8px; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+.picker-list { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px 12px; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
 .picker-head { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: var(--picker-cols); align-items: end; gap: 0 10px; height: 24px; padding: 0 10px 5px; background: var(--surface-0); border-bottom: 1px solid var(--line); font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-5); }
 .picker-head-when, .picker-head-key { text-align: right; }
 .picker-glide { position: absolute; left: 8px; right: 8px; border-radius: 8px; background: var(--surface-3); transition: top 140ms var(--ease-out), height 140ms var(--ease-out); pointer-events: none; }
@@ -2113,7 +2113,8 @@ html[data-window="picker"], html[data-window="picker"] body, html[data-window="p
 .picker-title { min-width: 0; font-size: 13.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .picker-title.is-custom { color: var(--accent-bright); }
 .picker-title-input { min-width: 0; height: 24px; padding: 0 8px; border: 1px solid var(--accent); border-radius: var(--r-chip); background: var(--surface-0); color: var(--text); font: inherit; font-size: 13px; outline: none; }
-.picker-source { min-width: 0; font-size: 11.5px; color: var(--ink-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.picker-source { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11.5px; color: var(--ink-4); white-space: nowrap; overflow: hidden; }
+.picker-source .clip-meta-rest { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .picker-when { font-size: 11px; color: var(--ink-5); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .picker-key { display: flex; justify-content: flex-end; }
 .picker-favkey { font-size: 10px; padding: 1px 5px; min-width: 0; color: var(--accent-bright); border-color: rgba(217, 119, 87, 0.4); white-space: nowrap; }
@@ -2126,7 +2127,7 @@ html[data-window="picker"], html[data-window="picker"] body, html[data-window="p
 .picker-star.is-on { color: var(--st-permission); }
 .picker-star.is-on svg { fill: currentColor; }
 /* Edit text: an editor inside the card, over the list. */
-.picker-editor { position: absolute; left: 14px; right: 14px; top: 70px; bottom: 44px; z-index: 5; display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--surface-2); box-shadow: var(--shadow-raised); animation: ctxmenu-pop 160ms var(--ease-out-strong) both; }
+.picker-editor { position: absolute; left: 14px; right: 14px; top: 70px; bottom: 14px; z-index: 5; display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--surface-2); box-shadow: var(--shadow-raised); animation: ctxmenu-pop 160ms var(--ease-out-strong) both; }
 .picker-editor-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .picker-editor-title { flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .picker-editor-n { font-size: 11px; color: var(--ink-5); font-variant-numeric: tabular-nums; }
@@ -2143,9 +2144,7 @@ html[data-window="picker"], html[data-window="picker"] body, html[data-window="p
 .picker-btn:disabled { opacity: 0.55; cursor: default; }
 .picker-empty { padding: 28px 12px; text-align: center; font-size: 13px; color: var(--ink-4); }
 .picker-notice { margin: 0 14px 6px; padding: 6px 10px; border-radius: var(--r-control); background: rgba(233, 162, 60, 0.12); color: var(--st-permission); font-size: 12px; animation: fade-in 140ms ease; }
-.picker-foot { display: flex; gap: 12px; justify-content: center; white-space: nowrap; padding: 8px 14px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--ink-5); }
-.picker-foot kbd { font-size: 10px; padding: 1px 5px; min-width: 0; margin-right: 2px; }
-.picker-keys { border: 0; background: transparent; padding: 0; font: inherit; color: var(--ink-5); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.picker-keys { flex: 0 0 auto; border: 0; background: transparent; padding: 0 0 0 6px; font: inherit; font-size: 11px; color: var(--ink-5); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .picker-keys:hover, .picker-keys:focus-visible { color: var(--text); }
 @media (prefers-reduced-motion: reduce) {
   .picker { transition: opacity 0.12s linear; transform: none; }

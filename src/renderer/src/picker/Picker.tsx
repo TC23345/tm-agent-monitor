@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AppWindow, Bot, Check, ClipboardPaste, Copy, Files, Globe, Image, Layers, Pencil, Search, Star, Terminal, Trash2, Type } from 'lucide-react'
 import type { ClipSummary, ClipsListing } from '@shared/types'
-import { appDisplayName, fromSource, inGroup, orderFavorites, sizeLabel, sourceLabel } from '@shared/clips.mjs'
+import { fromSource, inGroup, orderFavorites, sizeLabel } from '@shared/clips.mjs'
 import { fuzzyScore } from '@shared/palette.mjs'
 import { isPickerFavoriteModifier, modifierLabel } from '@shared/hotkeys.mjs'
 import { ContextMenu, tidyEntries, type ContextEntry } from '../ContextMenu'
 import { FilterChips } from '../clipboard/FilterChips'
+import { SourceCell } from '../clipboard/SourceCell'
 import { tid } from '../testid'
 
 /** How many rows the enter animation staggers (Beautiful UI: 20 ms each, at most 8). */
@@ -315,13 +316,14 @@ export function Picker() {
             ref={inputRef}
             className="picker-input"
             value={query}
-            placeholder="Paste what?"
+            aria-label="Search clips"
             spellCheck={false}
             autoComplete="off"
             onChange={(e) => setQuery(e.target.value)}
             data-testid="picker-search"
           />
           <span className="picker-count">{rows.length}</span>
+          <button className="picker-keys" onClick={() => window.picker.openKeySettings()} title="Keyboard shortcuts (Settings)" data-testid="picker-keys">keys</button>
         </div>
         <FilterChips
           chips={chips.map((c) => ({ ...c, active: filter === c.id }))}
@@ -341,7 +343,6 @@ export function Picker() {
           {rows.map((c, index) => {
             const favAt = favorites.findIndex((f) => f.id === c.id)
             const thumb = c.kind === 'image' ? thumbs.get(c.id) : undefined
-            const source = [sourceLabel(c.source) || appDisplayName(c.source.exe), c.bytes >= 4096 ? sizeLabel(c.bytes) : null].filter(Boolean).join(' · ')
             const isRenaming = renaming?.id === c.id
             return (
               <div
@@ -378,7 +379,7 @@ export function Picker() {
                 ) : (
                   <span className={`picker-title ${c.custom ? 'is-custom' : ''}`} title={c.preview || c.title}>{c.title || '(blank)'}</span>
                 )}
-                <span className="picker-source" title={source}>{source}</span>
+                <SourceCell clip={c} extras={c.bytes >= 4096 ? [sizeLabel(c.bytes)] : []} className="picker-source" />
                 <span className="picker-when">{ago(c.copiedAt, now)}</span>
                 <span className="picker-key">{favAt >= 0 && favAt < 3 && <kbd className="picker-favkey">{modKey}+{favAt + 1}</kbd>}</span>
                 <button
@@ -420,8 +421,6 @@ export function Picker() {
               data-testid="picker-editor-text"
             />
             <div className="picker-editor-foot">
-              <span><kbd>Ctrl</kbd><kbd>↵</kbd> save</span>
-              <span><kbd>Esc</kbd> cancel</span>
               <span className="picker-editor-grow" />
               <button className="picker-btn" onClick={cancelEdit} data-testid="picker-editor-cancel">Cancel</button>
               <button className="picker-btn is-primary" disabled={editing.saving} onClick={() => void saveEdit()} data-testid="picker-editor-save">Save</button>
@@ -429,15 +428,6 @@ export function Picker() {
           </div>
         )}
         {notice && <div className="picker-notice" role="status" data-testid="picker-notice">{notice}</div>}
-        <div className="picker-foot">
-          <span><kbd>↵</kbd> paste</span>
-          <span><kbd>⇧</kbd><kbd>↵</kbd> copy</span>
-          <span><kbd>{modKey}</kbd><kbd>1–3</kbd> favorites</span>
-          <span><kbd>Tab</kbd> filter</span>
-          <span><kbd>F2</kbd> rename</span>
-          <span><kbd>Esc</kbd> close</span>
-          <button className="picker-keys" onClick={() => window.picker.openKeySettings()} title="Change these keys in Settings → Keyboard shortcuts" data-testid="picker-keys">keys</button>
-        </div>
         {menu && menuClip && (
           <ContextMenu
             x={menu.x}

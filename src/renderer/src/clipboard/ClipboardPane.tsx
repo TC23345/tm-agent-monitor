@@ -12,6 +12,7 @@ import { useTreeDrag, type DragPress } from '../useTreeDrag'
 import { tid } from '../testid'
 import { CaptureSettings } from './CaptureSettings'
 import { FilterChips, nextChip, type FilterChip } from './FilterChips'
+import { SourceCell } from './SourceCell'
 
 /** Expanded sidebar sections. */
 const OPEN_KEY = 'tm.clips.open.v1'
@@ -75,37 +76,6 @@ function SourceGlyph({ clip }: { clip: ClipSummary }) {
     case 'manual': return <Pencil className={cls} strokeWidth={2} />
     default: return <AppWindow className={cls} strokeWidth={2} />
   }
-}
-
-/**
- * The colour of a row's source chip (the Filter Table's status chip): the
- * provider's dot colour for a pane or an agent, blue for the browser, the
- * accent for your own adds, grey for any other app. A dot and a 14% tint,
- * never a filled row.
- */
-const PROVIDER_TONES: Record<string, string> = { claude: '#e8906b', codex: '#6ab0e8', cursor: '#b58cff' }
-function sourceTone(source: ClipSummary['source']): string {
-  switch (source.kind) {
-    case 'chrome': return 'var(--st-running)'
-    case 'terminal': case 'agent': return PROVIDER_TONES[source.provider ?? ''] ?? 'var(--st-idle)'
-    case 'manual': return 'var(--accent)'
-    default: return 'var(--st-idle)'
-  }
-}
-
-/** The source cell: a chip naming what made the copy, then the detail (host, project, size…). */
-function SourceCell({ clip, extras }: { clip: ClipSummary; extras: string[] }) {
-  const [name, ...rest] = sourceLabel(clip.source).split(' · ')
-  const detail = [...rest, ...extras].join(' · ')
-  return (
-    <span className="clip-meta" title={[name, detail].filter(Boolean).join(' · ')}>
-      <span className={`clip-kind clip-kind--${clip.source.kind}`} style={{ ['--tone' as string]: sourceTone(clip.source) }}>
-        <span className="clip-kind-dot" />
-        <span className="clip-kind-name">{name || 'Unknown app'}</span>
-      </span>
-      {detail && <span className="clip-meta-rest">{detail}</span>}
-    </span>
-  )
 }
 
 type MenuSpec =
@@ -822,13 +792,12 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
             ref={searchRef}
             className="clip-search"
             value={query}
-            placeholder={group === 'all' ? 'Search clips' : `Search ${group === 'favorites' ? 'favorites' : group === 'images' ? 'images' : group}`}
+            aria-label={group === 'all' ? 'Search clips' : `Search ${group === 'favorites' ? 'favorites' : group === 'images' ? 'images' : group}`}
             spellCheck={false}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onSearchKey}
             data-testid="clip-search"
           />
-          <span className="clip-search-hint"><kbd>↵</kbd> copy · <kbd>Ctrl</kbd><kbd>↵</kbd> paste into pane</span>
         </div>
         <FilterChips chips={chips} onPick={pickChip} testPrefix="clip-chip" className="clip-chips" />
         {adding !== null && (
@@ -837,7 +806,6 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
             <div className="clip-add-row">
               <button className="clip-confirm-yes" onClick={() => void addText()} data-testid="clip-add-save">Add</button>
               <button className="clip-confirm-no" onClick={() => setAdding(null)}>Cancel</button>
-              <span className="clip-search-hint"><kbd>Ctrl</kbd><kbd>↵</kbd></span>
             </div>
           </div>
         )}
