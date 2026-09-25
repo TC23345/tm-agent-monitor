@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AppWindow, Bot, Check, ClipboardPaste, Copy, Files, Globe, Image, Layers, Pencil, Search, Star, Terminal, Trash2, Type } from 'lucide-react'
+import { AppWindow, Bot, Check, ClipboardPaste, Copy, Download, Files, Globe, Image, Layers, Pencil, Search, Star, Terminal, Trash2, Type } from 'lucide-react'
 import type { ClipSummary, ClipsListing } from '@shared/types'
 import { fromSource, inGroup, orderFavorites, sizeLabel } from '@shared/clips.mjs'
 import { fuzzyScore } from '@shared/palette.mjs'
@@ -45,11 +45,13 @@ type Chip = { id: string; label: string; count: number; dot?: string; star?: boo
 /**
  * The quick picker (PRD §5.3, design note § Quick picker): Bencho's command
  * bar shape — a 28px panel with a pill search — over Beautiful UI's search
- * results laid out as a table (kind · clip · source · when · key · star),
- * favorites pinned first, filter chips with count badges, one gliding
- * highlight, a kbd footer. Enter pastes into the window the picker opened
- * over, Shift+Enter copies only, Alt+1–3 (or Ctrl+1–3, Settings → Keyboard
- * shortcuts) take a favorite, Escape closes. Each row has a hover star and
+ * results laid out as a table (star · kind · clip · source · when · key),
+ * newest first in every view, filter chips with count badges and a search
+ * that opens from a circle at the end of the chip row, one gliding
+ * highlight, no hint footer. A click selects a row; Enter or a double-click
+ * pastes into the window the picker opened over, Shift+Enter copies only,
+ * Alt+1–3 (or Ctrl+1–3, Settings → Keyboard shortcuts) take a favorite,
+ * Escape collapses an open search, then closes. Each row has a star and
  * the shared right-click menu; F2 renames a row in place, Edit text opens an
  * editor inside the card. It reads the same list as the Clipboard pane
  * through IPC and re-reads on `clips:changed`; nothing is held per window.
@@ -57,6 +59,8 @@ type Chip = { id: string; label: string; count: number; dot?: string; star?: boo
 export function Picker() {
   const [listing, setListing] = useState<ClipsListing | null>(null)
   const [query, setQuery] = useState('')
+  /** The search field is a circle at the end of the chip row until clicked or typed into. */
+  const [searchOpen, setSearchOpen] = useState(false)
   const [filter, setFilter] = useState('all')
   const [active, setActive] = useState(0)
   const [open, setOpen] = useState(false)
@@ -132,11 +136,7 @@ export function Picker() {
     if (filter === 'favorites') list = favorites
     else if (filter.startsWith('src:')) list = list.filter((c) => fromSource(c, filter.slice(4)))
     else if (filter !== 'all') list = list.filter((c) => inGroup(c, filter))
-    else {
-      // Favorites pinned on top, then everything else newest first.
-      const favIds = new Set(favorites.map((c) => c.id))
-      list = [...favorites, ...list.filter((c) => !favIds.has(c.id))]
-    }
+    // All is newest first, favorites included in their place — the ★ chip is where they pin.
     const q = query.trim()
     if (!q) return list.slice(0, 200)
     const scored: { c: ClipSummary; s: number }[] = []
@@ -264,7 +264,10 @@ export function Picker() {
     if (e.key === 'ArrowDown') setActive((i) => Math.min(i + 1, Math.max(0, rows.length - 1)))
     else if (e.key === 'ArrowUp') setActive((i) => Math.max(i - 1, 0))
     else if (e.key === 'Enter') pick(rows[active], e.shiftKey ? 'copy' : 'paste')
-    else if (e.key === 'Escape') window.picker.close()
+    else if (e.key === 'Escape') {
+      // An open search collapses first (clearing what was typed); the next Escape closes the picker.
+      if (query || searchOpen) { setQuery(''); setSearchOpen(false) } else window.picker.close()
+    }
     else if (e.key === 'F2') startRename(rows[active])
     else if (favoriteKey(e)) pick(favorites[favoriteKey(e) - 1], 'paste')
     else if (e.key === 'Tab') {
@@ -310,34 +313,57 @@ export function Picker() {
         data-menu-host=""
         data-testid="picker"
       >
-        <div className="picker-search">
-          <Search className="picker-search-ic" strokeWidth={2} />
-          <input
-            ref={inputRef}
-            className="picker-input"
-            value={query}
-            aria-label="Search clips"
-            spellCheck={false}
-            autoComplete="off"
-            onChange={(e) => setQuery(e.target.value)}
-            data-testid="picker-search"
+        <div className="picker-top">
+          <FilterChips
+            chips={chips.map((c) => ({ ...c, active: filter === c.id }))}
+            onPick={(chip) => { setFilter(chip.id); inputRef.current?.focus() }}
+            testPrefix="picker-chip"
           />
-          <span className="picker-count">{rows.length}</span>
+          {/* The search: a circle after the chips that opens on click, or as soon as you type. */}
+          <div className={`picker-search ${searchOpen || query ? 'is-open' : ''}`} data-testid="picker-search-wrap">
+            <button
+              className="picker-search-btn"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setSearchOpen((v) => (v && !query ? false : true)); inputRef.current?.focus() }}
+              title="Search"
+              aria-label="Search"
+              aria-expanded={searchOpen || !!query}
+              data-testid="picker-search-toggle"
+            >
+              <Search strokeWidth={2} />
+            </button>
+            <input
+              ref={inputRef}
+              className="picker-input"
+              value={query}
+              aria-label="Search clips"
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(e) => { setQuery(e.target.value); if (e.target.value) setSearchOpen(true) }}
+              data-testid="picker-search"
+            />
+          </div>
           <button className="picker-keys" onClick={() => window.picker.openKeySettings()} title="Keyboard shortcuts (Settings)" data-testid="picker-keys">keys</button>
         </div>
-        <FilterChips
-          chips={chips.map((c) => ({ ...c, active: filter === c.id }))}
-          onPick={(chip) => { setFilter(chip.id); inputRef.current?.focus() }}
-          testPrefix="picker-chip"
-        />
         <div className="picker-list" ref={listRef} role="listbox" aria-label="Clips" data-testid="picker-list">
-          <div className="picker-head" aria-hidden="true">
+          <div className="picker-head">
+            <span />
             <span />
             <span>Clip</span>
             <span>Source</span>
             <span className="picker-head-when">When</span>
-            <span className="picker-head-key">Key</span>
-            <span />
+            <span className="picker-head-key">
+              <button
+                className="picker-head-btn"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { void window.picker.exportClips() }}
+                title="Save the history as JSON"
+                aria-label="Save the history as JSON"
+                data-testid="picker-export"
+              >
+                <Download strokeWidth={2} />
+              </button>
+            </span>
           </div>
           {glide && <div className="picker-glide" style={{ top: glide.top, height: glide.height }} />}
           {rows.map((c, index) => {
@@ -353,10 +379,25 @@ export function Picker() {
                 className={`picker-row ${index === active ? 'is-active' : ''} ${menu?.id === c.id ? 'is-menu' : ''}`}
                 style={{ animationDelay: `${Math.min(index, STAGGER_ROWS) * 20}ms` }}
                 onMouseMove={() => { if (index !== active) setActive(index) }}
-                onClick={(e) => { if (!isRenaming) pick(c, e.shiftKey ? 'copy' : 'paste') }}
+                // A click only selects the row; Enter, a double-click or the menu paste it.
+                onClick={() => { if (!isRenaming) setActive(index) }}
+                onDoubleClick={(e) => { if (!isRenaming) pick(c, e.shiftKey ? 'copy' : 'paste') }}
                 onContextMenu={(e) => { e.preventDefault(); setActive(index); setMenu({ id: c.id, x: e.clientX, y: e.clientY }) }}
                 data-testid={tid('picker-row', c.id)}
               >
+                <button
+                  className={`picker-star ${c.favorite ? 'is-on' : ''}`}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => { e.stopPropagation(); star(c) }}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                  title={c.favorite ? 'Unstar' : 'Star'}
+                  aria-label={c.favorite ? 'Unstar' : 'Star'}
+                  aria-pressed={c.favorite}
+                  tabIndex={-1}
+                  data-testid={tid('picker-star', c.id)}
+                >
+                  <Star strokeWidth={2} />
+                </button>
                 <span className="picker-cell-ic">{thumb ? <img className="picker-thumb" src={thumb} alt="" draggable={false} /> : <Glyph clip={c} />}</span>
                 {isRenaming ? (
                   <input
@@ -382,18 +423,6 @@ export function Picker() {
                 <SourceCell clip={c} extras={c.bytes >= 4096 ? [sizeLabel(c.bytes)] : []} className="picker-source" />
                 <span className="picker-when">{ago(c.copiedAt, now)}</span>
                 <span className="picker-key">{favAt >= 0 && favAt < 3 && <kbd className="picker-favkey">{modKey}+{favAt + 1}</kbd>}</span>
-                <button
-                  className={`picker-star ${c.favorite ? 'is-on' : ''}`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={(e) => { e.stopPropagation(); star(c) }}
-                  title={c.favorite ? 'Unstar' : 'Star'}
-                  aria-label={c.favorite ? 'Unstar' : 'Star'}
-                  aria-pressed={c.favorite}
-                  tabIndex={-1}
-                  data-testid={tid('picker-star', c.id)}
-                >
-                  <Star strokeWidth={2} />
-                </button>
               </div>
             )
           })}

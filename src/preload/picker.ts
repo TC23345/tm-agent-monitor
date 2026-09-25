@@ -32,6 +32,8 @@ const api = {
   clipText: (id: string): Promise<{ text: string } | null> => ipcRenderer.invoke('clips:get', id),
   /** The footer's "keys" link: close, and open the workspace at Settings → Keyboard shortcuts. */
   openKeySettings: () => ipcRenderer.send('picker:settings'),
+  /** The header's save button: the same explicit Export to JSON as the pane (a save dialog; main answers null when cancelled). */
+  exportClips: (): Promise<{ path: string; count: number } | null> => ipcRenderer.invoke('clips:export'),
   /** Open/close cue from main, with the pop-in's origin corner and the favorite keys' modifier on `enter`. */
   onPhase: (cb: (phase: 'enter' | 'exit', origin?: string, favoriteModifier?: string) => void) => {
     const listener = (_e: unknown, phase: 'enter' | 'exit', origin?: string, favoriteModifier?: string) => cb(phase, origin, favoriteModifier)
