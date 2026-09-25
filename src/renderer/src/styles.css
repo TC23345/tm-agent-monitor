@@ -1933,12 +1933,6 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 
 /* main column: search, list, selection bar, detail */
 .clip-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.clip-searchrow { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
-.clip-search { flex: 1 1 auto; min-width: 0; height: 30px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-pill); background: var(--tint); box-shadow: var(--shadow-field); color: var(--text); font: inherit; font-size: 13px; outline: none; transition: background 0.16s ease, border-color 0.16s ease; }
-.clip-search::placeholder { color: var(--ink-5); }
-.clip-search:focus { border-color: var(--line-strong); background: var(--surface-2); }
-.clip-search-hint { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--ink-5); white-space: nowrap; }
-.clip-search-hint kbd { font-size: 10px; padding: 1px 4px; min-width: 0; }
 .clip-add { padding: 8px 10px; border-bottom: 1px solid var(--hairline); display: flex; flex-direction: column; gap: 6px; }
 .clip-add-text { min-height: 72px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface-2); color: var(--text); font: 12.5px/1.45 ui-monospace, "Cascadia Code", Consolas, monospace; resize: vertical; outline: none; }
 .clip-add-row { display: flex; align-items: center; gap: 6px; }
@@ -1989,7 +1983,8 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
    the wide layout; the same thin scrollbar gutter as the list keeps the columns on the rows. */
 .clip-head-wrap { display: none; }
 /* Filter chips above the list (the Filter Table's tabs), the picker's component. */
-.clip-chips.picker-chips { padding: 0 12px 10px; border-bottom: 1px solid var(--hairline); }
+.clip-chips.picker-chips { padding: 10px 12px; border-bottom: 1px solid var(--hairline); }
+.clip-chips .clip-searchwrap { margin-right: 2px; }
 .picker-chip-ic { display: grid; place-items: center; margin-right: -1px; }
 .picker-chip-ic svg { width: 12px; height: 12px; color: var(--ink-4); }
 /* A wide list reads as the picker's table: the same --picker-cols on one

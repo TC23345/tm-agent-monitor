@@ -21,14 +21,17 @@ export interface FilterChip {
  * small badge inside each, a clear active chip. Clicking one is the caller's
  * business — the picker has one filter, the pane keeps its sidebar's two.
  */
-export function FilterChips({ chips, onPick, testPrefix, className = '' }: {
+export function FilterChips({ chips, onPick, testPrefix, className = '', leading }: {
   chips: FilterChip[]
   onPick: (chip: FilterChip) => void
   testPrefix: string
   className?: string
+  /** Rendered before the first chip — the pane's search circle. */
+  leading?: ReactNode
 }) {
   return (
     <div className={`picker-chips ${className}`} role="tablist" aria-label="Filter" data-testid={`${testPrefix}s`}>
+      {leading}
       {chips.map((chip) => (
         <button
           key={chip.id}

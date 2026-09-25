@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AppWindow, Bot, Check, ChevronRight, ChevronsDownUp, Clipboard, ClipboardPaste, Copy, Download, Files, FolderPlus, Globe, Image, Layers,
-  ListChecks, Merge, MoreHorizontal, Pause, Pencil, Play, Plus, SlidersHorizontal, Square, Star, Terminal, Trash2, Upload, X
+  ListChecks, Merge, MoreHorizontal, Pause, Pencil, Play, Plus, Search, SlidersHorizontal, Square, Star, Terminal, Trash2, Upload, X
 } from 'lucide-react'
 import type { ClipSummary, ClipsListing } from '@shared/types'
 import { appDisplayName, fromSource, groupNameOk, inGroup, looksLikeCode, orderFavorites, sizeLabel, sourceLabel } from '@shared/clips.mjs'
@@ -125,6 +125,8 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
 
   const listRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  /** The search is a circle before the chips until clicked or typed into. */
+  const [searchOpen, setSearchOpen] = useState(false)
   const noticeTimer = useRef(0)
   const selectedRef = useRef(selected)
   selectedRef.current = selected
@@ -450,6 +452,12 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
     } else if (e.key === 'Tab' && !e.ctrlKey && !e.altKey) {
       e.preventDefault()
       stepChip(e.shiftKey)
+    } else if (e.key === 'Escape' && (query || searchOpen)) {
+      // Collapse the search (clearing it) before Escape reaches the workspace.
+      e.preventDefault()
+      e.stopPropagation()
+      setQuery('')
+      setSearchOpen(false)
     }
   }
 
@@ -787,19 +795,38 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
         )}
       </div>
       <div className="clip-main">
-        <div className="clip-searchrow">
-          <input
-            ref={searchRef}
-            className="clip-search"
-            value={query}
-            aria-label={group === 'all' ? 'Search clips' : `Search ${group === 'favorites' ? 'favorites' : group === 'images' ? 'images' : group}`}
-            spellCheck={false}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onSearchKey}
-            data-testid="clip-search"
-          />
-        </div>
-        <FilterChips chips={chips} onPick={pickChip} testPrefix="clip-chip" className="clip-chips" />
+        {/* The search is a circle before the first chip; it opens into a field on click, or as soon as you type. */}
+        <FilterChips
+          chips={chips}
+          onPick={pickChip}
+          testPrefix="clip-chip"
+          className="clip-chips"
+          leading={
+            <div className={`picker-search clip-searchwrap ${searchOpen || query ? 'is-open' : ''}`} data-testid="clip-search-wrap">
+              <button
+                className="picker-search-btn"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { setSearchOpen((v) => (v && !query ? false : true)); searchRef.current?.focus() }}
+                title="Search"
+                aria-label="Search"
+                aria-expanded={searchOpen || !!query}
+                data-testid="clip-search-toggle"
+              >
+                <Search strokeWidth={2} />
+              </button>
+              <input
+                ref={searchRef}
+                className="picker-input"
+                value={query}
+                aria-label={group === 'all' ? 'Search clips' : `Search ${group === 'favorites' ? 'favorites' : group === 'images' ? 'images' : group}`}
+                spellCheck={false}
+                onChange={(e) => { setQuery(e.target.value); if (e.target.value) setSearchOpen(true) }}
+                onKeyDown={onSearchKey}
+                data-testid="clip-search"
+              />
+            </div>
+          }
+        />
         {adding !== null && (
           <div className="clip-add" data-testid="clip-add">
             <textarea autoFocus className="clip-add-text" value={adding} placeholder="Text to keep on the clipboard history" spellCheck={false} onChange={(e) => setAdding(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); void addText() } if (e.key === 'Escape') { e.preventDefault(); setAdding(null) } }} data-escape-close="" />
