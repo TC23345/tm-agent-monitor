@@ -1264,7 +1264,10 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .settings-x .ic-svg { width: 16px; height: 16px; }
 .settings-loading { padding: 24px; text-align: center; color: var(--muted); font-size: 13px; }
 .settings-body { padding: 4px 14px 10px; overflow-y: auto; min-height: 0; }
-.settings-body--api, .settings-body--system { padding-top: 10px; }
+.settings-body--api, .settings-body--system, .settings-body--shortcuts { padding-top: 10px; }
+/* Settings → Phone push: the URL and the "after N min" wait on one row. */
+.push-fields { gap: 6px; }
+.push-after { font-size: 11px; color: var(--faint); white-space: nowrap; }
 
 /* ---- new project modal ---- */
 .np-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
@@ -1310,8 +1313,8 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .shint { font-size: 11px; color: var(--faint); font-weight: 400; }
 .sval { font-size: 12px; color: var(--muted); }
 .srow--info .slabel { color: var(--muted); }
-/* Settings → Keyboard shortcuts: one table, preferred chord against what registered. */
-.shortcuts { padding: 11px 0; border-bottom: 1px solid var(--hairline); border-radius: 8px; transition: box-shadow 0.4s ease; scroll-margin-top: 8px; }
+/* Settings → Keyboard shortcuts (its own sub-page): one table, preferred chord against what registered. */
+.shortcuts { padding: 4px 0 11px; border-radius: 8px; transition: box-shadow 0.4s ease; scroll-margin-top: 8px; }
 .shortcuts.is-flash { box-shadow: 0 0 0 1px var(--accent), 0 0 0 5px rgba(217, 119, 87, 0.14); }
 .shortcuts-head { margin-bottom: 8px; }
 .shortcuts-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }

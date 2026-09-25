@@ -1376,7 +1376,7 @@ export function App() {
       />
 
       {palette && <CommandPalette items={paletteItems()} onClose={() => setPalette(false)} />}
-      {settingsOpen && <SettingsPanel section={settingsSection} onClose={() => { setSettingsOpen(false); setSettingsSection(undefined) }} />}
+      {settingsOpen && <SettingsPanel section={settingsSection} onSectionShown={() => setSettingsSection(undefined)} onClose={() => { setSettingsOpen(false); setSettingsSection(undefined) }} />}
       {newProjectOpen && <NewProject onClose={() => setNewProjectOpen(false)} />}
       {layoutDialog && (
         <NameDialog

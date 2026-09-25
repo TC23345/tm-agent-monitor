@@ -22,15 +22,32 @@ function shortcutOutcome(row: ShortcutRow | undefined): string {
   return `${row.label}: ${row.preferred} ${row.note ?? 'not registered'}.`
 }
 
-function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
+/** The main page's one-line summary of the shortcuts table. */
+export function shortcutsSummary(rows: readonly ShortcutRow[]): string {
+  const registered = rows.filter((row) => !!row.active).length
+  const held = rows.length - registered
+  const chords = `${registered} chord${registered === 1 ? '' : 's'} registered`
+  return held ? `${chords}, ${held} held by another app` : chords
+}
+
+function Toggle({ on, onClick, testId }: { on: boolean; onClick: () => void; testId?: string }) {
   return (
-    <button className={`toggle ${on ? 'is-on' : ''}`} onClick={onClick} role="switch" aria-checked={on}>
+    <button className={`toggle ${on ? 'is-on' : ''}`} onClick={onClick} role="switch" aria-checked={on} data-testid={testId}>
       <span className="toggle-knob" />
     </button>
   )
 }
 
-export function SettingsPanel({ onClose, section }: { onClose: () => void; section?: 'shortcuts' }) {
+type View = 'general' | 'shortcuts' | 'api' | 'system'
+const VIEW_TITLE: Record<View, string> = { general: 'Settings', shortcuts: 'Keyboard shortcuts', api: 'API settings', system: 'System & connections' }
+
+export function SettingsPanel({ onClose, section, onSectionShown }: {
+  onClose: () => void
+  /** Open straight on a sub-page (the picker's *keys* link, `tm settings`). */
+  section?: 'shortcuts'
+  /** Called once the requested section is on screen, so the same request can arrive again. */
+  onSectionShown?: () => void
+}) {
   const [s, setS] = useState<AppSettings | null>(null)
   /** The Keyboard shortcuts row recording its next chord, if any. */
   const [recording, setRecording] = useState<ShortcutId | null>(null)
@@ -38,11 +55,10 @@ export function SettingsPanel({ onClose, section }: { onClose: () => void; secti
   const [recordHint, setRecordHint] = useState<string | null>(null)
   /** The outcome of the last Record / Reset, under the table. */
   const [shortcutMsg, setShortcutMsg] = useState<{ id: ShortcutId | 'pickerFavorites'; text: string; ok: boolean } | null>(null)
-  const shortcutsRef = useRef<HTMLElement>(null)
   const [updateMsg, setUpdateMsg] = useState<string | null>(null)
   const [hookMsg, setHookMsg] = useState<string | null>(null)
   const [hookBusy, setHookBusy] = useState<ProviderId | 'extension' | null>(null)
-  const [view, setView] = useState<'general' | 'api' | 'system'>('general')
+  const [view, setView] = useState<View>(section === 'shortcuts' ? 'shortcuts' : 'general')
   const [diagnostics, setDiagnostics] = useState<Record<string, SystemDiagnostic>>({})
   const [diagnosticBusy, setDiagnosticBusy] = useState<string | null>(null)
 
@@ -121,6 +137,8 @@ export function SettingsPanel({ onClose, section }: { onClose: () => void; secti
     if (view === 'system' && Object.keys(diagnostics).length === 0) diagnose()
   }, [view])
 
+  // Escape closes the dialog from any page — while a Record is capturing, the
+  // recorder owns it (it cancels the capture) and this handler stands down.
   useEffect(() => {
     if (recording) return
     const onKey = (event: KeyboardEvent) => {
@@ -176,23 +194,45 @@ export function SettingsPanel({ onClose, section }: { onClose: () => void; secti
   recordingRef.current = recording
   useEffect(() => () => { if (recordingRef.current) window.watch.suspendHotkeys(false) }, [])
 
-  // Opened from the picker's "keys" link: scroll to the table and mark it.
+  // Leaving the shortcuts page cancels a capture in progress the same way.
+  const leaveShortcuts = () => {
+    if (recording) stopRecording(false)
+    setView('general')
+  }
+
+  // Opened from the picker's "keys" link or `tm settings`: go straight to the
+  // Keyboard shortcuts page and mark the table.
   const [flashShortcuts, setFlashShortcuts] = useState(false)
   useEffect(() => {
     if (section !== 'shortcuts' || !s) return
-    shortcutsRef.current?.scrollIntoView({ block: 'start' })
+    setView('shortcuts')
     setFlashShortcuts(true)
+    // App drops the request once it is on screen (it may clear `section`
+    // synchronously, so the flash timer lives in its own effect below).
+    onSectionShown?.()
+  }, [section, !!s])
+  useEffect(() => {
+    if (!flashShortcuts) return
     const t = setTimeout(() => setFlashShortcuts(false), 1600)
     return () => clearTimeout(t)
-  }, [section, !!s])
+  }, [flashShortcuts])
 
   return (
     <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-card" onClick={(e) => e.stopPropagation()}>
+      <div className="settings-card" onClick={(e) => e.stopPropagation()} data-testid="settings-card" data-view={view}>
         <div className="settings-head">
           <span className="settings-title">
-            {view !== 'general' && <button className="settings-back" onClick={() => setView('general')} title="Back to settings"><ArrowLeft /></button>}
-            {view === 'general' ? 'Settings' : view === 'api' ? 'API settings' : 'System & connections'}
+            {view !== 'general' && (
+              <button
+                className="settings-back"
+                onClick={view === 'shortcuts' ? leaveShortcuts : () => setView('general')}
+                title="Back to settings"
+                data-testid="settings-back"
+              >
+                <ArrowLeft />
+              </button>
+            )}
+            {VIEW_TITLE[view]}
           </span>
           <button className="settings-x" onClick={onClose} title="Close">
             <X className="ic-svg" strokeWidth={2} />
@@ -204,94 +244,19 @@ export function SettingsPanel({ onClose, section }: { onClose: () => void; secti
         ) : (
           <div className={`settings-body settings-body--${view}`}>
             {view === 'general' && <>
-            <section
-              ref={shortcutsRef}
-              className={`shortcuts ${flashShortcuts ? 'is-flash' : ''}`}
-              aria-labelledby="shortcuts-title"
-              data-testid="settings-shortcuts"
-            >
-              <div className="shortcuts-head">
-                <span className="slabel" id="shortcuts-title">Keyboard shortcuts<span className="shint">global chords work from any app; Record, then press the chord (Esc cancels)</span></span>
-              </div>
-              <table className="shortcuts-table">
-                <thead>
-                  <tr><th scope="col">Action</th><th scope="col">Shortcut</th><th scope="col">Registered</th><th scope="col"><span className="sr-only">Change</span></th></tr>
-                </thead>
-                <tbody>
-                  {s.shortcuts.map((row) => {
-                    const live = !!row.active && sameChord(row.active, row.preferred)
-                    const isRecording = recording === row.id
-                    return (
-                      <tr key={row.id} className={isRecording ? 'is-recording' : ''} data-testid={`shortcut:${row.id}`}>
-                        <th scope="row">{row.label}</th>
-                        <td><kbd className="shortcut-chord" data-testid={`shortcut-preferred:${row.id}`}>{row.preferred}</kbd></td>
-                        <td className={`shortcut-state ${live ? 'is-live' : row.active ? 'is-fallback' : 'is-missing'}`} data-testid={`shortcut-active:${row.id}`}>
-                          {live ? <><CheckCircle2 className="ic-svg" strokeWidth={2} />{row.active}</>
-                            : row.active ? <><CircleAlert className="ic-svg" strokeWidth={2} />{row.active} <span className="shint">fallback — {row.note ?? 'preferred unavailable'}</span></>
-                            : <><CircleAlert className="ic-svg" strokeWidth={2} />{row.note ?? 'not registered'}</>}
-                        </td>
-                        <td className="shortcut-actions">
-                          <button
-                            className={`hotkey-btn is-compact ${isRecording ? 'is-capturing' : ''}`}
-                            onClick={() => (isRecording ? stopRecording(false) : startRecording(row.id))}
-                            aria-pressed={isRecording}
-                            data-shortcut-recording={isRecording || undefined}
-                            data-testid={`shortcut-record:${row.id}`}
-                            title="Record: press the new chord, Esc to cancel"
-                          >
-                            {isRecording ? (recordHint ?? 'Press a chord…') : 'Record'}
-                          </button>
-                          <button
-                            className="hotkey-btn is-compact"
-                            disabled={sameChord(row.preferred, row.default) && live}
-                            onClick={() => saveShortcut(row.id, row.default)}
-                            data-testid={`shortcut-reset:${row.id}`}
-                            title={`Reset to ${row.default}`}
-                          >
-                            Reset
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                  <tr data-testid="shortcut:pickerFavorites">
-                    <th scope="row">Picker favorites<span className="shint">inside the picker only</span></th>
-                    <td><kbd className="shortcut-chord">{modifierLabel(s.pickerFavoriteModifier)}+1–3</kbd></td>
-                    <td className="shortcut-state is-live"><span className="shint">no global registration</span></td>
-                    <td className="shortcut-actions">
-                      <span className="sseg" role="radiogroup" aria-label="Picker favorite modifier">
-                        {(['Alt', 'Control'] as const).map((m) => (
-                          <button
-                            key={m}
-                            className={`hotkey-btn is-compact ${s.pickerFavoriteModifier === m ? 'is-on' : ''}`}
-                            aria-pressed={s.pickerFavoriteModifier === m}
-                            onClick={() => window.watch.setSettings({ pickerFavoriteModifier: m }).then((next) => {
-                              setS(next)
-                              setShortcutMsg({ id: 'pickerFavorites', text: `Picker favorites: ${modifierLabel(m)}+1–3 from the next open.`, ok: true })
-                            })}
-                            data-testid={`picker-fav-mod:${m}`}
-                          >
-                            {modifierLabel(m)}
-                          </button>
-                        ))}
-                      </span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              {shortcutMsg && (
-                <div className={`shortcut-msg ${shortcutMsg.ok ? 'is-ok' : 'is-warn'}`} role="status" data-testid="shortcut-msg">{shortcutMsg.text}</div>
-              )}
-            </section>
+            <div className="srow">
+              <span className="slabel">Keyboard shortcuts<span className="shint" data-testid="settings-shortcuts-summary">{shortcutsSummary(s.shortcuts)}</span></span>
+              <button className="hotkey-btn" onClick={() => setView('shortcuts')} data-testid="settings-shortcuts-open">Open</button>
+            </div>
 
             <div className="srow">
               <span className="slabel">Notifications<span className="shint">desktop "needs input" alerts</span></span>
-              <Toggle on={s.notifications} onClick={() => apply({ notifications: !s.notifications })} />
+              <Toggle on={s.notifications} onClick={() => apply({ notifications: !s.notifications })} testId="setting-notifications" />
             </div>
 
             <div className="srow">
               <span className="slabel">Start with Windows</span>
-              <Toggle on={s.launchAtLogin} onClick={() => apply({ launchAtLogin: !s.launchAtLogin })} />
+              <Toggle on={s.launchAtLogin} onClick={() => apply({ launchAtLogin: !s.launchAtLogin })} testId="setting-launch-at-login" />
             </div>
 
             <div className="srow">
@@ -312,65 +277,105 @@ export function SettingsPanel({ onClose, section }: { onClose: () => void; secti
             </div>
 
             <div className="srow">
-              <span className="slabel">Phone push<span className="shint">POST a waiting session's question to an ntfy / Pushover URL</span></span>
-              <TextSetting value={s.pushUrl} placeholder="https://ntfy.sh/your-topic" onCommit={(v) => apply({ pushUrl: v })} validate={(v) => (v === '' || /^https?:\/\/\S+$/.test(v) ? null : 'Needs an http(s) URL')} testId="push-url" />
-            </div>
-            <div className="srow">
-              <span className="slabel">Push after<span className="shint">minutes a session has waited before it is pushed</span></span>
-              <TextSetting value={String(s.pushAfterMin)} placeholder="10" width={70} onCommit={(v) => { const n = Number(v); if (Number.isInteger(n) && n >= 1 && n <= 240) apply({ pushAfterMin: n }) }} validate={(v) => (/^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 240 ? null : '1–240')} testId="push-after" />
-            </div>
-
-            <div className="srow">
-              <span className="slabel">Mock data<span className="shint">sample data for previewing</span></span>
-              <Toggle on={s.mock} onClick={() => apply({ mock: !s.mock })} />
+              <span className="slabel">Phone push<span className="shint">POST a waiting session's question to an ntfy/Pushover URL after N minutes</span></span>
+              <span className="sactions push-fields">
+                <TextSetting value={s.pushUrl} placeholder="https://ntfy.sh/your-topic" width={196} onCommit={(v) => apply({ pushUrl: v })} validate={(v) => (v === '' || /^https?:\/\/\S+$/.test(v) ? null : 'Needs an http(s) URL')} testId="push-url" />
+                <span className="push-after">after</span>
+                <TextSetting value={String(s.pushAfterMin)} placeholder="10" width={44} onCommit={(v) => { const n = Number(v); if (Number.isInteger(n) && n >= 1 && n <= 240) apply({ pushAfterMin: n }) }} validate={(v) => (/^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 240 ? null : '1–240')} testId="push-after" />
+                <span className="push-after">min</span>
+              </span>
             </div>
 
             <div className="srow">
               <span className="slabel">API meter<span className="shint">{s.hasAdminKey ? 'Anthropic Admin key configured' : 'optional organization spend and budget controls'}</span></span>
-              <button className="hotkey-btn" onClick={() => setView('api')}>Open API settings</button>
+              <button className="hotkey-btn" onClick={() => setView('api')} data-testid="settings-api-open">Open</button>
             </div>
             <div className="srow">
-              <span className="slabel">System & connections<span className="shint">daemon, hooks, ports, data, and machine paths</span></span>
-              <button className="hotkey-btn" onClick={() => setView('system')}>Open system settings</button>
-            </div>
-            <div className="srow srow--info">
-              <span className="slabel">History sync<span className="shint">daily totals → MongoDB</span></span>
-              <span
-                className="sval"
-                title={
-                  s.historySync.state === 'off'
-                    ? 'Set MONGODB_URI in .env to store daily usage history'
-                    : s.historySync.detail ?? (s.historySync.lastFlushAt ? `last flush ${new Date(s.historySync.lastFlushAt).toLocaleTimeString()}` : '')
-                }
-              >
-                {s.historySync.state === 'ok' ? 'ok' : s.historySync.state === 'off' ? 'off — no URI' : s.historySync.state}
-              </span>
-            </div>
-            <div className="srow">
-              <span className="slabel">Version<span className="shint">v{s.version}</span></span>
-              <button className="hotkey-btn" onClick={checkUpdates} title="Check GitHub Releases for a newer build">
-                Check for updates
-              </button>
-            </div>
-            <div className="srow">
-              <span className="slabel">Reinstall from source<span className="shint">{s.repoDir}</span></span>
-              <button
-                className="hotkey-btn"
-                onClick={reinstall}
-                disabled={reinstallBusy}
-                title="npm run dist in the repo, then silent reinstall and relaunch"
-              >
-                {reinstallBusy ? 'Building…' : 'Rebuild & relaunch'}
-              </button>
-            </div>
-            {updateMsg && <div className="supdate">{updateMsg}</div>}
-            <div className="srow">
-              <span className="slabel">Config folder<span className="shint">settings.json · .env · usage history</span></span>
-              <button className="hotkey-btn" onClick={() => window.watch.openConfigDir()} title="Open the app's config folder in File Explorer">
-                Open
-              </button>
+              <span className="slabel">System & connections<span className="shint">daemon, hooks, ports, data, version and updates</span></span>
+              <button className="hotkey-btn" onClick={() => setView('system')} data-testid="settings-system-open">Open</button>
             </div>
             </>}
+
+            {view === 'shortcuts' && (
+              <section
+                className={`shortcuts ${flashShortcuts ? 'is-flash' : ''}`}
+                aria-labelledby="shortcuts-title"
+                data-testid="settings-shortcuts"
+              >
+                <div className="shortcuts-head">
+                  <span className="slabel" id="shortcuts-title">Keyboard shortcuts<span className="shint">global chords work from any app; Record, then press the chord (Esc cancels)</span></span>
+                </div>
+                <table className="shortcuts-table">
+                  <thead>
+                    <tr><th scope="col">Action</th><th scope="col">Shortcut</th><th scope="col">Registered</th><th scope="col"><span className="sr-only">Change</span></th></tr>
+                  </thead>
+                  <tbody>
+                    {s.shortcuts.map((row) => {
+                      const live = !!row.active && sameChord(row.active, row.preferred)
+                      const isRecording = recording === row.id
+                      return (
+                        <tr key={row.id} className={isRecording ? 'is-recording' : ''} data-testid={`shortcut:${row.id}`}>
+                          <th scope="row">{row.label}</th>
+                          <td><kbd className="shortcut-chord" data-testid={`shortcut-preferred:${row.id}`}>{row.preferred}</kbd></td>
+                          <td className={`shortcut-state ${live ? 'is-live' : row.active ? 'is-fallback' : 'is-missing'}`} data-testid={`shortcut-active:${row.id}`}>
+                            {live ? <><CheckCircle2 className="ic-svg" strokeWidth={2} />{row.active}</>
+                              : row.active ? <><CircleAlert className="ic-svg" strokeWidth={2} />{row.active} <span className="shint">fallback — {row.note ?? 'preferred unavailable'}</span></>
+                              : <><CircleAlert className="ic-svg" strokeWidth={2} />{row.note ?? 'not registered'}</>}
+                          </td>
+                          <td className="shortcut-actions">
+                            <button
+                              className={`hotkey-btn is-compact ${isRecording ? 'is-capturing' : ''}`}
+                              onClick={() => (isRecording ? stopRecording(false) : startRecording(row.id))}
+                              aria-pressed={isRecording}
+                              data-shortcut-recording={isRecording || undefined}
+                              data-testid={`shortcut-record:${row.id}`}
+                              title="Record: press the new chord, Esc to cancel"
+                            >
+                              {isRecording ? (recordHint ?? 'Press a chord…') : 'Record'}
+                            </button>
+                            <button
+                              className="hotkey-btn is-compact"
+                              disabled={sameChord(row.preferred, row.default) && live}
+                              onClick={() => saveShortcut(row.id, row.default)}
+                              data-testid={`shortcut-reset:${row.id}`}
+                              title={`Reset to ${row.default}`}
+                            >
+                              Reset
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                    <tr data-testid="shortcut:pickerFavorites">
+                      <th scope="row">Picker favorites<span className="shint">inside the picker only</span></th>
+                      <td><kbd className="shortcut-chord">{modifierLabel(s.pickerFavoriteModifier)}+1–3</kbd></td>
+                      <td className="shortcut-state is-live"><span className="shint">no global registration</span></td>
+                      <td className="shortcut-actions">
+                        <span className="sseg" role="radiogroup" aria-label="Picker favorite modifier">
+                          {(['Alt', 'Control'] as const).map((m) => (
+                            <button
+                              key={m}
+                              className={`hotkey-btn is-compact ${s.pickerFavoriteModifier === m ? 'is-on' : ''}`}
+                              aria-pressed={s.pickerFavoriteModifier === m}
+                              onClick={() => window.watch.setSettings({ pickerFavoriteModifier: m }).then((next) => {
+                                setS(next)
+                                setShortcutMsg({ id: 'pickerFavorites', text: `Picker favorites: ${modifierLabel(m)}+1–3 from the next open.`, ok: true })
+                              })}
+                              data-testid={`picker-fav-mod:${m}`}
+                            >
+                              {modifierLabel(m)}
+                            </button>
+                          ))}
+                        </span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                {shortcutMsg && (
+                  <div className={`shortcut-msg ${shortcutMsg.ok ? 'is-ok' : 'is-warn'}`} role="status" data-testid="shortcut-msg">{shortcutMsg.text}</div>
+                )}
+              </section>
+            )}
 
             {view === 'api' && <>
               <div className="settings-intro">Usage and history integrations are loaded from <strong>.env</strong>. Secrets are never displayed here.</div>
@@ -385,8 +390,45 @@ export function SettingsPanel({ onClose, section }: { onClose: () => void; secti
             </>}
 
             {view === 'system' && <>
-              <div className="section-head"><span>Connections</span><button className="icon-text-btn" onClick={() => diagnose()} disabled={diagnosticBusy !== null}><RefreshCw className={diagnosticBusy === 'all' ? 'is-spinning' : ''} />Retest all</button></div>
+              <div className="section-head"><span>This app</span></div>
+              <div className="srow" data-testid="settings-version">
+                <span className="slabel">Version<span className="shint">v{s.version}</span></span>
+                <button className="hotkey-btn" onClick={checkUpdates} title="Check GitHub Releases for a newer build">
+                  Check for updates
+                </button>
+              </div>
+              <div className="srow" data-testid="settings-reinstall">
+                <span className="slabel">Reinstall from source<span className="shint">{s.repoDir}</span></span>
+                <button
+                  className="hotkey-btn"
+                  onClick={reinstall}
+                  disabled={reinstallBusy}
+                  title="npm run dist in the repo, then silent reinstall and relaunch"
+                >
+                  {reinstallBusy ? 'Building…' : 'Rebuild & relaunch'}
+                </button>
+              </div>
+              {updateMsg && <div className="supdate">{updateMsg}</div>}
+              <div className="srow" data-testid="settings-mock">
+                <span className="slabel">Mock data<span className="shint">sample data for previewing</span></span>
+                <Toggle on={s.mock} onClick={() => apply({ mock: !s.mock })} testId="setting-mock" />
+              </div>
+
+              <div className="section-head section-head--spaced"><span>Connections</span><button className="icon-text-btn" onClick={() => diagnose()} disabled={diagnosticBusy !== null}><RefreshCw className={diagnosticBusy === 'all' ? 'is-spinning' : ''} />Retest all</button></div>
               <div className="srow srow--info"><span className="slabel">Daemon address<span className="shint">Authenticated loopback event receiver</span></span><span className="sval">127.0.0.1:{s.port}</span></div>
+              <div className="srow srow--info" data-testid="settings-history-sync">
+                <span className="slabel">History sync<span className="shint">daily totals → MongoDB</span></span>
+                <span
+                  className="sval"
+                  title={
+                    s.historySync.state === 'off'
+                      ? 'Set MONGODB_URI in .env to store daily usage history'
+                      : s.historySync.detail ?? (s.historySync.lastFlushAt ? `last flush ${new Date(s.historySync.lastFlushAt).toLocaleTimeString()}` : '')
+                  }
+                >
+                  {s.historySync.state === 'ok' ? 'ok' : s.historySync.state === 'off' ? 'off — no URI' : s.historySync.state}
+                </span>
+              </div>
               {['daemon', 'endpoint', 'claude-usage', 'codex-auth', 'history'].map((id) => {
                 const result = diagnostics[id]
                 return <div className="diag-row" key={id}>
@@ -435,7 +477,13 @@ export function SettingsPanel({ onClose, section }: { onClose: () => void; secti
               </div>
               {extensionMsg && <div className="supdate">{extensionMsg}</div>}
 
-              <div className="section-head section-head--spaced"><span>Connected files & data</span><button className="icon-text-btn" onClick={() => window.watch.openConfigDir()}>Open folder</button></div>
+              <div className="section-head section-head--spaced"><span>Connected files & data</span></div>
+              <div className="srow" data-testid="settings-config-folder">
+                <span className="slabel">Config folder<span className="shint">settings.json · .env · usage history</span></span>
+                <button className="hotkey-btn" onClick={() => window.watch.openConfigDir()} title="Open the app's config folder in File Explorer">
+                  Open
+                </button>
+              </div>
               <div className="settings-note">This folder mixes app-owned configuration with Electron runtime caches. The paths below are the files the watcher actively reads or writes; Cache, GPUCache, Network, and Session Storage are Chromium internals and can normally be ignored.</div>
               {s.systemPaths.map((item) => <button className="path-row" key={item.id} onClick={() => item.exists && window.watch.openPath(item.path)} disabled={!item.exists} title={item.path}>
                 <span className="path-copy"><span>{item.label}</span><small>{item.detail}</small><code>{item.path}</code></span><span className={`path-state ${item.exists ? 'is-set' : ''}`}>{item.exists ? 'Open' : 'Missing'}</span>

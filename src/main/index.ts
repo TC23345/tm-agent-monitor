@@ -2520,8 +2520,8 @@ function registerIpc(): void {
     void pickClip(id, mode)
   })
   ipcMain.on('picker:close', () => hidePicker())
-  // The footer's "keys" link: close the picker, open the workspace at Settings →
-  // Keyboard shortcuts. No arguments, and only from the picker's own page.
+  // The search row's "keys" link: close the picker, open the workspace on the Settings →
+  // Keyboard shortcuts sub-page. No arguments, and only from the picker's own page.
   ipcMain.on('picker:settings', (event, ...args: unknown[]) => {
     if (args.length || event.sender !== pickerWindow()?.webContents) return
     hidePicker()
