@@ -1,10 +1,10 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AppWindow, Bot, Check, ChevronRight, ChevronsDownUp, Clipboard, ClipboardPaste, Copy, Download, Files, FolderPlus, Globe, Image, Layers,
-  ListChecks, Merge, MoreHorizontal, Pause, Pencil, Play, Plus, Search, SlidersHorizontal, Square, Star, Terminal, Trash2, Upload, X
+  ListChecks, Merge, MoreHorizontal, Pause, Pencil, Play, Plus, Search, SlidersHorizontal, Square, SquarePen, Star, Terminal, Trash2, Upload, X
 } from 'lucide-react'
 import type { ClipSummary, ClipsListing } from '@shared/types'
-import { appDisplayName, fromSource, groupNameOk, inGroup, looksLikeCode, orderFavorites, sizeLabel, sourceLabel } from '@shared/clips.mjs'
+import { appDisplayName, chordLabel, fromSource, groupNameOk, inGroup, looksLikeCode, orderFavorites, sizeLabel, sourceLabel } from '@shared/clips.mjs'
 import { fuzzyScore } from '@shared/palette.mjs'
 import { ContextMenu, tidyEntries, type ContextEntry } from '../ContextMenu'
 import { Collapse } from '../Collapse'
@@ -13,6 +13,8 @@ import { tid } from '../testid'
 import { CaptureSettings } from './CaptureSettings'
 import { FilterChips, nextChip, type FilterChip } from './FilterChips'
 import { SourceCell } from './SourceCell'
+import { ClipEditCard } from './ClipEditCard'
+import { gripAt, useClipColumns } from './ClipColumns'
 
 /** Expanded sidebar sections. */
 const OPEN_KEY = 'tm.clips.open.v1'
@@ -92,7 +94,8 @@ interface DropTarget { index: number; lineY: number; problem?: string }
 /**
  * The Clipboard pane (PRD §5.1): a groups sidebar (All · Favorites · Images ·
  * your groups · Sources), a search box, the list newest first, and a detail
- * card for the selected clip. Right-click for the shared ContextMenu; star a
+ * card for the selected clip (Edit… swaps in the edit card: title, text,
+ * note, expansion code, keybind). Right-click for the shared ContextMenu; star a
  * row; drag favorites into the order Shift+Alt+1..3 will send; Ctrl+click to
  * pick several for merge. Bodies are fetched one at a time (`clips:get`);
  * the list is summaries. Refreshes follow `clips:changed`, coalesced, and
@@ -106,6 +109,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
   const [selected, setSelected] = useState<string | null>(null)
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [body, setBody] = useState<{ id: string; text: string } | null>(null)
+  /** The clip whose Edit… card is open (where the detail card sits). */
   const [editing, setEditing] = useState<string | null>(null)
   const [imageUrl, setImageUrl] = useState<{ id: string; url: string } | null>(null)
   const [thumbs, setThumbs] = useState<Map<string, string>>(new Map())
@@ -125,6 +129,8 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
 
   const listRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  /** The wide layout's header, which the column grips measure. */
+  const headRef = useRef<HTMLDivElement>(null)
   /** The search is a circle before the chips until clicked or typed into. */
   const [searchOpen, setSearchOpen] = useState(false)
   const noticeTimer = useRef(0)
@@ -193,12 +199,14 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
     if (!q) return list
     const scored: { c: ClipSummary; s: number }[] = []
     for (const c of list) {
-      const s = fuzzyScore(q, `${c.title} ${c.preview}`)
+      const s = fuzzyScore(q, [c.title, c.shortcut, c.note, c.preview].filter(Boolean).join(' '))
       if (s !== null) scored.push({ c, s })
     }
     scored.sort((a, b) => b.s - a.s || b.c.copiedAt - a.c.copiedAt)
     return scored.map((x) => x.c)
   }, [clips, group, source, query, listing?.favoritesOrder])
+
+  const cols = useClipColumns('pane', headRef, useMemo(() => shown.flatMap((c) => (c.hotkey ? [chordLabel(c.hotkey)] : [])), [shown]))
 
   const counts = useMemo(() => ({
     all: clips.length,
@@ -341,10 +349,19 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
     const next = clip.groups.includes(name) ? clip.groups.filter((g) => g !== name) : [...clip.groups, name]
     void window.watch.updateClip(id, { groups: next })
   }
-  const saveText = async (id: string, text: string) => {
-    if (!(await window.watch.updateClip(id, { text }))) { say('Could not save the edit'); return }
+  /** Edit…: select the clip and swap its detail for the edit card. */
+  const openEdit = (id: string) => {
+    setSelected(id)
+    setEditing(id)
+    setSettingsOpen(false)
+    setTitleEdit(null)
+  }
+  /** Saved or cancelled: back to the detail, its body read again (an edit may have changed it). */
+  const closeEdit = (id: string) => {
     setEditing(null)
-    setBody({ id, text })
+    const clip = byId.get(id)
+    if (!clip || clip.kind === 'image') return
+    void window.watch.getClip(id).then((res) => { if (res && selectedRef.current === id) setBody({ id, text: res.text }) })
   }
   const commitTitle = async () => {
     const t = titleEdit
@@ -494,13 +511,14 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
       const c = byId.get(m.id)
       if (!c) return []
       return tidyEntries([
+        { kind: 'item', id: 'edit', label: 'Edit…', icon: <SquarePen />, onSelect: () => openEdit(m.id) },
+        { kind: 'sep' },
         { kind: 'item', id: 'copy', label: copied === m.id ? 'Copied' : 'Copy', icon: <Copy />, keys: ['↵'], keepOpen: true, onSelect: () => void copy(m.id) },
         c.kind !== 'image' && { kind: 'submenu', id: 'paste', label: 'Paste into', icon: <ClipboardPaste />, disabled: !terminals.length, hint: terminals.length ? undefined : 'Open a terminal pane first', entries: pasteEntries(m.id) },
         { kind: 'item', id: 'star', label: c.favorite ? 'Unstar' : 'Star', icon: <Star />, onSelect: () => star(m.id, !c.favorite) },
         { kind: 'submenu', id: 'groups', label: 'Add to group', icon: <Layers />, entries: groupEntries([m.id]) },
         { kind: 'sep' },
         { kind: 'item', id: 'title', label: c.custom ? 'Rename title' : 'Give it a title', icon: <Pencil />, keys: ['F2'], onSelect: () => setTitleEdit({ id: m.id, value: c.custom ? c.title : '' }) },
-        c.kind === 'text' && { kind: 'item', id: 'edit', label: 'Edit text', icon: <Pencil />, onSelect: () => { setSelected(m.id); setEditing(m.id) } },
         picked.size > 1 && picked.has(m.id) && { kind: 'item', id: 'merge', label: `Merge ${picked.size} selected`, icon: <Merge />, onSelect: () => void merge([...picked]) },
         { kind: 'sep' },
         { kind: 'item', id: 'delete', label: picked.size > 1 && picked.has(m.id) ? `Delete ${picked.size} selected` : 'Delete', icon: <Trash2 />, onSelect: () => void remove(picked.size > 1 && picked.has(m.id) ? [...picked] : [m.id]) }
@@ -695,11 +713,16 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
             data-testid="clip-title-input"
           />
         ) : (
-          <span className={`clip-title ${c.custom ? 'is-custom' : ''}`}>{c.title || '(blank)'}</span>
+          <span className="clip-title-cell">
+            <span className={`clip-title ${c.custom ? 'is-custom' : ''}`} title={c.note || undefined}>{c.title || '(blank)'}</span>
+            {c.shortcut && <span className="clip-short" title={`Expansion code: type ${c.shortcut} in Chrome`} data-testid={tid('clip-short', c.id)}>{c.shortcut}</span>}
+          </span>
         )}
         <span className="clip-when">{copied === c.id ? <span className="clip-copied">Copied</span> : ago(c.copiedAt, now)}</span>
         <SourceCell clip={c} extras={extras} />
-        {group === 'favorites' && index < 3 && !query && <kbd className="clip-favkey" title={`Paste favorite ${index + 1} (Settings → Keyboard shortcuts)`} data-testid={tid('clip-favkey', c.id)}>{index + 1}</kbd>}
+        {c.hotkey
+          ? <kbd className="clip-chord clip-keychip" title={`Keybind: ${chordLabel(c.hotkey)} pastes this from any app`} data-testid={tid('clip-chord', c.id)}>{chordLabel(c.hotkey)}</kbd>
+          : group === 'favorites' && index < 3 && !query && <kbd className="clip-favkey" title={`Paste favorite ${index + 1} (Settings → Keyboard shortcuts)`} data-testid={tid('clip-favkey', c.id)}>{index + 1}</kbd>}
         <button
           className={`notes-rowact clip-star ${c.favorite ? 'is-on' : ''}`}
           onClick={(e) => { e.stopPropagation(); star(c.id, !c.favorite) }}
@@ -724,25 +747,21 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
           {[sourceLabel(selectedClip.source), body && selectedClip.kind === 'text' ? `${body.text.length.toLocaleString()} chars` : sizeLabel(selectedClip.bytes), selectedClip.copies > 1 ? `copied ${selectedClip.copies}×` : null, selectedClip.edited ? 'edited' : null, selectedClip.merged ? 'merged' : null].filter(Boolean).join(' · ')}
         </span>
         <span className="clip-detail-actions">
-          {selectedClip.kind === 'text' && (editing === selectedClip.id
-            ? <button className="iconbtn iconbtn--sm" title="Save (Ctrl+S)" onClick={() => { const ta = document.querySelector<HTMLTextAreaElement>('.clip-edit'); if (ta) void saveText(selectedClip.id, ta.value) }} data-testid="clip-detail:save"><Check className="gear gear--sm" strokeWidth={2} /></button>
-            : <button className="iconbtn iconbtn--sm" title="Edit text" onClick={() => setEditing(selectedClip.id)} data-testid="clip-detail:edit"><Pencil className="gear gear--sm" strokeWidth={2} /></button>)}
+          <button className="iconbtn iconbtn--sm" title="Edit…" onClick={() => openEdit(selectedClip.id)} data-testid="clip-detail:edit"><SquarePen className="gear gear--sm" strokeWidth={2} /></button>
           {selectedClip.kind !== 'image' && <button className="iconbtn iconbtn--sm" title={focusedTerminal ? `Paste into ${focusedTerminal.label} (Ctrl+↵)` : 'Paste into a terminal pane (click one first)'} disabled={!focusedTerminal} onClick={() => void pasteInto(selectedClip.id, focusedTerminal)} data-testid="clip-detail:paste"><ClipboardPaste className="gear gear--sm" strokeWidth={2} /></button>}
           <button className="iconbtn iconbtn--sm" title="Copy (↵)" onClick={() => void copy(selectedClip.id)} data-testid="clip-detail:copy"><Copy className="gear gear--sm" strokeWidth={2} /></button>
           <button className="iconbtn iconbtn--sm" title="Close" onClick={() => { setSelected(null); setEditing(null) }} data-testid="clip-detail:close"><X className="gear gear--sm" strokeWidth={2} /></button>
         </span>
       </div>
+      {(selectedClip.note || selectedClip.shortcut || selectedClip.hotkey) && (
+        <div className="clip-detail-props" data-testid="clip-detail-props">
+          {selectedClip.note && <div className="clip-prop"><span className="clip-prop-k">Note</span><span className="clip-prop-v clip-prop-note" data-testid="clip-detail:note">{selectedClip.note}</span></div>}
+          {selectedClip.shortcut && <div className="clip-prop"><span className="clip-prop-k">Expansion code</span><span className="clip-prop-v"><span className="clip-short" data-testid="clip-detail:shortcut">{selectedClip.shortcut}</span></span></div>}
+          {selectedClip.hotkey && <div className="clip-prop"><span className="clip-prop-k">Keybind</span><span className="clip-prop-v"><kbd className="clip-chord" data-testid="clip-detail:hotkey">{chordLabel(selectedClip.hotkey)}</kbd></span></div>}
+        </div>
+      )}
       {selectedClip.kind === 'image' ? (
         imageUrl?.id === selectedClip.id ? <img className="clip-detail-img" src={imageUrl.url} alt={selectedClip.title} draggable={false} /> : <div className="clip-detail-text">Loading image…</div>
-      ) : editing === selectedClip.id && body ? (
-        <textarea
-          className="clip-edit"
-          defaultValue={body.text}
-          spellCheck={false}
-          autoFocus
-          onKeyDown={(e) => { e.stopPropagation(); if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); void saveText(selectedClip.id, (e.target as HTMLTextAreaElement).value) } if (e.key === 'Escape') { e.preventDefault(); setEditing(null) } }}
-          data-testid="clip-edit"
-        />
       ) : body?.id === selectedClip.id ? (
         looksLikeCode(body.text) && selectedClip.kind === 'text'
           ? <pre className="clip-code" data-testid="clip-code">{body.text.split('\n').map((line, i) => <span key={i} className="clip-code-line"><span className="clip-ln">{i + 1}</span>{line}{'\n'}</span>)}</pre>
@@ -794,7 +813,11 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
           </div>
         )}
       </div>
-      <div className="clip-main">
+      <div
+        className="clip-main"
+        // The wide table's header and rows read this one template; the header's grips change it.
+        style={{ ['--picker-cols' as string]: cols.template }}
+      >
         {/* The search is a circle before the first chip; it opens into a field on click, or as soon as you type. */}
         <FilterChips
           chips={chips}
@@ -838,13 +861,13 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
         )}
         {/* The table's header: outside the scroller so it never covers a row, shown only in the wide layout. */}
         {shown.length > 0 && (
-          <div className="clip-head-wrap" aria-hidden="true">
-            <div className="clip-head">
+          <div className="clip-head-wrap">
+            <div className="clip-head" ref={headRef}>
               <span />
-              <span>Clip</span>
-              <span>Source</span>
-              <span className="clip-head-when">When</span>
-              <span className="clip-head-key">Key</span>
+              <span className="clip-head-cell">Clip{gripAt(cols, 'pane', 1)}</span>
+              <span className="clip-head-cell">Source{gripAt(cols, 'pane', 2)}</span>
+              <span className="clip-head-cell clip-head-when">When{gripAt(cols, 'pane', 3)}</span>
+              <span className="clip-head-cell clip-head-key">Key{gripAt(cols, 'pane', 4)}</span>
               <span />
             </div>
           </div>
@@ -881,7 +904,22 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
             <button className="clip-pickbar-x" onClick={leaveSelect} title={selecting ? 'Leave select mode (Esc)' : 'Clear selection'} data-testid="clip-pickbar:close"><X strokeWidth={2} /></button>
           </div>
         )}
-        {settingsOpen ? <CaptureSettings settings={listing.settings} onClose={() => setSettingsOpen(false)} /> : detail}
+        {settingsOpen
+          ? <CaptureSettings settings={listing.settings} onClose={() => setSettingsOpen(false)} />
+          : editing && byId.get(editing)
+            ? (
+              <ClipEditCard
+                key={editing}
+                clip={byId.get(editing)!}
+                clips={clips}
+                loadText={window.watch.getClip}
+                save={window.watch.updateClip}
+                suspend={window.watch.suspendHotkeys}
+                onDone={() => closeEdit(editing)}
+                variant="pane"
+              />
+            )
+            : detail}
       </div>
       {drag && (
         <div ref={ghostRef} className="notes-ghost" style={{ left: drag.x + 12, top: drag.y + 10 }} data-escape-close="" data-testid="clip-ghost">

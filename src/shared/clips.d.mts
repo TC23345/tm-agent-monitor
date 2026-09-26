@@ -8,6 +8,9 @@ export const RETENTION_DAYS: number
 export const MAX_GROUPS: number
 export const MAX_GROUP_NAME: number
 export const MAX_TITLE: number
+export const MAX_NOTE: number
+export const SHORTCUT_MIN: number
+export const SHORTCUT_MAX: number
 export const INTERNAL_COPY_WINDOW_MS: number
 export const BURST_MS: number
 export const BUILTIN_GROUPS: readonly string[]
@@ -56,6 +59,12 @@ export interface Clip {
   edited?: boolean
   merged?: boolean
   manual?: boolean
+  /** The user's note (≤ MAX_NOTE), searchable. */
+  note?: string
+  /** A text-expansion code (`;sig`), unique across clips and snippet notes; served by `GET /v1/snippets`. */
+  shortcut?: string
+  /** A global chord that pastes this clip, normalized (`normalizeAccelerator`), unique across clips and the app's chords. */
+  hotkey?: string
 }
 
 /** A clip without its body, for the renderer's list. */
@@ -117,4 +126,9 @@ export function sanitizeClip(raw: unknown): Clip | null
 export function sanitizeGroups(raw: unknown): string[]
 export function orderFavorites<T extends { id: string; favorite: boolean; copiedAt?: number }>(clips: T[], order: unknown): T[]
 export function summarize(clip: Clip): ClipSummary
+export function cleanNote(raw: unknown): string
+export function shortcutShapeProblem(raw: unknown): string | null
+export function shortcutProblem(shortcut: string, clips: ReadonlyArray<{ id: string; title?: string; kind?: ClipKind; shortcut?: string }>, snippets: ReadonlyArray<{ name: string; shortcut?: string }>, selfId?: string): string | null
+export function hotkeyProblem(hotkey: string, clips: ReadonlyArray<{ id: string; title?: string; kind?: ClipKind; hotkey?: string }>, appChords: ReadonlyArray<{ label: string; chord: string }>, selfId?: string): string | null
+export function chordLabel(chord: string | undefined): string
 export function parseSnippetNote(text: string | undefined): { shortcut: string | null; body: string }

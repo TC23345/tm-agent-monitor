@@ -1,6 +1,7 @@
 import { DEFAULTS, type Agent, type AgentEventV1, type AppSettingsPatch, type HookReport, type ProviderId, type ToolKind, type ActivityEvent } from '../shared/types.js'
 import { estimateCostUsd } from '../shared/pricing.mjs'
 import { isPickerFavoriteModifier, normalizeAccelerator, normalizeFavoriteHotkeys } from '../shared/hotkeys.mjs'
+import { sanitizePickerSize } from '../shared/pickerPlace.mjs'
 
 export type { AgentEventKind, ProviderId } from '../shared/types.js'
 export type StoreEventV1 = AgentEventV1
@@ -10,7 +11,7 @@ export function validateMutableSettingsPatch(value: unknown): AppSettingsPatch |
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const input = value as Record<string, unknown>
   const allowed = new Set([
-    'hotkey', 'pickerHotkey', 'halfHotkey', 'favoriteHotkeys', 'pickerFavoriteModifier',
+    'hotkey', 'pickerHotkey', 'halfHotkey', 'favoriteHotkeys', 'pickerFavoriteModifier', 'pickerSize',
     'notifications', 'launchAtLogin', 'mock', 'sizeMode', 'windowMaterial', 'pushUrl', 'pushAfterMin'
   ])
   if (Object.keys(input).some((key) => !allowed.has(key))) return null
@@ -32,6 +33,15 @@ export function validateMutableSettingsPatch(value: unknown): AppSettingsPatch |
   if ('pickerFavoriteModifier' in input) {
     if (!isPickerFavoriteModifier(input.pickerFavoriteModifier)) return null
     result.pickerFavoriteModifier = input.pickerFavoriteModifier as AppSettingsPatch['pickerFavoriteModifier']
+  }
+  if ('pickerSize' in input) {
+    // null resets to the default card; anything else must be a {width, height} of numbers (clamped to the limits).
+    if (input.pickerSize === null) result.pickerSize = null
+    else {
+      const size = sanitizePickerSize(input.pickerSize)
+      if (!size) return null
+      result.pickerSize = size
+    }
   }
   if ('sizeMode' in input) {
     if (input.sizeMode !== 'full' && input.sizeMode !== 'left' && input.sizeMode !== 'right') return null

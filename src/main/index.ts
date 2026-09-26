@@ -32,8 +32,9 @@ import { focusHwnd, focusByPid, listDesktopWindows, clipboardOwner, foregroundWi
 import { startClipboardWatch, type ClipboardWatch } from './clipboardWatch.js'
 import { clipboardHasImage, makeThumbnail, protectText, protectionAvailable, readClipboardSnapshot, readClipboardText, unprotectText, writeClipboardImage, writeClipboardText } from './clipboardIo.js'
 import { ClipStore, type ClipSettingsPatch } from './clipStoreCore.mjs'
-import { clipTitle, describeSource, domainBlocked, filterClips, orderFavorites, parseSnippetNote, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, MAX_TITLE, type ClipSource } from '../shared/clips.mjs'
-import { createPicker, destroyPicker, hidePicker, pickClip, pickerWindow, showPicker, togglePicker } from './picker.js'
+import { cleanNote, clipTitle, describeSource, domainBlocked, filterClips, hotkeyProblem, orderFavorites, parseSnippetNote, shortcutProblem, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, MAX_NOTE, MAX_TITLE, type ClipSource } from '../shared/clips.mjs'
+import { applyPickerSize, createPicker, destroyPicker, endPickerResize, hidePicker, pickClip, pickerWindow, resizePickerBy, showPicker, togglePicker } from './picker.js'
+import { sanitizePickerSize, PICKER_CARD } from '../shared/pickerPlace.mjs'
 import { noteNameFor as snippetFileName } from '../shared/notes.mjs'
 import { EXTENSION_ID, HOST_NAME, inspectHostManifest } from '../../hooks/clipHostCore.mjs'
 import { parseClipImport, snippetNote, MAX_IMPORT_BYTES } from '../shared/clipImport.mjs'
@@ -46,7 +47,7 @@ import { estimateCostUsd } from '../shared/pricing.mjs'
 // export 'autoUpdater' not found"), so import the default export and destructure.
 import electronUpdater from 'electron-updater'
 import { validateMutableSettingsPatch } from './store.js'
-import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type WindowMaterial, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights, type ClipsListing, type ExtensionStatus, type PickerFavoriteModifier, type ShortcutId, type ShortcutRow } from '../shared/types.js'
+import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type WindowMaterial, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights, type ClipsListing, type ExtensionStatus, type PickerFavoriteModifier, type AppShortcutId, type ShortcutId, type ShortcutRow } from '../shared/types.js'
 import { isPickerFavoriteModifier, normalizeAccelerator, normalizeFavoriteHotkeys, sameChord, SHORTCUT_DEFAULTS } from '../shared/hotkeys.mjs'
 
 const { autoUpdater } = electronUpdater
@@ -85,6 +86,7 @@ interface Settings {
   /** The three paste-favorite chords, in favorite order. */
   favoriteHotkeys?: string[]
   pickerFavoriteModifier?: PickerFavoriteModifier
+  pickerSize?: { width: number; height: number } | null
   notifications?: boolean
   mock?: boolean
   sizeMode?: SizeMode
@@ -150,12 +152,31 @@ let activeHalfHotkey: string | null = null
 /** Alt+Shift+1..3 paste favorites 1–3 into the foreground window; each registers on its own. */
 let favoriteHotkeyPrefs: string[] = [...SHORTCUT_DEFAULTS.favoriteHotkeys]
 let activeFavoriteHotkeys: (string | null)[] = [null, null, null]
+/** The quick picker's card size from its resize grips (the `pickerSize` setting); null = PICKER_CARD. */
+let pickerSizePref: { width: number; height: number } | null = null
+/** Remember (or forget, with null) the picker's card size; an open picker takes a reset at once. */
+function setPickerSize(size: { width: number; height: number } | null, applyNow: boolean): void {
+  pickerSizePref = size
+  settings.pickerSize = size
+  saveSettings()
+  if (applyNow) applyPickerSize(size ?? PICKER_CARD)
+}
 /** The picker's own favorite keys: Alt+1–3 or Ctrl+1–3 (sent with each open). */
 let pickerFavoriteModifier: PickerFavoriteModifier = SHORTCUT_DEFAULTS.pickerFavoriteModifier as PickerFavoriteModifier
-const SHORTCUT_LABELS: Record<ShortcutId, string> = {
+const SHORTCUT_LABELS: Record<AppShortcutId, string> = {
   hotkey: 'Summon workspace', halfHotkey: 'Half view', pickerHotkey: 'Clipboard picker',
   favorite1: 'Paste favorite 1', favorite2: 'Paste favorite 2', favorite3: 'Paste favorite 3'
 }
+/** A row's name: the app's own label, or a clip keybind's clip title (`Paste “Signature”`). */
+function shortcutLabel(id: ShortcutId): string {
+  if (!id.startsWith('clip:')) return SHORTCUT_LABELS[id as AppShortcutId]
+  const clip = clipStore?.get(id.slice(5))
+  return `Paste “${clip ? clipTitle(clip) : 'a clip'}”`
+}
+/** Clip keybinds: clip id → the chord registered for it, or null when it could not be. */
+let activeClipHotkeys = new Map<string, string | null>()
+/** `id=chord` pairs of every clip keybind at the last registration — a store change re-registers only when this moves. */
+let clipHotkeySig = ''
 /** Chords this app holds right now → the row holding each; rebuilt by `registerAllHotkeys`. */
 let claimedChords = new Map<string, ShortcutId>()
 /** Why a row's preferred chord did not register (another app, or another row of ours). */
@@ -764,7 +785,7 @@ function claimChord(id: ShortcutId, acc: string, handler: () => void): boolean {
   const chord = normalizeAccelerator(acc) ?? acc
   const holder = claimedChords.get(chord)
   if (holder) {
-    shortcutNotes[id] ??= `used by ${SHORTCUT_LABELS[holder]}`
+    shortcutNotes[id] ??= `used by ${shortcutLabel(holder)}`
     return false
   }
   let ok = false
@@ -834,6 +855,45 @@ function registerFavoriteHotkeys(): void {
   if (held.length) console.log(`[hotkey] favorites: ${held.join(', ')}`)
 }
 
+/** `id=chord` for every clip that carries a keybind, in list order. */
+function clipHotkeyPairs(): Array<[string, string]> {
+  return (clipStore?.list() ?? []).filter((c) => typeof c.hotkey === 'string' && c.hotkey).map((c) => [c.id, c.hotkey as string])
+}
+
+/** Clip keybinds (the Edit… card): after every app chord, so one of ours always wins a clash and the clip row says who has it. */
+function registerClipHotkeys(): void {
+  const pairs = clipHotkeyPairs()
+  clipHotkeySig = pairs.map(([id, chord]) => `${id}=${chord}`).join('\n')
+  activeClipHotkeys = new Map()
+  for (const [id, chord] of pairs) {
+    const ok = claimChord(`clip:${id}`, chord, () => { void pasteClipHotkey(id) })
+    activeClipHotkeys.set(id, ok ? chord : null)
+    if (!ok) console.warn(`[hotkey] could not register ${chord} for clip ${id.slice(0, 8)}`)
+  }
+  const held = [...activeClipHotkeys.values()].filter(Boolean).length
+  if (held) console.log(`[hotkey] clip keybinds: ${held}`)
+}
+
+/** A store change re-registers only when a clip keybind was added, changed or removed — never while Record holds the chords. */
+function clipHotkeysChanged(): void {
+  const sig = clipHotkeyPairs().map(([id, chord]) => `${id}=${chord}`).join('\n')
+  if (sig === clipHotkeySig || hotkeysSuspended) return
+  registerAllHotkeys()
+}
+
+/** The app's own chords, preferred and registered, for `hotkeyProblem` (a clip may not take one). */
+function appChords(): Array<{ label: string; chord: string }> {
+  const out: Array<{ label: string; chord: string }> = []
+  const add = (id: AppShortcutId, ...chords: (string | null | undefined)[]) => {
+    for (const chord of chords) if (chord) out.push({ label: SHORTCUT_LABELS[id], chord })
+  }
+  add('hotkey', hotkeyPref, activeHotkey)
+  add('halfHotkey', halfHotkeyPref, activeHalfHotkey)
+  add('pickerHotkey', pickerHotkeyPref, activePickerHotkey)
+  favoriteHotkeyPrefs.forEach((chord, i) => add(`favorite${i + 1}` as AppShortcutId, chord, activeFavoriteHotkeys[i]))
+  return out
+}
+
 /**
  * Every global chord, in one place, so any change re-registers them all —
  * in priority order, so when two rows ask for one chord the earlier row
@@ -848,20 +908,27 @@ function registerAllHotkeys(): void {
   registerHalfHotkey()
   registerPickerHotkey()
   registerFavoriteHotkeys()
+  registerClipHotkeys()
 }
 
 /** Settings → Keyboard shortcuts: each chord as preferred, as registered, and why they differ. */
 function shortcutRows(): ShortcutRow[] {
   const row = (id: ShortcutId, preferred: string, active: string | null, fallback: string): ShortcutRow => {
     const note = active && sameChord(active, preferred) ? undefined : shortcutNotes[id]
-    return { id, label: SHORTCUT_LABELS[id], preferred, active, default: fallback, ...(note ? { note } : {}) }
+    return { id, label: shortcutLabel(id), preferred, active, default: fallback, ...(note ? { note } : {}) }
   }
+  // A clip's keybind is read-only here (the clip's Edit… card sets it); no default to reset to.
+  const clipRows = clipHotkeyPairs().map(([clipId, chord]): ShortcutRow => ({
+    ...row(`clip:${clipId}`, chord, activeClipHotkeys.get(clipId) ?? null, ''),
+    clipId
+  }))
   return [
     row('hotkey', hotkeyPref, activeHotkey, config.hotkey),
     row('halfHotkey', halfHotkeyPref, activeHalfHotkey, SHORTCUT_DEFAULTS.halfHotkey),
     row('pickerHotkey', pickerHotkeyPref, activePickerHotkey, SHORTCUT_DEFAULTS.pickerHotkey),
     ...favoriteHotkeyPrefs.map((preferred, index) =>
-      row(`favorite${index + 1}` as ShortcutId, preferred, activeFavoriteHotkeys[index] ?? null, SHORTCUT_DEFAULTS.favoriteHotkeys[index]))
+      row(`favorite${index + 1}` as ShortcutId, preferred, activeFavoriteHotkeys[index] ?? null, SHORTCUT_DEFAULTS.favoriteHotkeys[index])),
+    ...clipRows
   ]
 }
 
@@ -1260,6 +1327,44 @@ async function pasteFavorite(index: number): Promise<void> {
   clipboardLog(`[clipboard] favorite ${index + 1} pasted: "${clipTitle(favorite)}"`)
 }
 
+/** A clip's own keybind: the same paste-back as a favorite chord — onto the clipboard, then Ctrl+V into the foreground window. */
+async function pasteClipHotkey(id: string): Promise<void> {
+  const clip = clipStore?.get(id)
+  if (!clip) { clipboardLog(`[clipboard] keybind for ${id.slice(0, 8)}: that clip is gone`); return }
+  if (!(await copyClipToClipboard(id))) return
+  setTimeout(() => { if (!sendPasteKeys()) clipboardLog('[clipboard] keybind paste: Ctrl+V could not be sent') }, 40)
+  clipboardLog(`[clipboard] keybind pasted: "${clipTitle(clip)}"`)
+}
+
+/** Snippet notes (PRD §4.2): Notes\Snippets and Notes\Prompts, top level, with their `shortcut:` line parsed. */
+async function noteSnippets(): Promise<{ name: string; shortcut?: string; text: string }[]> {
+  const out: { name: string; shortcut?: string; text: string }[] = []
+  for (const folder of ['Snippets', 'Prompts']) {
+    const dir = join(ensureNotesDir(), folder)
+    const names = (await fsp.readdir(dir).catch(() => [] as string[])).filter((n) => n.toLowerCase().endsWith('.md')).slice(0, 200)
+    for (const name of names) {
+      const text = await fsp.readFile(join(dir, name), 'utf8').catch(() => null)
+      if (text === null || text.length > MAX_CLIP_BYTES) continue
+      const { shortcut, body } = parseSnippetNote(text)
+      out.push({ name: `${folder}/${name.slice(0, -3)}`, ...(shortcut ? { shortcut } : {}), text: body })
+    }
+  }
+  return out
+}
+
+/**
+ * Clips with an expansion code, as snippets: name = the clip's title, text =
+ * its body. Bounded (200 clips, 64 KB each) because the host forwards the
+ * whole list to Chrome in one native-messaging reply, which Chrome caps at 1 MB.
+ */
+const MAX_CLIP_SNIPPET_BYTES = 64 * 1024
+function clipSnippets(): { name: string; shortcut: string; text: string }[] {
+  return (clipStore?.list() ?? [])
+    .filter((c) => c.kind !== 'image' && typeof c.shortcut === 'string' && c.shortcut && c.text.trim() && c.bytes <= MAX_CLIP_SNIPPET_BYTES)
+    .slice(0, 200)
+    .map((c) => ({ name: clipTitle(c), shortcut: c.shortcut as string, text: c.text }))
+}
+
 function startClipboardCapture(): void {
   if (process.platform !== 'win32' || clipboardWatch) return
   clipboardWatch = startClipboardWatch({
@@ -1585,6 +1690,7 @@ function settingsView() {
     pickerHotkey: activePickerHotkey ?? '',
     favoriteHotkeys: [...favoriteHotkeyPrefs],
     pickerFavoriteModifier,
+    pickerSize: pickerSizePref,
     shortcuts: shortcutRows(),
     notifications: notify,
     launchAtLogin: app.getLoginItemSettings().openAtLogin,
@@ -1783,7 +1889,8 @@ function registerIpc(): void {
     }
   })
   ipcMain.on('hotkeys:suspend', (event, on: unknown) => {
-    if (typeof on !== 'boolean' || event.sender !== win?.webContents) return
+    // Settings' Record in the workspace, or the Keybind Record in either window's Edit… card.
+    if (typeof on !== 'boolean' || (event.sender !== win?.webContents && event.sender !== pickerWindow()?.webContents)) return
     if (!on) { registerAllHotkeys(); return }
     globalShortcut.unregisterAll()
     if (hotkeysSuspended) clearTimeout(hotkeysSuspended)
@@ -1802,6 +1909,7 @@ function registerIpc(): void {
       registerAllHotkeys()
     }
     if (patch.pickerFavoriteModifier) { pickerFavoriteModifier = patch.pickerFavoriteModifier; settings.pickerFavoriteModifier = patch.pickerFavoriteModifier }
+    if (patch.pickerSize !== undefined) setPickerSize(patch.pickerSize, true)
     if (typeof patch.notifications === 'boolean') { notify = patch.notifications; settings.notifications = patch.notifications }
     if (patch.sizeMode) { applySizeMode(patch.sizeMode); settings.sizeMode = patch.sizeMode }
     if (patch.windowMaterial) {
@@ -2372,17 +2480,47 @@ function registerIpc(): void {
     const key = clipId(id)
     return key ? copyClipToClipboard(key) : false
   })
-  ipcMain.handle('clips:update', async (_e, id: unknown, patch: unknown): Promise<boolean> => {
+  // `true` saved, `false` refused (bad shape, or the clip is gone), or a plain
+  // sentence when an expansion code or keybind is taken — the Edit… card shows it.
+  ipcMain.handle('clips:update', async (_e, id: unknown, patch: unknown): Promise<boolean | string> => {
     const key = clipId(id)
-    if (!key || !clipStore || typeof patch !== 'object' || patch === null || Array.isArray(patch)) return false
+    const store = clipStore
+    if (!key || !store || typeof patch !== 'object' || patch === null || Array.isArray(patch)) return false
+    const clip = store.get(key)
+    if (!clip) return false
     const p = patch as Record<string, unknown>
-    const clean: { title?: string | null; text?: string; groups?: string[]; favorite?: boolean } = {}
+    const clean: { title?: string | null; text?: string; groups?: string[]; favorite?: boolean; note?: string | null; shortcut?: string | null; hotkey?: string | null } = {}
     if (p.title === null) clean.title = null
     else if (typeof p.title === 'string' && p.title.length <= MAX_TITLE) clean.title = p.title
     if (typeof p.text === 'string' && Buffer.byteLength(p.text, 'utf8') <= MAX_CLIP_BYTES) clean.text = p.text
     if (p.groups !== undefined) { const g = groupNames(p.groups); if (!g) return false; clean.groups = g }
     if (typeof p.favorite === 'boolean') clean.favorite = p.favorite
-    return clipStore.update(key, clean) !== null
+    if (p.note !== undefined) {
+      if (p.note !== null && (typeof p.note !== 'string' || p.note.length > MAX_NOTE * 2)) return false
+      clean.note = p.note === null ? null : cleanNote(p.note) || null
+    }
+    if (p.shortcut !== undefined) {
+      if (p.shortcut !== null && (typeof p.shortcut !== 'string' || p.shortcut.length > 64)) return false
+      const code = typeof p.shortcut === 'string' ? p.shortcut.trim() : ''
+      if (code) {
+        if (clip.kind === 'image') return 'An image has no text to expand'
+        const body = clean.text ?? clip.text
+        if (Buffer.byteLength(body, 'utf8') > MAX_CLIP_SNIPPET_BYTES) return 'Too long to expand — keep expansions under 64 KB'
+        const problem = shortcutProblem(code, store.list(), await noteSnippets(), key)
+        if (problem) return problem
+      }
+      clean.shortcut = code || null
+    }
+    if (p.hotkey !== undefined) {
+      if (p.hotkey !== null && (typeof p.hotkey !== 'string' || p.hotkey.length > 80)) return false
+      const chord = typeof p.hotkey === 'string' ? p.hotkey.trim() : ''
+      if (chord) {
+        const problem = hotkeyProblem(chord, store.list(), appChords(), key)
+        if (problem) return problem
+        clean.hotkey = normalizeAccelerator(chord)
+      } else clean.hotkey = null
+    }
+    return store.update(key, clean) !== null
   })
   ipcMain.handle('clips:delete', async (_e, ids: unknown): Promise<number> => {
     const list = clipIds(ids)
@@ -2403,7 +2541,8 @@ function registerIpc(): void {
     if (!groups) return null
     const clip = await clipStore.add({
       id: randomUUID(), kind: 'text', text: i.text, source: { kind: 'manual' }, bytes: Buffer.byteLength(i.text, 'utf8'), manual: true, groups,
-      ...(typeof i.title === 'string' && i.title.trim() && i.title.length <= MAX_TITLE ? { title: i.title.trim() } : {})
+      ...(typeof i.title === 'string' && i.title.trim() && i.title.length <= MAX_TITLE ? { title: i.title.trim() } : {}),
+      ...(typeof i.note === 'string' && i.note.length <= MAX_NOTE * 2 && cleanNote(i.note) ? { note: cleanNote(i.note) } : {})
     })
     return clip?.id ?? null
   })
@@ -2528,6 +2667,31 @@ function registerIpc(): void {
     showWindow()
     win?.webContents.send('workspace:command', { kind: 'settings', section: 'shortcuts' })
   })
+  // The picker's resize grips (a transparent frameless window has no OS border):
+  // pointer travel since pointer-down, at most one per animation frame; main
+  // owns the geometry (pickerPlace.mjs `resizePicker`) and the remembered size.
+  ipcMain.on('picker:resize', (event, dw: unknown, dh: unknown) => {
+    if (event.sender !== pickerWindow()?.webContents) return
+    if (typeof dw !== 'number' || typeof dh !== 'number' || !Number.isFinite(dw) || !Number.isFinite(dh) || Math.abs(dw) > 10_000 || Math.abs(dh) > 10_000) return
+    resizePickerBy(Math.round(dw), Math.round(dh))
+  })
+  ipcMain.on('picker:resize-end', (event, ...args: unknown[]) => {
+    if (args.length || event.sender !== pickerWindow()?.webContents) return
+    const size = endPickerResize()
+    if (size) setPickerSize(sanitizePickerSize(size), false)
+  })
+  // Keys → Reset size: forget the remembered size, and the open picker goes back to the default card.
+  ipcMain.on('picker:reset-size', (event, ...args: unknown[]) => {
+    if (args.length || event.sender !== pickerWindow()?.webContents) return
+    setPickerSize(null, true)
+  })
+  // The picker's Clips → Open Clipboard pane: the same hand-off, onto the clipboard pane.
+  ipcMain.on('picker:clipboard', (event, ...args: unknown[]) => {
+    if (args.length || event.sender !== pickerWindow()?.webContents) return
+    hidePicker()
+    showWindow()
+    win?.webContents.send('workspace:command', { kind: 'clipboard' })
+  })
   ipcMain.on('window:hide', () => hideWindow())
   ipcMain.on('window:edge-drag', (_event, edge: unknown, delta: unknown) => {
     if ((edge !== 'left' && edge !== 'right') || typeof delta !== 'number' || !Number.isFinite(delta) || Math.abs(delta) > 10_000) return
@@ -2614,6 +2778,7 @@ if (!gotLock) {
     const storedFavorites = normalizeFavoriteHotkeys(settings.favoriteHotkeys)
     if (storedFavorites) favoriteHotkeyPrefs = storedFavorites
     if (isPickerFavoriteModifier(settings.pickerFavoriteModifier)) pickerFavoriteModifier = settings.pickerFavoriteModifier!
+    pickerSizePref = sanitizePickerSize(settings.pickerSize)
     // Capture tooling pins the boot view; the persisted mode must not override it.
     if (!process.env.CLAUDE_WATCH_CAPTURE_HALF && (settings.sizeMode === 'full' || settings.sizeMode === 'left' || settings.sizeMode === 'right')) applySizeMode(settings.sizeMode)
     if (settings.windowMaterial === 'none' || settings.windowMaterial === 'mica' || settings.windowMaterial === 'acrylic') materialPref = settings.windowMaterial
@@ -2734,21 +2899,11 @@ if (!gotLock) {
           const result = terminals.input(terminalId, clip.text)
           return result === 'missing' ? 'no-terminal' : result === 'exited' ? 'exited' : 'ok'
         },
-        // Snippets are notes (PRD §4.2): Notes\Snippets and Notes\Prompts, top level.
-        snippets: async () => {
-          const out: { name: string; shortcut?: string; text: string }[] = []
-          for (const folder of ['Snippets', 'Prompts']) {
-            const dir = join(ensureNotesDir(), folder)
-            const names = (await fsp.readdir(dir).catch(() => [] as string[])).filter((n) => n.toLowerCase().endsWith('.md')).slice(0, 200)
-            for (const name of names) {
-              const text = await fsp.readFile(join(dir, name), 'utf8').catch(() => null)
-              if (text === null || text.length > MAX_CLIP_BYTES) continue
-              const { shortcut, body } = parseSnippetNote(text)
-              out.push({ name: `${folder}/${name.slice(0, -3)}`, ...(shortcut ? { shortcut } : {}), text: body })
-            }
-          }
-          return out
-        },
+        // Snippets are notes (PRD §4.2): Notes\Snippets and Notes\Prompts, top level —
+        // plus every clip with an expansion code (its Edit… card), so the
+        // extension's expander (the host re-reads this every 30 s and pushes
+        // on change) expands `;code` typed anywhere.
+        snippets: async () => [...(await noteSnippets()), ...clipSnippets()],
         addSnippet: async ({ name, text, shortcut }) => {
           const file = snippetFileName(name)
           if (!file) return { error: 'that name cannot be a file name' }
@@ -2780,8 +2935,11 @@ if (!gotLock) {
     store.onChange(() => {
       if (win && !win.isDestroyed()) win.webContents.send('clips:changed')
       pickerWindow()?.webContents.send('clips:changed')
+      // A keybind added, changed or removed (or its clip deleted) re-registers every chord.
+      clipHotkeysChanged()
     })
-    const clipsLoaded = store.load().then(() => startClipboardCapture())
+    // Loaded after the first registerAllHotkeys (below): the clip keybinds join once the list is in memory.
+    const clipsLoaded = store.load().then(() => { startClipboardCapture(); clipHotkeysChanged() })
 
     createWindow()
     createPicker({
@@ -2792,6 +2950,7 @@ if (!gotLock) {
       },
       copyClip: copyClipToClipboard,
       favoriteModifier: () => pickerFavoriteModifier,
+      cardSize: () => pickerSizePref,
       log: clipboardLog
     })
     registerAllHotkeys()

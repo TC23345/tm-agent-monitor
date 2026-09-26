@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   applyRetention, blockedExe, blocklistEntry, clipPreview, clipTitle, dedupeKey, describeSource, domainBlocked, filterClips, groupNameOk, inGroup,
   looksLikeCode, looksSecret, mergeText, orderFavorites, parseDropFiles, parseSnippetNote, sanitizeClip, sanitizeGroups, shouldCapture, sizeLabel,
-  appDisplayName, sanitizeSource, sourceLabel, summarize, upsertClip, CF_HDROP, EXCLUSION_FORMATS, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, INTERNAL_COPY_WINDOW_MS, BURST_MS
+  appDisplayName, sanitizeSource, sourceLabel, summarize, upsertClip, searchText, cleanNote, shortcutProblem, shortcutShapeProblem, hotkeyProblem, chordLabel, MAX_NOTE, SHORTCUT_MAX, CF_HDROP, EXCLUSION_FORMATS, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, INTERNAL_COPY_WINDOW_MS, BURST_MS
 } from './clips.mjs'
 
 /** Build a DROPFILES payload the way Explorer does: 20-byte header, then paths. */
@@ -287,4 +287,56 @@ test('orderFavorites puts the saved order first, then the rest newest first; sum
   assert.equal(s.custom, true)
   assert.equal(s.preview, 'body text here')
   assert.equal(summarize(textClip('a', 'first\nsecond')).custom, false)
+})
+
+test('sanitizeClip keeps a note, an expansion code and a keybind within their bounds', () => {
+  const c = sanitizeClip({ id: 'n1', kind: 'text', text: 'Best,\nTaylor', note: '  sign-off \r\nfor email\u0007  ', shortcut: ';sig', hotkey: 'Shift+Alt+K' })
+  assert.equal(c.note, 'sign-off \nfor email')
+  assert.equal(c.shortcut, ';sig')
+  assert.equal(c.hotkey, 'Alt+Shift+K', 'stored in the one spelling')
+  assert.equal(sanitizeClip({ id: 'n2', kind: 'text', text: 'x', note: 'n'.repeat(MAX_NOTE + 50) }).note.length, MAX_NOTE)
+  const bad = sanitizeClip({ id: 'n3', kind: 'text', text: 'x', note: '   ', shortcut: ';has space', hotkey: 'Shift+K' })
+  assert.equal('note' in bad, false)
+  assert.equal('shortcut' in bad, false)
+  assert.equal('hotkey' in bad, false, 'a global chord needs Ctrl, Alt or Win')
+  for (const code of [';', '1abc', 'x'.repeat(SHORTCUT_MAX + 1), 42]) assert.equal('shortcut' in sanitizeClip({ id: 'n4', kind: 'text', text: 'x', shortcut: code }), false, String(code))
+  for (const code of [';s', 'sig', '/addr', '$usd', 'x'.repeat(SHORTCUT_MAX)]) assert.equal(sanitizeClip({ id: 'n5', kind: 'text', text: 'x', shortcut: code }).shortcut, code)
+  const img = sanitizeClip({ id: 'n6', kind: 'image', image: { width: 1, height: 1, bytes: 1, hash: 'h' }, shortcut: ';img', hotkey: 'Control+F9' })
+  assert.equal('shortcut' in img, false, 'an image has no text to expand')
+  assert.equal(img.hotkey, 'Control+F9', 'but it can still be pasted by chord')
+})
+
+test('summarize and searchText carry the note and the expansion code', () => {
+  const c = textClip('s1', 'Best,\nTaylor', { title: 'Signature', note: 'for client email', shortcut: ';sig', hotkey: 'Alt+Shift+K' })
+  const s = summarize(c)
+  assert.equal(s.note, 'for client email')
+  assert.equal(s.shortcut, ';sig')
+  assert.equal(s.hotkey, 'Alt+Shift+K')
+  assert.match(searchText(c), /;sig/)
+  assert.match(searchText(c), /client email/)
+  assert.equal(filterClips([c, textClip('s2', 'other')], { query: 'client' })[0].id, 's1')
+})
+
+test('shortcutProblem: shape, then unique across clips and snippet notes, case-insensitively', () => {
+  const clips = [textClip('a', 'one', { shortcut: ';sig', title: 'Signature' }), textClip('b', 'two')]
+  const snippets = [{ name: 'Snippets/addr', shortcut: ';addr' }, { name: 'Prompts/plain' }]
+  assert.equal(shortcutProblem(';new', clips, snippets, 'b'), null)
+  assert.equal(shortcutProblem(';sig', clips, snippets, 'a'), null, 'its own code is no clash')
+  assert.match(shortcutProblem(';SIG', clips, snippets, 'b'), /already expands “Signature”/)
+  assert.match(shortcutProblem(';Addr', clips, snippets, 'b'), /already the snippet “Snippets\/addr”/)
+  assert.match(shortcutProblem('a b', clips, snippets, 'b'), /No spaces/)
+  assert.match(shortcutProblem(';', clips, snippets, 'b'), /At least 2/)
+  assert.match(shortcutProblem('9x', clips, snippets, 'b'), /Start with a letter/)
+  assert.equal(shortcutShapeProblem(';sig'), null)
+})
+
+test('hotkeyProblem: a global chord, not the app’s, not another clip’s', () => {
+  const clips = [textClip('a', 'one', { hotkey: 'Alt+Shift+K', title: 'Sig' }), textClip('b', 'two')]
+  const app = [{ label: 'Clipboard picker', chord: 'Control+Alt+V' }, { label: 'Paste favorite 1', chord: 'Alt+Shift+1' }]
+  assert.equal(hotkeyProblem('Control+Alt+J', clips, app, 'b'), null)
+  assert.equal(hotkeyProblem('Shift+Alt+K', clips, app, 'a'), null, 'its own chord is no clash')
+  assert.match(hotkeyProblem('Shift+Alt+K', clips, app, 'b'), /already pastes “Sig”/)
+  assert.match(hotkeyProblem('Ctrl+Alt+V', clips, app, 'b'), /Ctrl\+Alt\+V is already Clipboard picker/)
+  assert.match(hotkeyProblem('Shift+K', clips, app, 'b'), /Not a global shortcut/)
+  assert.equal(chordLabel('Control+Super+F9'), 'Ctrl+Win+F9')
 })

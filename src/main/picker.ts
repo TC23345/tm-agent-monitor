@@ -12,7 +12,7 @@
 // the PID recorded then — HWNDs are recycled), and Ctrl+V is sent. The picker
 // hides itself only; the workspace is untouched.
 import { BrowserWindow, screen } from 'electron'
-import { placePicker, PICKER_CARD, PICKER_SHADOW } from '../shared/pickerPlace.mjs'
+import { placePicker, resizePicker, PICKER_CARD, PICKER_SHADOW } from '../shared/pickerPlace.mjs'
 import { focusHwnd, foregroundWindowInfo, hwndOwnedByPid, sendPasteKeys } from '../native/win32.mjs'
 
 export interface PickerDeps {
@@ -23,6 +23,8 @@ export interface PickerDeps {
   copyClip: (id: string) => Promise<boolean>
   /** Alt or Control: the modifier of the picker's own favorite keys, read on every open. */
   favoriteModifier: () => 'Alt' | 'Control'
+  /** The remembered card size (the `pickerSize` setting), or null for PICKER_CARD. */
+  cardSize: () => { width: number; height: number } | null
   log: (line: string) => void
 }
 
@@ -82,14 +84,16 @@ export function showPicker(): void {
   target = foregroundWindowInfo()
   const cursor = screen.getCursorScreenPoint()
   const { workArea } = screen.getDisplayNearestPoint(cursor)
-  const place = placePicker({ cursor, workArea })
+  const place = placePicker({ cursor, workArea, card: deps?.cardSize() ?? PICKER_CARD })
   win.setBounds({ x: place.x, y: place.y, width: place.width, height: place.height })
+  resizeStart = null
   win.show()
   win.focus()
   shownAt = Date.now()
   // After show, so the pop-in runs against painted frames. The favorite keys'
-  // modifier rides along, so a Settings change reaches the next open.
-  win.webContents.send('picker:phase', 'enter', place.origin, deps?.favoriteModifier() ?? 'Alt')
+  // modifier rides along, so a Settings change reaches the next open, and
+  // whether the size is a remembered one (Keys → Reset size is live then).
+  win.webContents.send('picker:phase', 'enter', place.origin, deps?.favoriteModifier() ?? 'Alt', !!deps?.cardSize())
 }
 
 export function hidePicker(): void {
@@ -135,6 +139,47 @@ export async function pickClip(id: string, mode: 'paste' | 'copy'): Promise<void
     // The window needs a beat to take the foreground before the keystroke.
     setTimeout(() => { if (!sendPasteKeys()) deps?.log('[picker] Ctrl+V could not be sent') }, 60)
   }, EXIT_MS + 20)
+}
+
+// ---- resize: the renderer's grips report pointer travel, main owns the geometry ----
+/** The card when the current grip drag started (the first `resizePickerBy` of a drag); null between drags. */
+let resizeStart: { width: number; height: number } | null = null
+
+function currentCard(): { width: number; height: number; cardX: number; cardY: number } | null {
+  if (!win || win.isDestroyed()) return null
+  const b = win.getBounds()
+  return { width: b.width - 2 * PICKER_SHADOW, height: b.height - 2 * PICKER_SHADOW, cardX: b.x + PICKER_SHADOW, cardY: b.y + PICKER_SHADOW }
+}
+
+/**
+ * One step of a grip drag: `dw`/`dh` are the pointer's travel since
+ * pointer-down (the renderer sends at most one per animation frame). The
+ * top-left stays put; `resizePicker` clamps to the minimum and the display.
+ */
+export function resizePickerBy(dw: number, dh: number): void {
+  const cur = currentCard()
+  if (!win || !cur || !win.isVisible()) return
+  resizeStart ??= { width: cur.width, height: cur.height }
+  const { workArea } = screen.getDisplayMatching(win.getBounds())
+  const next = resizePicker({ start: resizeStart, dw, dh, cardX: cur.cardX, cardY: cur.cardY, workArea })
+  win.setBounds(next.bounds)
+}
+
+/** Pointer-up on a grip: the card size to remember, or null when no drag was in progress. */
+export function endPickerResize(): { width: number; height: number } | null {
+  const cur = currentCard()
+  const was = resizeStart
+  resizeStart = null
+  return was && cur ? { width: cur.width, height: cur.height } : null
+}
+
+/** Keys → Reset size (or a settings patch): the open window takes `card` now, from the same top-left. */
+export function applyPickerSize(card: { width: number; height: number }): void {
+  const cur = currentCard()
+  if (!win || !cur) return
+  resizeStart = null
+  const { workArea } = screen.getDisplayMatching(win.getBounds())
+  win.setBounds(resizePicker({ start: card, dw: 0, dh: 0, cardX: cur.cardX, cardY: cur.cardY, workArea }).bounds)
 }
 
 export function destroyPicker(): void {

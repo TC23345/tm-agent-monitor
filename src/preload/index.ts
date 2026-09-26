@@ -151,7 +151,16 @@ const api = {
   getClip: (id: string): Promise<{ text: string } | null> => ipcRenderer.invoke('clips:get', id),
   /** Put a clip back on the clipboard (text, file list as text, or the image). */
   copyClip: (id: string): Promise<boolean> => ipcRenderer.invoke('clips:copy', id),
-  updateClip: (id: string, patch: { title?: string | null; text?: string; groups?: string[]; favorite?: boolean }): Promise<boolean> => ipcRenderer.invoke('clips:update', id, patch),
+  /** `true` saved, `false` refused, or a plain sentence when the expansion code or keybind is taken. `null` clears note/shortcut/hotkey. */
+  updateClip: (id: string, patch: { title?: string | null; text?: string; groups?: string[]; favorite?: boolean; note?: string | null; shortcut?: string | null; hotkey?: string | null }): Promise<boolean | string> => {
+    const clean: Record<string, unknown> = {}
+    if (typeof patch?.favorite === 'boolean') clean.favorite = patch.favorite
+    if (patch?.title === null || typeof patch?.title === 'string') clean.title = patch.title
+    if (typeof patch?.text === 'string') clean.text = patch.text
+    if (Array.isArray(patch?.groups)) clean.groups = patch.groups
+    for (const key of ['note', 'shortcut', 'hotkey'] as const) if (patch?.[key] === null || typeof patch?.[key] === 'string') clean[key] = patch[key]
+    return ipcRenderer.invoke('clips:update', id, clean)
+  },
   deleteClips: (ids: string[]): Promise<number> => ipcRenderer.invoke('clips:delete', ids),
   /** Everything unpinned, or everything when `all`. Answers how many went. */
   clearClips: (all?: boolean): Promise<number> => ipcRenderer.invoke('clips:clear', all === true),

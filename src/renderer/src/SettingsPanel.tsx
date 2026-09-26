@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AppSettings, AppSettingsPatch, ProviderId, ShortcutId, ShortcutRow, SystemDiagnostic } from '@shared/types'
+import type { AppSettings, AppSettingsPatch, AppShortcutId, ProviderId, ShortcutId, ShortcutRow, SystemDiagnostic } from '@shared/types'
 import { providerStatus } from '@shared/health.mjs'
-import { chordFromKeydown, modifierLabel, sameChord } from '@shared/hotkeys.mjs'
+import { modifierLabel, sameChord } from '@shared/hotkeys.mjs'
+import { chordLabel } from '@shared/clips.mjs'
 import { ArrowLeft, CheckCircle2, CircleAlert, RefreshCw, X } from 'lucide-react'
 import { ProviderBadge } from './ProviderBadge'
+import { useChordCapture } from './ShortcutRecorder'
 
 /** The patch that sets one row's chord: the three favorites always travel as one array. */
-function shortcutPatch(s: AppSettings, id: ShortcutId, chord: string): AppSettingsPatch {
+function shortcutPatch(s: AppSettings, id: AppShortcutId, chord: string): AppSettingsPatch {
   const fav = /^favorite([1-3])$/.exec(id)
   if (!fav) return { [id]: chord } as AppSettingsPatch
   const chords = [...s.favoriteHotkeys]
@@ -50,9 +52,7 @@ export function SettingsPanel({ onClose, section, onSectionShown }: {
 }) {
   const [s, setS] = useState<AppSettings | null>(null)
   /** The Keyboard shortcuts row recording its next chord, if any. */
-  const [recording, setRecording] = useState<ShortcutId | null>(null)
-  /** Why the last key pressed while recording is no shortcut (Shift+A…). */
-  const [recordHint, setRecordHint] = useState<string | null>(null)
+  const [recording, setRecording] = useState<AppShortcutId | null>(null)
   /** The outcome of the last Record / Reset, under the table. */
   const [shortcutMsg, setShortcutMsg] = useState<{ id: ShortcutId | 'pickerFavorites'; text: string; ok: boolean } | null>(null)
   const [updateMsg, setUpdateMsg] = useState<string | null>(null)
@@ -149,7 +149,7 @@ export function SettingsPanel({ onClose, section, onSectionShown }: {
   }, [recording, onClose])
 
   /** Save one row's chord; main re-registers every chord and answers with the rows. */
-  const saveShortcut = useCallback((id: ShortcutId, chord: string) => {
+  const saveShortcut = useCallback((id: AppShortcutId, chord: string) => {
     if (!s) return
     window.watch.setSettings(shortcutPatch(s, id, chord)).then((next) => {
       setS(next)
@@ -158,36 +158,25 @@ export function SettingsPanel({ onClose, section, onSectionShown }: {
     }).catch((error) => setShortcutMsg({ id, text: `Could not save: ${String(error)}`, ok: false }))
   }, [s])
 
-  const startRecording = (id: ShortcutId) => {
+  const startRecording = (id: AppShortcutId) => {
     setRecording(id)
-    setRecordHint(null)
     setShortcutMsg(null)
     // Let go of our global chords, so pressing one of them (Alt+Q…) reaches this page.
     window.watch.suspendHotkeys(true)
   }
   const stopRecording = useCallback((saved: boolean) => {
     setRecording(null)
-    setRecordHint(null)
     if (!saved) window.watch.suspendHotkeys(false) // a save re-registers them itself
   }, [])
 
-  // The Record button owns the next keydown: Escape cancels, a bare modifier
-  // waits, a chord a global shortcut cannot be says why, anything else saves.
-  useEffect(() => {
+  // The Record button owns the next keydown (useChordCapture): Escape cancels,
+  // a bare modifier waits, a chord a global shortcut cannot be says why
+  // (the hint), anything else saves.
+  const recordHint = useChordCapture(recording, (accelerator) => {
     if (!recording) return
-    const onKey = (e: KeyboardEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      const result = chordFromKeydown(e)
-      if ('cancel' in result) { stopRecording(false); return }
-      if ('pending' in result) return
-      if ('invalid' in result) { setRecordHint(result.invalid); return }
-      stopRecording(true)
-      saveShortcut(recording, result.accelerator)
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [recording, saveShortcut, stopRecording])
+    stopRecording(true)
+    saveShortcut(recording, accelerator)
+  }, () => stopRecording(false))
 
   // Closing mid-recording must not leave the global chords let go.
   const recordingRef = useRef(recording)
@@ -312,7 +301,21 @@ export function SettingsPanel({ onClose, section, onSectionShown }: {
                   <tbody>
                     {s.shortcuts.map((row) => {
                       const live = !!row.active && sameChord(row.active, row.preferred)
-                      const isRecording = recording === row.id
+                      if (row.clipId) {
+                        // A clip's keybind: named by the clip, set and cleared in its Edit… card.
+                        return (
+                          <tr key={row.id} data-testid={`shortcut:${row.id}`}>
+                            <th scope="row">{row.label}<span className="shint">clip keybind — change it in the clip’s Edit…</span></th>
+                            <td><kbd className="shortcut-chord" title={row.preferred} data-testid={`shortcut-preferred:${row.id}`}>{chordLabel(row.preferred)}</kbd></td>
+                            <td className={`shortcut-state ${live ? 'is-live' : 'is-missing'}`} data-testid={`shortcut-active:${row.id}`}>
+                              {live ? <><CheckCircle2 className="ic-svg" strokeWidth={2} />{chordLabel(row.preferred)}</> : <><CircleAlert className="ic-svg" strokeWidth={2} />{row.note ?? 'not registered'}</>}
+                            </td>
+                            <td className="shortcut-actions" />
+                          </tr>
+                        )
+                      }
+                      const id = row.id as AppShortcutId
+                      const isRecording = recording === id
                       return (
                         <tr key={row.id} className={isRecording ? 'is-recording' : ''} data-testid={`shortcut:${row.id}`}>
                           <th scope="row">{row.label}</th>
@@ -325,7 +328,7 @@ export function SettingsPanel({ onClose, section, onSectionShown }: {
                           <td className="shortcut-actions">
                             <button
                               className={`hotkey-btn is-compact ${isRecording ? 'is-capturing' : ''}`}
-                              onClick={() => (isRecording ? stopRecording(false) : startRecording(row.id))}
+                              onClick={() => (isRecording ? stopRecording(false) : startRecording(id))}
                               aria-pressed={isRecording}
                               data-shortcut-recording={isRecording || undefined}
                               data-testid={`shortcut-record:${row.id}`}
@@ -336,7 +339,7 @@ export function SettingsPanel({ onClose, section, onSectionShown }: {
                             <button
                               className="hotkey-btn is-compact"
                               disabled={sameChord(row.preferred, row.default) && live}
-                              onClick={() => saveShortcut(row.id, row.default)}
+                              onClick={() => saveShortcut(id, row.default)}
                               data-testid={`shortcut-reset:${row.id}`}
                               title={`Reset to ${row.default}`}
                             >

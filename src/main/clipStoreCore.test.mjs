@@ -193,3 +193,31 @@ test('sanitizeMeta bounds everything and defaults the rest', () => {
   assert.deepEqual(m, { groups: ['A'], favoritesOrder: ['x'], pausedUntil: -1, blockedExes: ['one.exe'], blockedDomains: ['example.com'], redactSecrets: true, captureImages: false, maxItems: 2000, maxAgeDays: 7 })
   assert.equal(sanitizeMeta({ blockedDomains: Array.from({ length: 150 }, (_, i) => `h${i}.test`) }).blockedDomains.length, 100, 'bounded')
 })
+
+test('update sets and clears a note, an expansion code and a keybind; the note is sealed with the body', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tm-clips-'))
+  try {
+    const clock = { t: 1_000_000 }
+    const { store } = makeStore(dir, clock)
+    await store.load()
+    await store.add(text('a', 'Best,\nTaylor'))
+    const set = store.update('a', { note: 'client sign-off', shortcut: ';sig', hotkey: 'Shift+Alt+K' })
+    assert.deepEqual([set.note, set.shortcut, set.hotkey], ['client sign-off', ';sig', 'Alt+Shift+K'])
+    assert.equal(store.update('a', { shortcut: 'has space' }), null, 'a code sanitizeClip refuses fails the update')
+    assert.equal(store.update('a', { hotkey: 'Shift+K' }), null, 'so does a chord that is not global')
+    assert.equal(store.get('a').shortcut, ';sig', 'and changes nothing')
+    await store.flush()
+    const disk = readFileSync(join(dir, 'clips.jsonl'), 'utf8')
+    assert.ok(!disk.includes('client sign-off'), 'the note is never in the clear')
+    assert.ok(disk.includes(';sig'), 'the code is metadata the list needs')
+
+    const reload = makeStore(dir, clock)
+    await reload.store.load()
+    const back = reload.store.get('a')
+    assert.deepEqual([back.note, back.shortcut, back.hotkey], ['client sign-off', ';sig', 'Alt+Shift+K'])
+    const cleared = reload.store.update('a', { note: null, shortcut: '', hotkey: null })
+    assert.equal('note' in cleared || 'shortcut' in cleared || 'hotkey' in cleared, false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

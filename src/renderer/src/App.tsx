@@ -388,6 +388,7 @@ export function App() {
       case 'notes': openNotes(); break
       case 'layout': applyLayout(raw.name); break
       case 'settings': setSettingsSection(raw.section); setSettingsOpen(true); break
+      case 'clipboard': openClipboard(); break
       case 'open': {
         const label = raw.cwd ? raw.cwd.split(/[\\/]/).pop() : undefined
         if (raw.sessionId) {

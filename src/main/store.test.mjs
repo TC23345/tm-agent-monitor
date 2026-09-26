@@ -23,6 +23,7 @@ for (const [source, target] of [
 }
 copyFileSync('src/shared/pricing.mjs', join(fixtureRoot, 'shared', 'pricing.mjs'))
 copyFileSync('src/shared/hotkeys.mjs', join(fixtureRoot, 'shared', 'hotkeys.mjs'))
+copyFileSync('src/shared/pickerPlace.mjs', join(fixtureRoot, 'shared', 'pickerPlace.mjs'))
 after(() => rmSync(fixtureRoot, { recursive: true, force: true }))
 
 const { AgentStore, validateMutableSettingsPatch } = await import(pathToFileURL(join(fixtureRoot, 'main', 'store.js')).href)
@@ -93,6 +94,10 @@ test('settings patches allow only mutable fields with bounded runtime types', ()
   assert.equal(validateMutableSettingsPatch({ favoriteHotkeys: 'Alt+1,Alt+2,Alt+3' }), null)
   assert.deepEqual(validateMutableSettingsPatch({ pickerFavoriteModifier: 'Control' }), { pickerFavoriteModifier: 'Control' })
   assert.equal(validateMutableSettingsPatch({ pickerFavoriteModifier: 'Shift' }), null)
+  assert.deepEqual(validateMutableSettingsPatch({ pickerSize: { width: 720.4, height: 100 } }), { pickerSize: { width: 720, height: 300 } }, 'clamped to the minimum')
+  assert.deepEqual(validateMutableSettingsPatch({ pickerSize: null }), { pickerSize: null }, 'null is the default card')
+  assert.equal(validateMutableSettingsPatch({ pickerSize: { width: 700 } }), null)
+  assert.equal(validateMutableSettingsPatch({ pickerSize: '700x500' }), null)
   assert.equal(validateMutableSettingsPatch({ shortcuts: [] }), null, 'the rows are reported, never set')
   assert.deepEqual(validateMutableSettingsPatch({ sizeMode: 'left' }), { sizeMode: 'left' })
   assert.deepEqual(validateMutableSettingsPatch({ sizeMode: 'full' }), { sizeMode: 'full' })

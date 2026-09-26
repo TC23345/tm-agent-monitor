@@ -52,9 +52,9 @@ export function sanitizeMeta(raw) {
   }
 }
 
-/** The body a line seals: what must never be readable from the file alone. */
+/** The body a line seals: what must never be readable from the file alone (the user's note included). */
 function bodyOf(clip) {
-  return JSON.stringify({ text: clip.text, files: clip.files, title: clip.title })
+  return JSON.stringify({ text: clip.text, files: clip.files, title: clip.title, note: clip.note })
 }
 
 export class ClipStore {
@@ -286,7 +286,13 @@ export class ClipStore {
     return clean
   }
 
-  /** Title, text (text clips only — marks it edited), groups (existing names only), star. */
+  /**
+   * Title, text (text clips only — marks it edited), groups (existing names
+   * only), star, note, expansion code and keybind (null clears each of the
+   * last three). A code or chord `sanitizeClip` refuses fails the update
+   * rather than silently dropping; uniqueness is main's check (it knows the
+   * snippet notes and its own chords).
+   */
   update(id, patch) {
     const idx = this.clips.findIndex((c) => c.id === id)
     if (idx === -1 || !isRecord(patch)) return null
@@ -294,11 +300,17 @@ export class ClipStore {
     const next = { ...prev }
     if (patch.title === null) delete next.title
     else if (typeof patch.title === 'string') next.title = patch.title
+    for (const key of ['note', 'shortcut', 'hotkey']) {
+      if (patch[key] === null || patch[key] === '') delete next[key]
+      else if (typeof patch[key] === 'string') next[key] = patch[key]
+    }
     if (typeof patch.text === 'string' && prev.kind === 'text' && patch.text !== prev.text) { next.text = patch.text; next.edited = true; next.bytes = Buffer.byteLength(patch.text, 'utf8') }
     if (Array.isArray(patch.groups)) next.groups = [...new Set(patch.groups.filter((g) => groupNameOk(g) && this.meta.groups.includes(g)))]
     if (typeof patch.favorite === 'boolean') next.favorite = patch.favorite
     const clean = sanitizeClip(next)
     if (!clean) return null
+    if ((typeof patch.shortcut === 'string' && patch.shortcut && clean.shortcut !== patch.shortcut) ||
+      (typeof patch.hotkey === 'string' && patch.hotkey && !clean.hotkey)) return null
     this.clips = [...this.clips.slice(0, idx), clean, ...this.clips.slice(idx + 1)]
     // The seal covers the body only; a star or group change keeps it.
     if (bodyOf(clean) !== bodyOf(prev)) this.sealed.delete(id)
@@ -442,10 +454,10 @@ export class ClipStore {
 
   /** One stored line: the record minus its body, plus the body sealed (reused from the cache when unchanged). */
   async lineFor(clip) {
-    const { text, files, title, ...rest } = clip
+    const { text, files, title, note, ...rest } = clip
     const line = { v: 1, clip: rest }
     if (!this.crypto.available()) {
-      line.plain = { text, files, title }
+      line.plain = { text, files, title, note }
       this.unprotected = true
       return line
     }
@@ -459,7 +471,7 @@ export class ClipStore {
       line.enc = (await this.crypto.protect(body)).toString('base64')
       this.sealed.set(clip.id, { body, enc: line.enc })
     } catch {
-      line.plain = { text, files, title }
+      line.plain = { text, files, title, note }
       this.unprotected = true
     }
     return line

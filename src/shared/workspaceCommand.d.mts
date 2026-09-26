@@ -9,6 +9,7 @@ export type WorkspaceCommand =
   | { kind: 'hide' }
   | { kind: 'layout'; name: string }
   | { kind: 'settings'; section?: 'shortcuts' }
+  | { kind: 'clipboard' }
   | { kind: 'open'; launch: TerminalLaunch; cwd?: string; command?: string; sessionId?: string }
 
 export function parseWorkspaceArgs(argv: unknown): WorkspaceCommand | null

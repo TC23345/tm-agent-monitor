@@ -10,10 +10,12 @@
  *     title?, createdAt, copiedAt, copies, groups: string[], favorite,
  *     source: { kind: 'app'|'terminal'|'chrome'|'agent'|'manual', exe?, app?, title?, url?,
  *               terminalId?, project?, provider?, agentId? },
- *     bytes, seq?, edited?, merged?, manual? }
+ *     bytes, seq?, edited?, merged?, manual?,
+ *     note?, shortcut?, hotkey? }  — the user's note, a `;sig` expansion code, a global paste chord
  * The list is kept newest-copied first; `copiedAt` is the sort key.
  */
 import { fuzzyScore } from './palette.mjs'
+import { normalizeAccelerator } from './hotkeys.mjs'
 
 /** Standard Windows clipboard format id for a file list (DROPFILES). */
 export const CF_HDROP = 15
@@ -35,6 +37,11 @@ export const RETENTION_DAYS = 30
 export const MAX_GROUPS = 50
 export const MAX_GROUP_NAME = 40
 export const MAX_TITLE = 120
+/** A clip's free-text note (the Edit… card). */
+export const MAX_NOTE = 500
+/** An expansion code (`;sig`): 2–32 characters, no whitespace. */
+export const SHORTCUT_MIN = 2
+export const SHORTCUT_MAX = 32
 /** How long an internal `text:copy` hint (a pane's copy-on-select) can precede the clipboard update it explains. */
 export const INTERNAL_COPY_WINDOW_MS = 1500
 /** The same content on top again within this window is the same copy (a write-then-flush burst), not a re-copy. */
@@ -269,11 +276,11 @@ export function fromSource(clip, filter) {
   return s.kind === filter
 }
 
-/** The text a search runs over: title, then the first 500 characters. */
+/** The text a search runs over: title, expansion code and note, then the first 500 characters. */
 export function searchText(clip) {
   if (!clip) return ''
   const body = clip.kind === 'files' ? (clip.files ?? []).join(' ') : clip.kind === 'image' ? `image ${clip.image?.width ?? ''}x${clip.image?.height ?? ''}` : (clip.text ?? '')
-  return `${clip.title ?? ''} ${body.slice(0, 500)}`.trim()
+  return [clip.title ?? '', clip.shortcut ?? '', clip.note ?? '', body.slice(0, 500)].filter(Boolean).join(' ').trim()
 }
 
 /**
@@ -500,7 +507,82 @@ export function sanitizeClip(raw) {
   clip.bytes = Number.isInteger(raw.bytes) && raw.bytes >= 0 ? raw.bytes : kind === 'image' ? clip.image.bytes : Buffer.byteLength(clip.text, 'utf8')
   if (Number.isInteger(raw.seq) && raw.seq >= 0) clip.seq = raw.seq
   for (const flag of ['edited', 'merged', 'manual']) if (raw[flag] === true) clip[flag] = true
+  const note = cleanNote(raw.note)
+  if (note) clip.note = note
+  // An image has no text to expand, so it never carries a code.
+  if (kind !== 'image' && shortcutShapeProblem(raw.shortcut) === null) clip.shortcut = raw.shortcut
+  const hotkey = normalizeAccelerator(raw.hotkey)
+  if (hotkey) clip.hotkey = hotkey
   return clip
+}
+
+/** A note as stored: trimmed, ≤ MAX_NOTE, no control characters but newlines and tabs; '' when empty. */
+export function cleanNote(raw) {
+  if (typeof raw !== 'string') return ''
+  // eslint-disable-next-line no-control-regex
+  return raw.replace(/\r\n/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim().slice(0, MAX_NOTE)
+}
+
+/**
+ * Why a string cannot be an expansion code, or null when it can: 2–32
+ * characters, no whitespace, starting with a letter or a punctuation/symbol
+ * character (`;sig`, `/addr`, `sig1`) — never a digit, so typing a number
+ * never expands.
+ */
+export function shortcutShapeProblem(raw) {
+  if (typeof raw !== 'string' || !raw) return 'Type a code like ;sig'
+  const n = [...raw].length
+  if (/\s/.test(raw)) return 'No spaces in an expansion code'
+  if (n < SHORTCUT_MIN) return `At least ${SHORTCUT_MIN} characters`
+  if (n > SHORTCUT_MAX) return `At most ${SHORTCUT_MAX} characters`
+  if (!/^[\p{L}\p{P}\p{S}]/u.test(raw)) return 'Start with a letter or a punctuation mark like ;'
+  return null
+}
+
+/**
+ * Why `shortcut` cannot be this clip's expansion code, or null. The shape
+ * rule, then uniqueness — case-insensitive, because the expander matches
+ * that way — against every other clip and every snippet note's shortcut
+ * (`snippets`: `{ name, shortcut? }` as `GET /v1/snippets` lists them).
+ */
+export function shortcutProblem(shortcut, clips, snippets, selfId) {
+  const shape = shortcutShapeProblem(shortcut)
+  if (shape) return shape
+  const key = shortcut.toLowerCase()
+  for (const c of Array.isArray(clips) ? clips : []) {
+    if (!c || c.id === selfId || typeof c.shortcut !== 'string') continue
+    if (c.shortcut.toLowerCase() === key) return `${shortcut} already expands “${clipTitle(c)}”`
+  }
+  for (const s of Array.isArray(snippets) ? snippets : []) {
+    if (!s || typeof s.shortcut !== 'string') continue
+    if (s.shortcut.toLowerCase() === key) return `${shortcut} is already the snippet “${s.name}”`
+  }
+  return null
+}
+
+/**
+ * Why `hotkey` cannot be this clip's keybind, or null: it must be a global
+ * chord (`normalizeAccelerator`), not one of the app's own (`appChords`:
+ * `{ label, chord }` — summon, half view, picker, favorites), and not
+ * another clip's.
+ */
+export function hotkeyProblem(hotkey, clips, appChords, selfId) {
+  const chord = normalizeAccelerator(hotkey)
+  if (!chord) return 'Not a global shortcut — add Ctrl, Alt or Win'
+  for (const a of Array.isArray(appChords) ? appChords : []) {
+    if (a && normalizeAccelerator(a.chord) === chord) return `${chordLabel(chord)} is already ${a.label}`
+  }
+  for (const c of Array.isArray(clips) ? clips : []) {
+    if (!c || c.id === selfId || typeof c.hotkey !== 'string') continue
+    if (normalizeAccelerator(c.hotkey) === chord) return `${chordLabel(chord)} already pastes “${clipTitle(c)}”`
+  }
+  return null
+}
+
+/** A chord as a compact chip reads it: `Ctrl+Alt+K`, `Win+F9` (stored as Control/Super). */
+export function chordLabel(chord) {
+  if (typeof chord !== 'string') return ''
+  return chord.split('+').map((p) => (p === 'Control' ? 'Ctrl' : p === 'Super' ? 'Win' : p)).join('+')
 }
 
 /** The named groups list as loaded: unique, valid names, bounded. */

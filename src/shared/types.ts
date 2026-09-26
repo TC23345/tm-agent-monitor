@@ -353,7 +353,10 @@ export type WindowMaterial = 'none' | 'mica' | 'acrylic'
 
 export type PickerFavoriteModifier = 'Alt' | 'Control'
 
-export type ShortcutId = 'hotkey' | 'halfHotkey' | 'pickerHotkey' | 'favorite1' | 'favorite2' | 'favorite3'
+/** The app's own chords, which Settings can record and reset. */
+export type AppShortcutId = 'hotkey' | 'halfHotkey' | 'pickerHotkey' | 'favorite1' | 'favorite2' | 'favorite3'
+/** Every registered chord: the app's own, then one per clip keybind (`clip:<id>`, set in the clip's Edit… card). */
+export type ShortcutId = AppShortcutId | `clip:${string}`
 
 /** One global chord as Settings shows it. */
 export interface ShortcutRow {
@@ -366,6 +369,8 @@ export interface ShortcutRow {
   default: string
   /** Why `active` is not `preferred`: held by another app, or used by another of our rows. */
   note?: string
+  /** A clip's keybind (read-only here; edited in the clip's Edit… card). */
+  clipId?: string
 }
 
 export interface AppSettingsPatch {
@@ -378,6 +383,8 @@ export interface AppSettingsPatch {
   favoriteHotkeys?: string[]
   /** The modifier of the picker's own favorite keys: Alt+1–3 or Ctrl+1–3. */
   pickerFavoriteModifier?: PickerFavoriteModifier
+  /** The quick picker's card size, remembered from its resize grips; null = the default (PICKER_CARD). */
+  pickerSize?: { width: number; height: number } | null
   notifications?: boolean
   launchAtLogin?: boolean
   mock?: boolean
@@ -396,6 +403,8 @@ export interface AppSettings {
   /** The three paste-favorite chords as preferred (the rows in `shortcuts` say which registered). */
   favoriteHotkeys: string[]
   pickerFavoriteModifier: PickerFavoriteModifier
+  /** The quick picker's remembered card size, or null for the default. */
+  pickerSize: { width: number; height: number } | null
   /** Settings → Keyboard shortcuts: every chord, preferred against what actually registered. */
   shortcuts: ShortcutRow[]
   notifications: boolean

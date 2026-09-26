@@ -55,17 +55,20 @@ export function MenuPop({ children, onAway, ignoreSelector }: {
   )
 }
 
-export function MenuItem({ icon, label, hint, disabled, onClick }: {
+export function MenuItem({ icon, label, hint, disabled, keys, onClick }: {
   icon?: ReactNode
   label: string
   hint?: string
   disabled?: boolean
+  /** Shortcut chips at the right (the ContextMenu's `kbd` look). */
+  keys?: string[]
   onClick: () => void
 }) {
   return (
     <button className="menu-item" disabled={disabled} onClick={onClick} title={hint} data-testid={tid('menu', label)}>
       <span className="menu-item-ic">{icon}</span>
       {label}
+      {keys?.length ? <span className="ctxmenu-keys menu-item-keys">{keys.map((k) => <kbd key={k}>{k}</kbd>)}</span> : null}
     </button>
   )
 }

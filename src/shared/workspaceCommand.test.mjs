@@ -39,6 +39,9 @@ test('the renderer-side check accepts only the parsed shapes', () => {
   assert.equal(isWorkspaceCommand({ kind: 'settings', section: 'api' }), false)
   assert.equal(isWorkspaceCommand({ kind: 'settings', section: 'shortcuts', extra: 1 }), false)
   assert.equal(parseWorkspaceArgs(['app.exe', 'settings']), null, 'not a tm verb')
+  assert.equal(isWorkspaceCommand({ kind: 'clipboard' }), true, 'the picker menu opens the Clipboard pane')
+  assert.equal(isWorkspaceCommand({ kind: 'clipboard', extra: 1 }), false)
+  assert.equal(parseWorkspaceArgs(['app.exe', 'clipboard']), null, 'main-only, not a tm verb')
   // A daemon-spawned session rides along as a UUID; anything else is dropped.
   assert.equal(isWorkspaceCommand({ kind: 'open', launch: 'claude', cwd: 'C:\\x', sessionId: '0f3b1c2d-1111-4222-8333-444455556666' }), true)
   assert.equal(isWorkspaceCommand({ kind: 'open', launch: 'claude', sessionId: 'not-a-uuid' }), false)
