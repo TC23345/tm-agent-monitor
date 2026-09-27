@@ -2750,7 +2750,11 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     app.setName('TaylorMade Agents')
-    if (process.platform === 'win32') app.setAppUserModelId('com.taylormade.agent-monitor')
+    // The taskbar groups buttons, and caches their icon, by this id. A dev or
+    // `npm run debug:app` run is node_modules' electron.exe — the Electron
+    // atom — so under the installed app's id it shared (and could leave its
+    // icon on) the installed app's taskbar button. Unpackaged runs get their own.
+    if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? 'com.taylormade.agent-monitor' : 'com.taylormade.agent-monitor.dev')
 
     // Windows Jump List: right-click the taskbar icon to start a session
     // without the workspace. Each task relaunches the exe with argv the
