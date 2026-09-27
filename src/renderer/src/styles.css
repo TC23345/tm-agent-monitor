@@ -1338,6 +1338,12 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .shortcut-actions .hotkey-btn.is-capturing { max-width: 150px; white-space: normal; text-align: left; line-height: 1.25; }
 .shortcut-msg { margin-top: 8px; font-size: 11.5px; color: var(--muted); }
 .shortcut-msg.is-warn { color: var(--st-permission); }
+/* The Keys pane: the legend in the grid. */
+.keys-pane { padding: 6px 12px 10px; margin: 0; }
+/* A full-width pane would push the chips a screen away from their labels. */
+.keys-pane .legend { max-width: 780px; }
+.keys-pane .legend-table th { width: 58%; }
+.keys-pane .legend-h:first-of-type { margin-top: 6px; }
 /* Keyboard shortcuts → Global chords | Legend. */
 .shortcuts-tabs { margin-bottom: 6px; }
 .legend-check { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 2px 0 6px; }

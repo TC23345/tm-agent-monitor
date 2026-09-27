@@ -108,7 +108,7 @@ export function KeyLegend({ shortcuts, pickerModifier }: { shortcuts: readonly S
         </tbody>
       </table>
 
-      <h3 className="legend-h">Global<span className="shint">from any app — change them on the Global chords tab</span></h3>
+      <h3 className="legend-h">Global<span className="shint">from any app — change them in Settings → Keyboard shortcuts</span></h3>
       <table className="legend-table">
         <tbody>
           {shortcuts.map((row) => (

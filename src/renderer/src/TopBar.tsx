@@ -191,7 +191,7 @@ export function TopBar(props: Props) {
               })}
               <div className="menu-sep" />
               <MenuItem icon={<Settings strokeWidth={2} />} label="Settings…" hint="Hotkey, notifications, startup, updates, hooks (Ctrl+,)" onClick={run(onSettings)} />
-              <MenuItem icon={<Keyboard strokeWidth={2} />} label="Keyboard shortcuts" hint="Every key the workspace, Claude Code, Codex and the shell use (F1)" onClick={run(onKeys)} />
+              <MenuItem icon={<Keyboard strokeWidth={2} />} label="Keyboard shortcuts" hint="The Keys pane on and off — every key the workspace, Claude Code, Codex and the shell use (F1)" onClick={run(onKeys)} />
               <div className="menu-sep" />
               <div className="menu-status">
                 <ConnChip health={health} />

@@ -55,7 +55,7 @@ const k = (chord, terminal, arg) => (arg === undefined ? { chord, terminal } : {
  */
 export const APP_KEYS = Object.freeze([
   { action: 'palette', label: 'Command palette', keys: [k('Control+K', false), k('Control+P', false), k('Control+Shift+P', true), k('Alt+K', true)] },
-  { action: 'legend', label: 'Keyboard shortcuts legend (this tab)', keys: [k('F1', false), k('Control+/', false)] },
+  { action: 'legend', label: 'Keys pane on / off (this legend)', keys: [k('F1', false), k('Control+/', false)] },
   { action: 'settings', label: 'Settings', keys: [k('Control+,', false)] },
   { action: 'sidebar', label: 'Hide / show the sidebar', keys: [k('Control+B', false), k('Alt+S', true)] },
   { action: 'waiting', label: 'Jump to the next waiting session', keys: [k('Alt+J', true), k('Control+Shift+W', true)] },
@@ -88,7 +88,7 @@ export const OTHER_KEYS = Object.freeze([
     group: 'Clipboard picker', rows: [
       { label: 'Paste the clip back into the app you came from', keys: ['Enter'] },
       { label: 'Copy the clip and close', keys: ['Shift+Enter'] },
-      { label: 'Favorites 1–3 (Alt or Ctrl — set on the Global chords tab)', keys: ['Alt+1', 'Alt+2', 'Alt+3'] },
+      { label: 'Favorites 1–3 (Alt or Ctrl — set in Settings → Keyboard shortcuts)', keys: ['Alt+1', 'Alt+2', 'Alt+3'] },
       { label: 'Rename the clip', keys: ['F2'] },
       { label: 'Next filter chip', keys: ['Tab'] },
       { label: 'Close', keys: ['Escape'] }

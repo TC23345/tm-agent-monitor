@@ -25,6 +25,7 @@ import { useProjectCommands } from './useProject'
 import { ActivityPane } from './ActivityPane'
 import { NotesPane, type NotesPaneHandle } from './NotesPane'
 import { ClipboardPane, type PasteTarget } from './clipboard/ClipboardPane'
+import { KeysPane } from './KeysPane'
 import { sourceLabel } from '@shared/clips.mjs'
 import type { ClipSummary } from '@shared/types'
 import { isWorkspaceCommand } from '@shared/workspaceCommand.mjs'
@@ -580,10 +581,16 @@ export function App() {
     else if (target && panes.length > 1) setZoom(target)
   }
 
-  /** F1 (Ctrl+/): Settings → Keyboard shortcuts, on the Legend tab. */
+  /** F1 (Ctrl+/): the Keys pane on and off. A full grid shows the same legend
+   * in Settings → Keyboard shortcuts instead. */
   const openLegend = () => {
-    setSettingsSection('legend')
-    setSettingsOpen(true)
+    const open = panes.find((p) => p.kind === 'keys')
+    if (open) closePane(open.id)
+    else if (panes.length < MAX_PANES) addPane('keys')
+    else {
+      setSettingsSection('legend')
+      setSettingsOpen(true)
+    }
   }
 
   /** Alt+J / Ctrl+Shift+W: the next waiting session — its own pane if it has one
@@ -770,6 +777,8 @@ export function App() {
         const targets = pasteTargets()
         return <ClipboardPane terminals={targets} focusedTerminal={pasteTarget(targets)} />
       }
+      case 'keys':
+        return <KeysPane refresh={settingsOpen} />
       case 'terminal':
         return (
           <Suspense fallback={<div className="empty">Starting terminal…</div>}>
@@ -1034,7 +1043,8 @@ export function App() {
     }
     if (!full) {
       for (const k of PANE_KINDS) {
-        if (isUniqueKind(k.id) && !panes.some((p) => p.kind === k.id)) {
+        // Keys has its own on/off command (`cmd:keys`, F1).
+        if (isUniqueKind(k.id) && k.id !== 'keys' && !panes.some((p) => p.kind === k.id)) {
           cmd(`add-${k.id}`, `Add pane: ${k.label}`, () => addPane(k.id), { icon: <k.icon strokeWidth={2} />, keywords: ['pane', 'view'] })
         }
       }
@@ -1078,7 +1088,7 @@ export function App() {
     if (order.length > 0) cmd('reset-order', 'Reset project order', clearOrder, { icon: <ChevronsUpDown strokeWidth={2} /> })
     if (waitingAgents(agents).length > 0) cmd('route-waiting', 'Go to next waiting session', routeToWaiting, { icon: <BellRing strokeWidth={2} />, keys: ['Ctrl', 'Shift', 'W'], keywords: ['attention', 'question', 'input'], pinned: true })
     cmd('settings', 'Settings…', () => setSettingsOpen(true), { icon: <SettingsIcon strokeWidth={2} />, keys: ['Ctrl', ','], keywords: ['hotkey', 'hooks', 'updates', 'preferences'] })
-    cmd('keys', 'Keyboard shortcuts legend', openLegend, { icon: <Keyboard strokeWidth={2} />, keys: ['F1'], keywords: ['keys', 'keybindings', 'hotkeys', 'shortcuts', 'legend', 'help', 'cheatsheet'] })
+    cmd('keys', panes.some((p) => p.kind === 'keys') ? 'Close the Keys pane' : 'Keys: every keyboard shortcut', openLegend, { icon: <Keyboard strokeWidth={2} />, keys: ['F1'], detail: full && !panes.some((p) => p.kind === 'keys') ? 'all six panes are open — shows it in Settings' : undefined, keywords: ['keys', 'keybindings', 'hotkeys', 'shortcuts', 'legend', 'help', 'cheatsheet'] })
     cmd('rebuild', 'Rebuild & relaunch', rebuildApp, {
       icon: <RefreshCw strokeWidth={2} />,
       detail: rebuild.busy ? 'building…' : 'npm run dist in the local checkout, then quit, reinstall, relaunch',
