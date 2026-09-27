@@ -9,6 +9,8 @@ export type ChordResult =
   | { pending: true }
   | { invalid: string }
 
+export function keyFromEvent(e: { key?: string; code?: string } | null | undefined): string | null
+
 export function chordFromKeydown(e: {
   key?: string
   code?: string

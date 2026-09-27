@@ -74,6 +74,20 @@ const CODE_KEYS = Object.freeze({
   NumpadDecimal: 'numdec', NumpadAdd: 'numadd', NumpadSubtract: 'numsub', NumpadMultiply: 'nummult', NumpadDivide: 'numdiv'
 })
 
+/** A keydown's key in accelerator spelling, from the physical `code`; null for a bare modifier or an unknown key. */
+export function keyFromEvent(e) {
+  if (!e || typeof e !== 'object') return null
+  if (['Control', 'Alt', 'Shift', 'Meta', 'OS', 'AltGraph'].includes(e.key)) return null
+  const code = typeof e.code === 'string' ? e.code : ''
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3)
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5)
+  if (/^Numpad[0-9]$/.test(code)) return `num${code.slice(6)}`
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code
+  if (CODE_KEYS[code]) return CODE_KEYS[code]
+  if (typeof e.key === 'string' && e.key.length === 1) return e.key.toUpperCase()
+  return null
+}
+
 /**
  * What the Settings recorder makes of one keydown: `{cancel: true}` for
  * Escape, `{accelerator}` for a usable chord, `{pending: true}` while only
@@ -83,15 +97,8 @@ export function chordFromKeydown(e) {
   if (!e || typeof e !== 'object') return { invalid: 'no key' }
   if (e.key === 'Escape' && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) return { cancel: true }
   if (['Control', 'Alt', 'Shift', 'Meta', 'OS', 'AltGraph'].includes(e.key)) return { pending: true }
-  const code = typeof e.code === 'string' ? e.code : ''
-  let key = null
-  if (/^Key[A-Z]$/.test(code)) key = code.slice(3)
-  else if (/^Digit[0-9]$/.test(code)) key = code.slice(5)
-  else if (/^Numpad[0-9]$/.test(code)) key = `num${code.slice(6)}`
-  else if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) key = code
-  else if (CODE_KEYS[code]) key = CODE_KEYS[code]
-  else if (typeof e.key === 'string' && e.key.length === 1) key = e.key.toUpperCase()
-  if (!key) return { invalid: `${e.key || code || 'that key'} cannot be a shortcut` }
+  const key = keyFromEvent(e)
+  if (!key) return { invalid: `${e.key || e.code || 'that key'} cannot be a shortcut` }
   const mods = [e.ctrlKey && 'Control', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Super'].filter(Boolean)
   const accelerator = normalizeAccelerator([...mods, key].join('+'))
   return accelerator ? { accelerator } : { invalid: 'add Ctrl, Alt or Win — a global shortcut needs one' }

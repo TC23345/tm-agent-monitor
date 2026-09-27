@@ -74,6 +74,7 @@ test('commandGroup files ids under the browse headings', () => {
   assert.equal(commandGroup('cmd:field'), 'Layout')
   assert.equal(commandGroup('cmd:sidebar'), 'Layout')
   assert.equal(commandGroup('cmd:quit'), 'App')
+  assert.equal(commandGroup('cmd:keys'), 'App')
   assert.equal(commandGroup('cmd:something-new'), 'Other')
   assert.equal(commandGroup(undefined), 'Other')
 })

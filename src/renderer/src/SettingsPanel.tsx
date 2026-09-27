@@ -6,6 +6,7 @@ import { chordLabel } from '@shared/clips.mjs'
 import { ArrowLeft, CheckCircle2, CircleAlert, RefreshCw, X } from 'lucide-react'
 import { ProviderBadge } from './ProviderBadge'
 import { useChordCapture } from './ShortcutRecorder'
+import { KeyLegend } from './KeyLegend'
 
 /** The patch that sets one row's chord: the three favorites always travel as one array. */
 function shortcutPatch(s: AppSettings, id: AppShortcutId, chord: string): AppSettingsPatch {
@@ -45,8 +46,8 @@ const VIEW_TITLE: Record<View, string> = { general: 'Settings', shortcuts: 'Keyb
 
 export function SettingsPanel({ onClose, section, onSectionShown }: {
   onClose: () => void
-  /** Open straight on a sub-page (the picker's *keys* link, `tm settings`). */
-  section?: 'shortcuts'
+  /** Open straight on a sub-page (the picker's *keys* link, `tm settings`), or on its Legend tab (F1). */
+  section?: 'shortcuts' | 'legend'
   /** Called once the requested section is on screen, so the same request can arrive again. */
   onSectionShown?: () => void
 }) {
@@ -58,7 +59,9 @@ export function SettingsPanel({ onClose, section, onSectionShown }: {
   const [updateMsg, setUpdateMsg] = useState<string | null>(null)
   const [hookMsg, setHookMsg] = useState<string | null>(null)
   const [hookBusy, setHookBusy] = useState<ProviderId | 'extension' | null>(null)
-  const [view, setView] = useState<View>(section === 'shortcuts' ? 'shortcuts' : 'general')
+  const [view, setView] = useState<View>(section ? 'shortcuts' : 'general')
+  /** Keyboard shortcuts: the global chords you can change, or the legend of every key. */
+  const [keysTab, setKeysTab] = useState<'chords' | 'legend'>(section === 'legend' ? 'legend' : 'chords')
   const [diagnostics, setDiagnostics] = useState<Record<string, SystemDiagnostic>>({})
   const [diagnosticBusy, setDiagnosticBusy] = useState<string | null>(null)
 
@@ -193,9 +196,10 @@ export function SettingsPanel({ onClose, section, onSectionShown }: {
   // Keyboard shortcuts page and mark the table.
   const [flashShortcuts, setFlashShortcuts] = useState(false)
   useEffect(() => {
-    if (section !== 'shortcuts' || !s) return
+    if (!section || !s) return
     setView('shortcuts')
-    setFlashShortcuts(true)
+    setKeysTab(section === 'legend' ? 'legend' : 'chords')
+    if (section === 'shortcuts') setFlashShortcuts(true)
     // App drops the request once it is on screen (it may clear `section`
     // synchronously, so the flash timer lives in its own effect below).
     onSectionShown?.()
@@ -292,8 +296,28 @@ export function SettingsPanel({ onClose, section, onSectionShown }: {
                 data-testid="settings-shortcuts"
               >
                 <div className="shortcuts-head">
-                  <span className="slabel" id="shortcuts-title">Keyboard shortcuts<span className="shint">global chords work from any app; Record, then press the chord (Esc cancels)</span></span>
+                  <span className="sseg shortcuts-tabs" role="tablist" aria-label="Keyboard shortcuts">
+                    {([['chords', 'Global chords'], ['legend', 'Legend']] as const).map(([id, label]) => (
+                      <button
+                        key={id}
+                        role="tab"
+                        aria-selected={keysTab === id}
+                        className={`hotkey-btn is-compact ${keysTab === id ? 'is-on' : ''}`}
+                        onClick={() => { if (recording) stopRecording(false); setKeysTab(id) }}
+                        data-testid={`shortcuts-tab-${id}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </span>
+                  <span className="slabel" id="shortcuts-title">
+                    <span className="sr-only">Keyboard shortcuts</span>
+                    <span className="shint">{keysTab === 'chords'
+                      ? 'global chords work from any app; Record, then press the chord (Esc cancels)'
+                      : 'every key the workspace uses, and the keys Claude Code, Codex and the shell keep for themselves'}</span>
+                  </span>
                 </div>
+                {keysTab === 'legend' ? <KeyLegend shortcuts={s.shortcuts} pickerModifier={s.pickerFavoriteModifier} /> : <>
                 <table className="shortcuts-table">
                   <thead>
                     <tr><th scope="col">Action</th><th scope="col">Shortcut</th><th scope="col">Registered</th><th scope="col"><span className="sr-only">Change</span></th></tr>
@@ -377,6 +401,7 @@ export function SettingsPanel({ onClose, section, onSectionShown }: {
                 {shortcutMsg && (
                   <div className={`shortcut-msg ${shortcutMsg.ok ? 'is-ok' : 'is-warn'}`} role="status" data-testid="shortcut-msg">{shortcutMsg.text}</div>
                 )}
+                </>}
               </section>
             )}
 

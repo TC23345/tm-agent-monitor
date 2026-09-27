@@ -1,5 +1,5 @@
 import {
-  Code2, Folder, FolderPlus, Globe, ListRestart, Minus, Play, Power, RefreshCw, Search, SquareTerminal, Terminal, X
+  Code2, Folder, FolderPlus, Globe, Keyboard, ListRestart, Minus, Play, Power, RefreshCw, Search, SquareTerminal, Terminal, X
 } from 'lucide-react'
 import { Settings } from './Icons'
 import mark from './assets/icon.png'
@@ -53,6 +53,8 @@ interface Props {
   canResetOrder: boolean
   onResetOrder: () => void
   onSettings: () => void
+  /** Settings → Keyboard shortcuts, Legend tab (F1). */
+  onKeys: () => void
   /** Which dropdown is open. Owned by App so Escape can close it before hiding. */
   openMenu: MenuName | null
   onOpenMenu: (menu: MenuName | null) => void
@@ -81,7 +83,7 @@ interface Props {
 export function TopBar(props: Props) {
   const {
     waiting, waitingOnly, onWaitingOnly, onRouteWaiting, health, panes, context, onNewTerminal, onNewProject, commands, onRunCommand,
-    canResetOrder, onResetOrder, onSettings, openMenu, onOpenMenu, onPalette, onMinimize, onHide, onOpenPane, hot, onFocusAgent,
+    canResetOrder, onResetOrder, onSettings, onKeys, openMenu, onOpenMenu, onPalette, onMinimize, onHide, onOpenPane, hot, onFocusAgent,
     rebuild, onRebuild
   } = props
 
@@ -189,6 +191,7 @@ export function TopBar(props: Props) {
               })}
               <div className="menu-sep" />
               <MenuItem icon={<Settings strokeWidth={2} />} label="Settings…" hint="Hotkey, notifications, startup, updates, hooks (Ctrl+,)" onClick={run(onSettings)} />
+              <MenuItem icon={<Keyboard strokeWidth={2} />} label="Keyboard shortcuts" hint="Every key the workspace, Claude Code, Codex and the shell use (F1)" onClick={run(onKeys)} />
               <div className="menu-sep" />
               <div className="menu-status">
                 <ConnChip health={health} />
@@ -199,12 +202,13 @@ export function TopBar(props: Props) {
       </nav>
 
       {/* The command center: the palette's front door, where an IDE keeps its
-          search box. Ctrl+Shift+P always opens it; Ctrl+P too, unless a
-          terminal pane has focus and the key belongs to the shell. */}
-      <button className="cmdcenter" onClick={onPalette} title="Search commands, agents, and open windows (Ctrl+Shift+P)" data-testid="cmdcenter">
+          search box. Ctrl+K opens it (Ctrl+P too) unless a terminal pane has
+          focus and the key belongs to the CLI; Alt+K and Ctrl+Shift+P work
+          everywhere (@shared/keymap.mjs). */}
+      <button className="cmdcenter" onClick={onPalette} title="Search commands, agents, and open windows (Ctrl+K — Alt+K inside a terminal)" data-testid="cmdcenter">
         <Search className="cmdcenter-ic" strokeWidth={2} />
         <span className="cmdcenter-label">Search commands, agents, windows</span>
-        <span className="cmdcenter-keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd></span>
+        <span className="cmdcenter-keys"><kbd>Ctrl</kbd><kbd>K</kbd></span>
       </button>
 
       <div className="topbar-status">
@@ -219,12 +223,12 @@ export function TopBar(props: Props) {
           </button>
         )}
         {/* The chip *goes there*: a click lands you in the next waiting session
-            (Ctrl+Shift+W); Shift-click is the list filter for the rare case. */}
+            (Alt+J or Ctrl+Shift+W); Shift-click is the list filter for the rare case. */}
         {(waiting > 0 || waitingOnly) && (
           <button
             className={`needs ${waitingOnly ? 'needs--active' : ''}`}
             onClick={(event) => { if (event.shiftKey || waitingOnly) onWaitingOnly(); else onRouteWaiting() }}
-            title={waitingOnly ? 'Showing waiting sessions only — click to show all' : `${waiting} waiting for your input — click to go to the next one (Ctrl+Shift+W), Shift-click to show only them`}
+            title={waitingOnly ? 'Showing waiting sessions only — click to show all' : `${waiting} waiting for your input — click to go to the next one (Alt+J), Shift-click to show only them`}
             data-testid="waiting-chip"
           >
             {waiting} waiting

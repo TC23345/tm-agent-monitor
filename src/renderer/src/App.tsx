@@ -28,6 +28,7 @@ import { ClipboardPane, type PasteTarget } from './clipboard/ClipboardPane'
 import { sourceLabel } from '@shared/clips.mjs'
 import type { ClipSummary } from '@shared/types'
 import { isWorkspaceCommand } from '@shared/workspaceCommand.mjs'
+import { eventChord, matchAppKey } from '@shared/keymap.mjs'
 import type { ProjectCommand } from '@shared/types'
 import { LAYOUT_NAME_MAX, loadLayouts, panesFromLayout, saveLayouts, snapshotLayout, type LayoutMap } from './layouts'
 import { tid } from './testid'
@@ -51,7 +52,7 @@ import { launchFor, launchKey, withLaunch, type LaunchPrefs } from '@shared/pane
 import { LaunchNav, type LaunchTarget, type NavMenu } from './LaunchNav'
 import {
   AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Clipboard, Code2, Code2 as CursorIcon, Columns3, Copy,
-  Eye, EyeOff, Filter, Folder, FolderPlus, Globe, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
+  Eye, EyeOff, Filter, Folder, FolderPlus, Globe, Keyboard, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
   NotebookPen, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, Rss, Ruler, Save, Shrink, Sparkles, SquareSlash,
   SquareTerminal, Terminal, Trash2, X
 } from 'lucide-react'
@@ -97,7 +98,7 @@ export function App() {
   const snapRef = useRef<StatusSnapshot | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   /** Where Settings opens scrolled to (the picker's "keys" link asks for the shortcuts table). */
-  const [settingsSection, setSettingsSection] = useState<'shortcuts' | undefined>(undefined)
+  const [settingsSection, setSettingsSection] = useState<'shortcuts' | 'legend' | undefined>(undefined)
   // First-run hook installation from the Agents pane's empty state.
   const [hookSetup, setHookSetup] = useState<{ busy: 'claude' | 'codex' | null; msg: string | null }>({ busy: null, msg: null })
   // Rebuild & relaunch: one state shared by the title-bar chip, File menu, and
@@ -174,7 +175,7 @@ export function App() {
     try { localStorage.setItem('tm.field.v1', v ? '0' : '1') } catch { /* preference only */ }
     return !v
   })
-  /** Ctrl+B (Ctrl+Shift+B inside a terminal): the grid takes the whole frame. Remembered. */
+  /** Ctrl+B (Alt+S, which also works inside a terminal): the grid takes the whole frame. Remembered. */
   const [sidebarHidden, setSidebarHidden] = useState<boolean>(() => {
     try { return localStorage.getItem('tm.sidebar.hidden.v1') === '1' } catch { return false }
   })
@@ -291,65 +292,42 @@ export function App() {
     }
   }, [])
 
+  // The app's keys are one table, `@shared/keymap.mjs`, which the Settings
+  // legend renders too. Inside a terminal pane only the keys marked
+  // `terminal` are ours (the Alt layer, Ctrl+Shift chords, Ctrl+Tab, Ctrl+1–6)
+  // — the rest (Ctrl+K, Ctrl+B, F1, Escape…) belong to the CLI there, and a
+  // test keeps every terminal key off Claude Code's, Codex's and the shell's.
   // Escape closes an open menu, the palette, or a dialog, then un-zooms, and
-  // otherwise dismisses the workspace (it no longer auto-hides on blur, so this
-  // is the fast keyboard way out). Keys inside an embedded terminal belong to
-  // the shell — Escape there interrupts the CLI, it must never also hide the
-  // workspace, and Ctrl+P is the shell's too. Only the Ctrl+Shift chords reach
-  // past a focused terminal, which is why the palette's canonical shortcut is
-  // Ctrl+Shift+P rather than Ctrl+P alone.
+  // otherwise dismisses the workspace.
   const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => {})
   onKeyRef.current = (e: KeyboardEvent) => {
       // Settings → Keyboard shortcuts is recording: the next chord is its, not ours.
       if (document.querySelector('[data-shortcut-recording]')) return
       const inTerminal = !!(e.target as HTMLElement)?.closest?.('.termpane')
-      const ctrl = e.ctrlKey && !e.altKey && !e.metaKey
-      if (ctrl && e.shiftKey && (e.key === 'P' || e.key === 'p')) {
-        e.preventDefault()
-        setPalette((v) => !v)
-        return
-      }
-      if (ctrl && e.shiftKey && e.key === '`') {
-        e.preventDefault()
-        newTerminal('shell')
-        return
-      }
-      if (ctrl && e.shiftKey && (e.key === 'W' || e.key === 'w')) {
-        e.preventDefault()
-        routeToWaiting()
-        return
-      }
-      // Ctrl+B belongs to the CLI inside a terminal (Claude Code backgrounds
-      // a running command with it), so there the sidebar is Ctrl+Shift+B.
-      if (ctrl && (e.key === 'b' || e.key === 'B') && (e.shiftKey || !inTerminal)) {
-        e.preventDefault()
-        toggleSidebar()
-        return
-      }
-      if (ctrl && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-        e.preventDefault()
-        stepFocus(e.key === 'ArrowRight' ? 1 : -1)
-        return
-      }
-      if (ctrl && !e.shiftKey && /^[1-6]$/.test(e.key)) {
-        const target = panes[Number(e.key) - 1]
-        if (target) {
+      const hit = matchAppKey(eventChord(e), inTerminal)
+      if (hit) {
+        if (hit.action === 'focusPane') {
+          const target = panes[(hit.arg ?? 0) - 1]
+          if (!target) return
           e.preventDefault()
           focusPane(target.id)
+          return
+        }
+        e.preventDefault()
+        switch (hit.action) {
+          case 'palette': setPalette((v) => !v); break
+          case 'legend': openLegend(); break
+          case 'settings': setSettingsOpen(true); break
+          case 'sidebar': toggleSidebar(); break
+          case 'waiting': routeToWaiting(); break
+          case 'newTerminal': newTerminal('shell'); break
+          case 'nextPane': stepFocus(1); break
+          case 'prevPane': stepFocus(-1); break
+          case 'zoom': toggleZoomFocused(); break
         }
         return
       }
       if (inTerminal) return
-      if (ctrl && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
-        e.preventDefault()
-        setPalette((v) => !v)
-        return
-      }
-      if (ctrl && !e.shiftKey && e.key === ',') {
-        e.preventDefault()
-        setSettingsOpen(true)
-        return
-      }
       if (e.key !== 'Escape') return
       // A ContextMenu or an inline rename owns Escape while it is open.
       const owner = document.querySelector('[data-escape-close]')
@@ -595,7 +573,20 @@ export function App() {
     focusPane(next.id)
   }
 
-  /** Ctrl+Shift+W: the next waiting session — its own pane if it has one
+  /** Alt+Z: zoom the focused pane, or restore the grid when it is the zoomed one. */
+  const toggleZoomFocused = () => {
+    const target = focusedPane && panes.some((p) => p.id === focusedPane) ? focusedPane : null
+    if (zoom && (!target || zoom === target)) setZoom(null)
+    else if (target && panes.length > 1) setZoom(target)
+  }
+
+  /** F1 (Ctrl+/): Settings → Keyboard shortcuts, on the Legend tab. */
+  const openLegend = () => {
+    setSettingsSection('legend')
+    setSettingsOpen(true)
+  }
+
+  /** Alt+J / Ctrl+Shift+W: the next waiting session — its own pane if it has one
    * (zoomed into view if something else is zoomed), else its real window. */
   const routeToWaiting = () => {
     const target = nextWaiting(snap?.agents, lastRouted.current)
@@ -1070,7 +1061,7 @@ export function App() {
       cmd(`cols-${c}`, `Columns: ${c === 'auto' ? 'Auto' : c}`, () => setPaneCols(c), { icon: <Columns3 strokeWidth={2} />, detail: paneCols === c ? 'current' : undefined, keywords: ['grid', 'layout'] })
     }
     if (sized) cmd('reset-sizes', 'Reset pane sizes', resetSizes, { icon: <Ruler strokeWidth={2} />, keywords: ['layout', 'splitter'] })
-    cmd('sidebar', `${sidebarHidden ? 'Show' : 'Hide'} sidebar`, toggleSidebar, { icon: <PanelLeft strokeWidth={2} />, keys: ['Ctrl', 'B'], keywords: ['sidebar', 'fullscreen', 'full screen', 'focus', 'hide', 'show', 'toggle', 'agents', 'limits'] })
+    cmd('sidebar', `${sidebarHidden ? 'Show' : 'Hide'} sidebar`, toggleSidebar, { icon: <PanelLeft strokeWidth={2} />, keys: ['Ctrl', 'B'], detail: 'Alt+S in a terminal', keywords: ['sidebar', 'fullscreen', 'full screen', 'focus', 'hide', 'show', 'toggle', 'agents', 'limits'] })
     cmd('field', `Pace streaks: ${fieldOn ? 'off' : 'on'}`, toggleField, { icon: <Sparkles strokeWidth={2} />, keywords: ['field', 'gpu', 'webgpu', 'streaks', 'burn', 'session', 'effects'] })
     if (!full) {
       for (const c of projectCommands) {
@@ -1087,6 +1078,7 @@ export function App() {
     if (order.length > 0) cmd('reset-order', 'Reset project order', clearOrder, { icon: <ChevronsUpDown strokeWidth={2} /> })
     if (waitingAgents(agents).length > 0) cmd('route-waiting', 'Go to next waiting session', routeToWaiting, { icon: <BellRing strokeWidth={2} />, keys: ['Ctrl', 'Shift', 'W'], keywords: ['attention', 'question', 'input'], pinned: true })
     cmd('settings', 'Settings…', () => setSettingsOpen(true), { icon: <SettingsIcon strokeWidth={2} />, keys: ['Ctrl', ','], keywords: ['hotkey', 'hooks', 'updates', 'preferences'] })
+    cmd('keys', 'Keyboard shortcuts legend', openLegend, { icon: <Keyboard strokeWidth={2} />, keys: ['F1'], keywords: ['keys', 'keybindings', 'hotkeys', 'shortcuts', 'legend', 'help', 'cheatsheet'] })
     cmd('rebuild', 'Rebuild & relaunch', rebuildApp, {
       icon: <RefreshCw strokeWidth={2} />,
       detail: rebuild.busy ? 'building…' : 'npm run dist in the local checkout, then quit, reinstall, relaunch',
@@ -1176,6 +1168,7 @@ export function App() {
         canResetOrder={order.length > 0}
         onResetOrder={clearOrder}
         onSettings={() => setSettingsOpen(true)}
+        onKeys={openLegend}
         rebuild={rebuild}
         onRebuild={rebuildApp}
         openMenu={openMenu === 'file' || openMenu === 'terminal' || openMenu === 'user' ? openMenu : null}

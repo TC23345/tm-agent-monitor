@@ -1338,6 +1338,25 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .shortcut-actions .hotkey-btn.is-capturing { max-width: 150px; white-space: normal; text-align: left; line-height: 1.25; }
 .shortcut-msg { margin-top: 8px; font-size: 11.5px; color: var(--muted); }
 .shortcut-msg.is-warn { color: var(--st-permission); }
+/* Keyboard shortcuts → Global chords | Legend. */
+.shortcuts-tabs { margin-bottom: 6px; }
+.legend-check { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 2px 0 6px; }
+.legend-check .hotkey-btn.is-capturing { color: var(--accent); }
+.legend-check-out { font-size: 11.5px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.legend-owner strong { color: var(--text); font-weight: 600; }
+.legend-h { margin: 12px 0 4px; font-size: 10px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--faint); }
+.legend-h .shint { display: block; margin-top: 1px; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.legend-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+.legend-table tr { border-top: 1px solid var(--hairline); }
+.legend-table th { width: 50%; padding: 5px 8px 5px 0; text-align: left; font-weight: 400; color: var(--text); vertical-align: middle; }
+.legend-table td { padding: 4px 0; vertical-align: middle; }
+.legend-table td .shortcut-chord { margin: 1px 4px 1px 0; }
+.shortcut-chord.is-outside { opacity: 0.5; border-style: dashed; }
+.legend-reserved { display: grid; grid-template-columns: 104px 1fr; gap: 8px; padding: 6px 0; border-top: 1px solid var(--hairline); font-size: 11.5px; }
+.legend-reserved-owner { color: var(--text); }
+.legend-reserved-keys { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--muted); }
+.legend-reserved-key { white-space: nowrap; }
+.legend-free { display: flex; flex-wrap: wrap; gap: 4px; padding-bottom: 4px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 /* Result line under "Check for updates". */
 .supdate { padding: 2px 0 6px; font-size: 12px; color: var(--muted); text-align: right; }

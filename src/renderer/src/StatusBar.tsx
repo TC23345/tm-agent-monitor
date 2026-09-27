@@ -159,7 +159,7 @@ export function StatusBar(props: Props) {
               <MenuCheckItem
                 icon={<PanelLeft strokeWidth={2} />}
                 label="Sidebar"
-                hint="Ctrl+B (Ctrl+Shift+B inside a terminal): hide it and let the panes fill the frame"
+                hint="Ctrl+B (Alt+S inside a terminal): hide it and let the panes fill the frame"
                 checked={!sidebarHidden}
                 onClick={onToggleSidebar}
                 testId="sidebar-toggle"

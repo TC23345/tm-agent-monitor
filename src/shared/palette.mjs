@@ -91,7 +91,7 @@ export function commandGroup(id) {
   if (/^(cursor|chrome|new-project|projects-dir|collapse|waiting|reset-order)$/.test(key)) return 'Project'
   if (/^(activity|notes|clipboard|usage|spend|insights|history|add-|zoom:|close:|view:)/.test(key)) return 'Panes'
   if (/^(size-|cols-|reset-sizes|save-layout|layout:|layout-delete:|field$|sidebar$)/.test(key)) return 'Layout'
-  if (/^(settings|rebuild|hide|quit)$/.test(key)) return 'App'
+  if (/^(settings|keys|rebuild|hide|quit)$/.test(key)) return 'App'
   return 'Other'
 }
 
