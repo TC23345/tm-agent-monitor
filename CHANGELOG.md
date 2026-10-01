@@ -18,6 +18,10 @@ Layout customization, on top of the 0.3.0 workspace.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
 
+## 0.4.48 — 2026-09-30
+
+- **The Notes tree reads like a file explorer.** A note row is its file name as stored on disk — `UI feedback template.md`, not the H1 — on one line, with the H1 and the first line of text in the tooltip. Folder icons no longer turn orange when open or for the template folders, the selected row's bar and a drop target's outline are the same muted mark as a selected folder, and the preview line under each note is gone.
+
 ## 0.4.47 — 2026-09-30
 
 - **The Fable weekly limit shows again.** Limits hid any model-scoped weekly limit the usage endpoint marked inactive. The endpoint now marks the Fable limit inactive even while you use Fable (13% on 2026-09-30), and it marks the 5-hour session limit the same way, so "inactive" doesn't mean "doesn't apply". A model's weekly bar now shows once it has any usage; one you haven't touched this week (inactive at 0%) stays hidden.
