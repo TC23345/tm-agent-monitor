@@ -30,8 +30,10 @@ your row in `GET /v1/terminals`.
 
 ## The shared notepad
 
-`%USERPROFILE%\Notes` (or `TM_NOTES_DIR`) is a folder of plain Markdown files
-the user edits in the app's **Notes** pane. Read it when the user says "my
+`%USERPROFILE%\Notes` (or `TM_NOTES_DIR`) is a folder of plain text files,
+mostly Markdown, that the user edits in the app's **Notes** pane (it also shows
+`.json`, `.yaml`, `.txt`, `.csv` and other text files, so a config or data file
+you leave there is visible and editable). Read it when the user says "my
 notes", "the notepad", or points you at a note by name; write there when they
 ask you to leave them something. One file per note, `<name>.md`, in a
 file tree of real folders (up to four deep, e.g. `Work\Q3\launch.md`).

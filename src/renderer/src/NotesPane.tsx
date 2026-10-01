@@ -1,10 +1,10 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  CalendarDays, ChevronRight, ChevronsDownUp, ClipboardList, Copy, FilePlus2, FileText, Folder, FolderInput, FolderOpen,
+  CalendarDays, ChevronRight, ChevronsDownUp, ClipboardList, Copy, File, FilePlus2, Folder, FolderInput, FolderOpen,
   FolderPlus, LayoutTemplate, Pencil, Plus, Sparkles, Trash2, Users
 } from 'lucide-react'
 import {
-  baseName, buildTree, folderNameFor, moveProblem, noteNameFor, noteTitle, parentOf,
+  baseName, buildTree, fileNameFor, folderNameFor, isMarkdownName, moveProblem, noteExt, parentOf,
   sortNotes, subtreeDepth, templateForFolder, MAX_FOLDER_DEPTH, NOTE_TEMPLATES, type NoteFolderNode, type NoteMeta, type NoteOrder
 } from '@shared/notes.mjs'
 import { MarkdownView } from './MarkdownView'
@@ -18,6 +18,18 @@ const SAVE_AFTER_MS = 600
 const OPEN_KEY = 'tm.notes.open.v2'
 /** Hovering a closed folder this long mid-drag opens it. */
 const AUTO_OPEN_MS = 600
+
+/**
+ * Tree geometry, one place. Each level steps INDENT px right. A folder row
+ * starts with its chevron (12 px + a 6 px gap), so a row's icon sits at
+ * iconX(depth) whether it is a folder or a file, and a child's icon lands one
+ * step right of its parent's. The guide line under an open folder runs down
+ * the middle of that folder's chevron.
+ */
+const INDENT = 16
+const chevronX = (depth: number) => 4 + depth * INDENT
+const iconX = (depth: number) => chevronX(depth) + 18
+const guideX = (depth: number) => chevronX(depth) + 6
 
 function readOpen(): string[] {
   try {
@@ -109,8 +121,8 @@ function RenameInput({ state, depth, onChange, onCommit, onCancel }: {
     return () => el.removeEventListener('tm-escape', esc)
   }, [])
   return (
-    <div className="notes-rename" style={{ paddingLeft: 6 + depth * 14 }}>
-      {state.kind === 'folder' ? <Folder className="notes-rename-ic" strokeWidth={2} /> : <FileText className="notes-rename-ic" strokeWidth={2} />}
+    <div className="notes-rename" style={{ paddingLeft: iconX(depth) }}>
+      {state.kind === 'folder' ? <Folder className="notes-rename-ic" strokeWidth={2} /> : <File className="notes-rename-ic" strokeWidth={1.5} />}
       <input
         ref={ref}
         className={`notes-rename-input ${state.error ? 'is-invalid' : ''}`}
@@ -282,7 +294,7 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
   }, [refresh])
 
   const startRename = (path: string, kind: 'note' | 'folder') =>
-    setRenaming({ path, kind, value: kind === 'note' ? noteTitle(path) : baseName(path) })
+    setRenaming({ path, kind, value: baseName(path) })
 
   /** Selection and expanded folders follow an entry that moved or was renamed. */
   const followMove = (from: string, to: string, kind: 'note' | 'folder') => {
@@ -307,7 +319,8 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
     const r = renamingRef.current
     if (!r) return
     renamingRef.current = null
-    const nextBase = r.kind === 'note' ? noteNameFor(r.value) : folderNameFor(r.value)
+    // The field shows the file name with its extension; typed without one, the file keeps its own.
+    const nextBase = r.kind === 'note' ? fileNameFor(r.value, noteExt(r.path)) : folderNameFor(r.value)
     if (!nextBase) { setRenaming({ ...r, error: 'Use letters, numbers, spaces and - _ ( ) & , \' — no \\ / : * ? " < > |' }); return }
     if (nextBase === baseName(r.path)) { setRenaming(null); return }
     setRenaming(null)
@@ -390,7 +403,7 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
       moveProblem(dragging.path, folder, dragging.kind === 'folder', dragging.kind === 'folder' ? subtreeDepth(dragging.path, folders) : 0)
     const lineAt = (row: HTMLElement, after: boolean, depth: number) => {
       const r = row.getBoundingClientRect()
-      return { lineY: (after ? r.bottom : r.top) - lr.top + list.scrollTop, lineIndent: 6 + depth * 14 }
+      return { lineY: (after ? r.bottom : r.top) - lr.top + list.scrollTop, lineIndent: iconX(depth) }
     }
     if (!el) {
       // Empty space below the tree: to the top level, unplaced.
@@ -485,7 +498,7 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
     if (target.kind === 'note') {
       const folder = parentOf(target.path)
       return tidyEntries([
-        { kind: 'item', id: 'open', label: 'Open', icon: <FileText />, onSelect: () => void open(target.path) },
+        { kind: 'item', id: 'open', label: 'Open', icon: <File strokeWidth={1.5} />, onSelect: () => void open(target.path) },
         { kind: 'item', id: 'rename', label: 'Rename', icon: <Pencil />, keys: ['F2'], onSelect: () => startRename(target.path, 'note') },
         { kind: 'submenu', id: 'move', label: 'Move to', icon: <FolderInput />, entries: moveEntries(target.path, 'note') },
         { kind: 'item', id: 'copy-path', label: copied ? 'Copied' : 'Copy path', icon: <Copy />, hint: absPath(target.path), keepOpen: true, onSelect: () => copyPath(target.path) },
@@ -568,13 +581,13 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
       >
         <button
           className="notes-open"
-          style={{ paddingLeft: 6 + depth * 14 }}
+          style={{ paddingLeft: iconX(depth) }}
           onClick={() => { if (!justDragged.current) void open(n.name) }}
           onKeyDown={(e) => { if (e.key === 'F2') { e.preventDefault(); startRename(n.name, 'note') } }}
           title={hint}
           data-testid={tid('note', n.name)}
         >
-          <FileText className="notes-file-ic" strokeWidth={2} />
+          <File className="notes-file-ic" strokeWidth={1.5} />
           <span className="notes-title">{title}</span>
           <span className="notes-when">{ago(n.mtime, now)}</span>
         </button>
@@ -589,7 +602,7 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
     const Icon = template ? TEMPLATE_ICON[template.id] : null
     const addLabel = newNoteLabel(node.path)
     return (
-      <div key={node.path} className="notes-folder" data-testid={tid('notes-folder', node.path)}>
+      <div key={node.path} className="notes-folder" style={{ ['--guide-x' as string]: `${guideX(depth)}px` }} data-testid={tid('notes-folder', node.path)}>
         {renameFor(node.path, depth) ?? (
           <div
             className={`notes-folder-row ${isOpen ? 'is-open' : ''} ${selectedFolder === node.path ? 'is-selected' : ''} ${dropInto === node.path ? (dropBad ? 'is-drop-bad' : 'is-drop-into') : ''} ${drag?.press.key === node.path ? 'is-dragging' : ''}`}
@@ -601,7 +614,7 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
           >
             <button
               className="notes-folder-toggle"
-              style={{ paddingLeft: 2 + depth * 14 }}
+              style={{ paddingLeft: chevronX(depth) }}
               onClick={() => {
                 if (justDragged.current) return
                 setSelectedFolder(node.path)
@@ -631,7 +644,7 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
         <Collapse open={isOpen}>
           {node.folders.map((f) => folderNode(f, depth + 1))}
           {node.notes.map((n) => noteRow(n, depth + 1))}
-          {empty && <div className="notes-folder-empty" style={{ paddingLeft: 24 + (depth + 1) * 14 }}>Empty</div>}
+          {empty && <div className="notes-folder-empty" style={{ paddingLeft: iconX(depth + 1) }}>Empty</div>}
         </Collapse>
       </div>
     )
@@ -687,7 +700,7 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
         {notice && <div className="notes-notice" role="status" data-testid="notes-notice">{notice}</div>}
       </div>
       <div className="notes-editor">
-        {selected && preview ? (
+        {selected && preview && isMarkdownName(selected) ? (
           <div className="notes-rendered">
             <MarkdownView source={text} />
           </div>
@@ -713,7 +726,7 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
       </div>
       {drag && (
         <div ref={ghostRef} className={`notes-ghost ${dropBad ? 'is-bad' : ''}`} style={{ left: drag.x + 12, top: drag.y + 10 }} data-escape-close="" data-testid="notes-ghost">
-          {drag.press.kind === 'folder' ? <Folder strokeWidth={2} /> : <FileText strokeWidth={2} />}
+          {drag.press.kind === 'folder' ? <Folder strokeWidth={2} /> : <File strokeWidth={1.5} />}
           <span>{drag.press.label}</span>
           {drag.target?.problem && <em>{drag.target.problem}</em>}
         </div>
@@ -727,7 +740,7 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
           testId="notes-menu"
           header={
             menu.target.kind === 'note' ? (
-              <><div className="ctxmenu-head-title"><FileText className="ctxmenu-head-ic" strokeWidth={2} /><span>{baseName(menu.target.path)}</span></div>
+              <><div className="ctxmenu-head-title"><File className="ctxmenu-head-ic" strokeWidth={1.5} /><span>{baseName(menu.target.path)}</span></div>
                 <div className="ctxmenu-head-detail"><bdi>{[parentOf(menu.target.path) || 'Notes', notes.find((n) => n.name === (menu.target as { path: string }).path)?.heading].filter(Boolean).join(' · ')}</bdi></div></>
             ) : menu.target.kind === 'folder' ? (
               <><div className="ctxmenu-head-title"><Folder className="ctxmenu-head-ic" strokeWidth={2} /><span>{baseName(menu.target.path)}</span></div>

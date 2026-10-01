@@ -18,6 +18,12 @@ Layout customization, on top of the 0.3.0 workspace.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
 
+## 0.4.49 — 2026-10-01
+
+- **Notes shows JSON, YAML and the other text formats.** The tree lists every common text file in your Notes folder, not just Markdown: `.json`, `.yaml`, `.toml`, `.csv`, `.txt`, `.xml`, `.html`, scripts and source files. They open in the same editor and save the same way. Preview applies only to Markdown, and a `#` line in YAML or Python is not mistaken for a heading. Images, PDFs and other binaries stay out. Renaming shows the full file name; type a new extension to change it, or leave it off to keep the current one. New notes are still Markdown.
+- **The tree indents.** Each level now steps clearly right of its parent, and a faint guide line runs down beside an open folder's contents. Rows have a little more room.
+- **A lighter file icon.** Files show a plain thin page outline instead of the lined document icon.
+
 ## 0.4.48 — 2026-09-30
 
 - **The Notes tree reads like a file explorer.** A note row is its file name as stored on disk — `UI feedback template.md`, not the H1 — on one line, with the H1 and the first line of text in the tooltip. Folder icons no longer turn orange when open or for the template folders, the selected row's bar and a drop target's outline are the same muted mark as a selected folder, and the preview line under each note is gone.

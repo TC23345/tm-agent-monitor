@@ -1,4 +1,12 @@
 export const NOTE_EXT: string
+/** Every text-file extension the tree shows and the editor opens, without the dot. */
+export const NOTE_EXTS: readonly string[]
+/** `.json` for `config.json` when the pane opens that kind, else ''. */
+export function noteExt(name: unknown): string
+/** Markdown (`.md`, `.markdown`, `.mdx`): the only kind with a heading, template and preview. */
+export function isMarkdownName(name: unknown): boolean
+/** A typed rename as a file name: a typed known extension wins, else `ext` is kept. */
+export function fileNameFor(typed: string, ext?: string): string | undefined
 export const MAX_NOTE_BYTES: number
 export const MAX_NOTES: number
 export const MAX_FOLDER_DEPTH: number

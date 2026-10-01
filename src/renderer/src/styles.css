@@ -981,6 +981,11 @@ kbd {
 .notes-collapse { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease; }
 .notes-collapse.is-open { grid-template-rows: 1fr; opacity: 1; }
 .notes-collapse-inner { overflow: hidden; min-height: 0; }
+/* Indent guide: a hairline down the middle of an open folder's chevron, beside
+   everything inside it (NotesPane sets --guide-x from its geometry helpers). */
+.notes-folder > .notes-collapse > .notes-collapse-inner { position: relative; }
+.notes-folder > .notes-collapse > .notes-collapse-inner::before { content: ''; position: absolute; top: 0; bottom: 4px; left: var(--guide-x, 10px); width: 1px; background: var(--hairline); pointer-events: none; }
+.notes-folder:hover > .notes-collapse > .notes-collapse-inner::before { background: var(--border); }
 .notes-collapse:not(.is-open) .notes-collapse-inner { visibility: hidden; transition: visibility 0s 220ms; }
 .notes-chev { width: 12px; height: 12px; flex: 0 0 auto; color: var(--muted); transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1); }
 .notes-folder-row.is-open .notes-chev { transform: rotate(90deg); }
@@ -990,7 +995,7 @@ kbd {
 .notes-folder-row.is-selected { background: var(--elev); box-shadow: inset 2px 0 0 var(--muted); }
 .notes-folder-row.is-drop-into { background: var(--elev); box-shadow: inset 0 0 0 1px var(--muted); }
 .notes-folder-row.is-drop-bad { box-shadow: inset 0 0 0 1px var(--st-permission); }
-.notes-folder-toggle { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; padding: 4px 6px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.notes-folder-toggle { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; padding: 5px 6px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
 /* Icons stay muted whether the folder is open, a template folder, or selected: the
    tree reads like an IDE's explorer, and the accent is kept for the editor. */
 .notes-folder-ic { width: 14px; height: 14px; flex: 0 0 auto; color: var(--muted); }
@@ -1000,14 +1005,15 @@ kbd {
 .notes-rowact svg { width: 13px; height: 13px; }
 .notes-folder-row:hover .notes-rowact, .notes-rowact:focus-visible { opacity: 1; }
 .notes-rowact:hover { color: var(--text); background: var(--card); }
-.notes-folder-empty { padding: 4px 8px; font-size: 11.5px; color: var(--faint); }
+.notes-folder-empty { padding: 5px 8px; font-size: 11.5px; color: var(--faint); }
 /* Note rows: file icon, the file name as it is on disk, how long ago — one line. The
    selected row is the folder row's neutral mark, never the accent. */
 .notes-row { border-radius: 6px; touch-action: none; transition: background 0.12s ease; }
 .notes-row:hover, .notes-row.is-active { background: var(--elev); }
 .notes-row.is-active { box-shadow: inset 2px 0 0 var(--muted); }
-.notes-open { display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "icon title when"; align-items: center; gap: 0 7px; width: 100%; padding: 4px 8px 4px 6px; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
-.notes-file-ic { grid-area: icon; width: 13px; height: 13px; color: var(--faint); }
+.notes-open { display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "icon title when"; align-items: center; gap: 0 6px; width: 100%; padding: 5px 8px 5px 6px; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+/* A plain page outline, thin stroke — the extension in the name says what kind of file it is. */
+.notes-file-ic { grid-area: icon; width: 14px; height: 14px; color: var(--faint); }
 .notes-title { grid-area: title; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .notes-when { grid-area: when; font-size: 10.5px; color: var(--faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* Drag and drop: the source dims, a line marks the slot, a small ghost follows the pointer. */

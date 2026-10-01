@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
 import { cpSync, existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, promises as fsp, watch as fsWatch, type FSWatcher } from 'node:fs'
 import {
-  freeName, isNoteName, isNotePath, isFolderName, isFolderPath, joinNotePath, migrationPlan, moveProblem, nextFolderName, noteHeading,
+  freeName, isMarkdownName, isNoteName, isNotePath, isFolderName, isFolderPath, joinNotePath, migrationPlan, moveProblem, nextFolderName, noteHeading,
   parentOf, titleFileName,
   noteTemplate, orderAfterMove, orderAfterRemove, planNewNote, notePreview, sanitizeOrder, MAX_FOLDERS, MAX_FOLDER_DEPTH, NOTE_TEMPLATES,
   type NoteOrder, MAX_NOTES, MAX_NOTE_BYTES, type NoteMeta } from '../shared/notes.mjs'
@@ -2262,7 +2262,9 @@ function registerIpc(): void {
         let info = noteInfoCache.get(abs)
         if (!info || info.mtime !== st.mtimeMs || info.size !== st.size) {
           const text = st.size <= 64 * 1024 ? await fsp.readFile(abs, 'utf8') : ''
-          info = { mtime: st.mtimeMs, size: st.size, heading: noteHeading(text), preview: notePreview(text) }
+          // Only Markdown has a heading: `# ` opens a comment in YAML, TOML, Python and shell.
+          const md = isMarkdownName(name)
+          info = { mtime: st.mtimeMs, size: st.size, heading: md ? noteHeading(text) : '', preview: md ? notePreview(text) : (text.split(/\r?\n/, 50).find((l) => l.trim()) ?? '').trim().slice(0, 80) }
           noteInfoCache.set(abs, info)
         }
         return { name, mtime: st.mtimeMs, size: st.size, heading: info.heading, preview: info.preview }

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  applyOrder, buildTree, displayTitle, folderNameFor, freeName, isPlaceholderName, titleFileName, isFolderName, isFolderPath, isNoteName, isNotePath, migrationPlan,
+  applyOrder, buildTree, displayTitle, fileNameFor, folderNameFor, freeName, isMarkdownName, noteExt, isPlaceholderName, titleFileName, isFolderName, isFolderPath, isNoteName, isNotePath, migrationPlan,
   moveProblem, nextFolderName, nextNoteName, noteHeading, noteNameFor, notePreview, noteTitle, orderAfterMove,
   orderAfterRemove, parentOf, planNewNote, sanitizeOrder, sortNotes, subtreeDepth, templateForFolder, NOTE_TEMPLATES
 } from './notes.mjs'
@@ -220,17 +220,42 @@ test('moves that cannot happen say why; a same-folder move is a reorder, not an 
   assert.equal(subtreeDepth('Empty', ['Empty']), 0)
 })
 
-test('a note name is one Markdown file name, never a path', () => {
+test('a note name is one text file name, never a path', () => {
   assert.ok(isNoteName('2026-09-15.md'))
   assert.ok(isNoteName("Taylor's ideas (draft).md"))
   assert.ok(!isNoteName('../secrets.md'))
   assert.ok(!isNoteName('sub/dir.md'))
   assert.ok(!isNoteName('sub\\dir.md'))
   assert.ok(!isNoteName('.hidden.md'))
-  assert.ok(!isNoteName('notes.txt'))
   assert.ok(!isNoteName('a'.repeat(81) + '.md'))
   assert.ok(!isNoteName(''))
   assert.ok(!isNoteName(42))
+})
+
+test('the tree opens the major text formats, never binaries, dotfiles or device names', () => {
+  for (const ok of ['notes.txt', 'config.json', 'compose.YAML', 'ci.yml', 'pyproject.toml', 'data.csv', 'run.ps1', 'App.tsx', 'a.b.json', 'prod.env'])
+    assert.ok(isNoteName(ok), ok)
+  for (const bad of ['photo.png', 'app.exe', 'doc.pdf', 'noext', '.env', '.tm-order.json', 'bad .json', 'bad..json', 'CON.json', 'x.'])
+    assert.ok(!isNoteName(bad), bad)
+  assert.equal(noteExt('Work/config.JSON'), '.json')
+  assert.equal(noteExt('photo.png'), '')
+  assert.ok(isMarkdownName('a.md') && isMarkdownName('a.MDX') && !isMarkdownName('a.json'))
+  assert.equal(noteTitle('Work/config.json'), 'config')
+})
+
+test('a rename keeps the extension unless a known one is typed', () => {
+  assert.equal(fileNameFor('settings', '.json'), 'settings.json')
+  assert.equal(fileNameFor('settings.yaml', '.json'), 'settings.yaml')
+  assert.equal(fileNameFor('Ideas v2', '.md'), 'Ideas v2.md')
+  assert.equal(fileNameFor('weird.exe', '.json'), 'weird.exe.json', 'an unknown extension is part of the name')
+  assert.equal(fileNameFor('a/b: c.', '.txt'), 'a b c.txt')
+  assert.equal(fileNameFor('   ', '.md'), undefined)
+  assert.equal(fileNameFor('.json', '.json'), undefined)
+})
+
+test('freeName and migration handle non-Markdown files', () => {
+  assert.equal(freeName('config.json', ['config.json']), 'config (2).json')
+  assert.deepEqual(migrationPlan(['Plan foo.json', 'Plan bar.md']).map((m) => m.to), ['Plans/bar.md'])
 })
 
 test('titles round-trip through file names, with the unsafe bits scrubbed', () => {
