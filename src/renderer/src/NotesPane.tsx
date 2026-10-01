@@ -4,7 +4,7 @@ import {
   FolderPlus, LayoutTemplate, Pencil, Plus, Sparkles, Trash2, Users
 } from 'lucide-react'
 import {
-  baseName, buildTree, displayTitle, folderNameFor, moveProblem, noteNameFor, noteTitle, parentOf,
+  baseName, buildTree, folderNameFor, moveProblem, noteNameFor, noteTitle, parentOf,
   sortNotes, subtreeDepth, templateForFolder, MAX_FOLDER_DEPTH, NOTE_TEMPLATES, type NoteFolderNode, type NoteMeta, type NoteOrder
 } from '@shared/notes.mjs'
 import { MarkdownView } from './MarkdownView'
@@ -551,8 +551,11 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
   const dropInto = drag?.target?.into
   const dropBad = !!drag?.target?.problem
 
+  // The row is the file as it is on disk — name and extension, one line, like an
+  // IDE's explorer. The H1 and the first line of text live in the tooltip.
   const noteRow = (n: NoteMeta, depth: number) => {
-    const title = displayTitle(n.name, n.heading)
+    const title = baseName(n.name)
+    const hint = [n.name, n.heading, n.preview].filter((s): s is string => !!s && s !== title).join('\n')
     return renameFor(n.name, depth) ?? (
       <div
         key={n.name}
@@ -568,13 +571,12 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
           style={{ paddingLeft: 6 + depth * 14 }}
           onClick={() => { if (!justDragged.current) void open(n.name) }}
           onKeyDown={(e) => { if (e.key === 'F2') { e.preventDefault(); startRename(n.name, 'note') } }}
-          title={`${n.name}${n.preview ? `\n${n.preview}` : ''}`}
+          title={hint}
           data-testid={tid('note', n.name)}
         >
           <FileText className="notes-file-ic" strokeWidth={2} />
           <span className="notes-title">{title}</span>
           <span className="notes-when">{ago(n.mtime, now)}</span>
-          {n.preview && <span className="notes-meta">{n.preview}</span>}
         </button>
       </div>
     )
@@ -725,8 +727,8 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
           testId="notes-menu"
           header={
             menu.target.kind === 'note' ? (
-              <><div className="ctxmenu-head-title"><FileText className="ctxmenu-head-ic" strokeWidth={2} /><span>{displayTitle(menu.target.path, notes.find((n) => n.name === (menu.target as { path: string }).path)?.heading)}</span></div>
-                <div className="ctxmenu-head-detail"><bdi>{parentOf(menu.target.path) || 'Notes'} · {baseName(menu.target.path)}</bdi></div></>
+              <><div className="ctxmenu-head-title"><FileText className="ctxmenu-head-ic" strokeWidth={2} /><span>{baseName(menu.target.path)}</span></div>
+                <div className="ctxmenu-head-detail"><bdi>{[parentOf(menu.target.path) || 'Notes', notes.find((n) => n.name === (menu.target as { path: string }).path)?.heading].filter(Boolean).join(' · ')}</bdi></div></>
             ) : menu.target.kind === 'folder' ? (
               <><div className="ctxmenu-head-title"><Folder className="ctxmenu-head-ic" strokeWidth={2} /><span>{baseName(menu.target.path)}</span></div>
                 <div className="ctxmenu-head-detail"><bdi>{menu.target.count} note{menu.target.count === 1 ? '' : 's'}{templateForFolder(menu.target.path) ? ` · ${templateForFolder(menu.target.path)!.prefix} template` : ''}</bdi></div></>

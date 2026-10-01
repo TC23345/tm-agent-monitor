@@ -925,7 +925,7 @@ kbd {
 .notes-tool:hover, .notes-tool:focus-visible { background: var(--elev); color: var(--text); outline: none; }
 .notes-toolbar-where { flex: 1 1 auto; min-width: 0; padding: 0 6px; font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
 .notes-list { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 5px 24px; scrollbar-width: thin; scrollbar-color: var(--track) transparent; border-radius: 0 0 0 8px; transition: box-shadow 0.12s ease; }
-.notes-list.is-drop-into { box-shadow: inset 0 0 0 1px var(--accent); }
+.notes-list.is-drop-into { box-shadow: inset 0 0 0 1px var(--muted); }
 .notes-list.is-drop-bad { box-shadow: inset 0 0 0 1px var(--st-permission); }
 /* Expand/collapse without measuring: a one-row grid track eases 0fr → 1fr, the content fading with it. */
 .notes-collapse { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease; }
@@ -938,12 +938,12 @@ kbd {
 .notes-folder-row { display: flex; align-items: center; border-radius: 6px; touch-action: none; transition: background 0.12s ease, box-shadow 0.12s ease; }
 .notes-folder-row:hover { background: var(--elev); }
 .notes-folder-row.is-selected { background: var(--elev); box-shadow: inset 2px 0 0 var(--muted); }
-.notes-folder-row.is-drop-into { background: rgba(217, 119, 87, 0.14); box-shadow: inset 0 0 0 1px var(--accent); }
+.notes-folder-row.is-drop-into { background: var(--elev); box-shadow: inset 0 0 0 1px var(--muted); }
 .notes-folder-row.is-drop-bad { box-shadow: inset 0 0 0 1px var(--st-permission); }
-.notes-folder-toggle { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; padding: 5px 6px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; font-weight: 500; text-align: left; cursor: pointer; }
+.notes-folder-toggle { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; padding: 4px 6px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+/* Icons stay muted whether the folder is open, a template folder, or selected: the
+   tree reads like an IDE's explorer, and the accent is kept for the editor. */
 .notes-folder-ic { width: 14px; height: 14px; flex: 0 0 auto; color: var(--muted); }
-.notes-folder-ic.is-template { color: var(--accent); }
-.notes-folder-row.is-open .notes-folder-ic:not(.is-template) { color: var(--accent-bright, var(--accent)); }
 .notes-folder-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .notes-gcount { flex: 0 0 auto; font-size: 11px; font-weight: 500; color: var(--faint); font-variant-numeric: tabular-nums; }
 .notes-rowact { width: 22px; height: 22px; display: grid; place-items: center; flex: 0 0 auto; margin-right: 3px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0; transition: opacity 0.12s ease; }
@@ -951,15 +951,14 @@ kbd {
 .notes-folder-row:hover .notes-rowact, .notes-rowact:focus-visible { opacity: 1; }
 .notes-rowact:hover { color: var(--text); background: var(--card); }
 .notes-folder-empty { padding: 4px 8px; font-size: 11.5px; color: var(--faint); }
-/* Note rows: file icon, the note's H1, how long ago; a second line only when there is real text. */
+/* Note rows: file icon, the file name as it is on disk, how long ago — one line. The
+   selected row is the folder row's neutral mark, never the accent. */
 .notes-row { border-radius: 6px; touch-action: none; transition: background 0.12s ease; }
 .notes-row:hover, .notes-row.is-active { background: var(--elev); }
-.notes-row.is-active { box-shadow: inset 2px 0 0 var(--accent); }
-.notes-open { display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "icon title when" ". meta meta"; align-items: center; gap: 1px 7px; width: 100%; padding: 5px 8px 5px 6px; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.notes-row.is-active { box-shadow: inset 2px 0 0 var(--muted); }
+.notes-open { display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "icon title when"; align-items: center; gap: 0 7px; width: 100%; padding: 4px 8px 4px 6px; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
 .notes-file-ic { grid-area: icon; width: 13px; height: 13px; color: var(--faint); }
-.notes-row.is-active .notes-file-ic { color: var(--accent); }
-.notes-title { grid-area: title; min-width: 0; font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.notes-meta { grid-area: meta; min-width: 0; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notes-title { grid-area: title; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .notes-when { grid-area: when; font-size: 10.5px; color: var(--faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* Drag and drop: the source dims, a line marks the slot, a small ghost follows the pointer. */
 .notes-row.is-dragging, .notes-folder-row.is-dragging { opacity: 0.4; }
