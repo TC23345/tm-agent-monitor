@@ -18,6 +18,10 @@ Layout customization, on top of the 0.3.0 workspace.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
 
+## 0.4.50 — 2026-10-01
+
+- **Copy path is one click on a folder.** A folder's right-click menu is now New note, New from template, Rename, Copy path and Delete folder. *Copy path* no longer hides under a *Folder* flyout. *New folder* (it's in the toolbar), *Move to* (drag the folder instead), *Reveal in File Explorer* and the F2 label are gone from that menu; F2 still renames.
+
 ## 0.4.49 — 2026-10-01
 
 - **Notes shows JSON, YAML and the other text formats.** The tree lists every common text file in your Notes folder, not just Markdown: `.json`, `.yaml`, `.toml`, `.csv`, `.txt`, `.xml`, `.html`, scripts and source files. They open in the same editor and save the same way. Preview applies only to Markdown, and a `#` line in YAML or Python is not mistaken for a heading. Images, PDFs and other binaries stay out. Renaming shows the full file name; type a new extension to change it, or leave it off to keep the current one. New notes are still Markdown.

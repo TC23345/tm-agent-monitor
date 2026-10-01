@@ -509,21 +509,15 @@ export const NotesPane = forwardRef<NotesPaneHandle, { onDir?: (dir: string) => 
       ])
     }
     if (target.kind === 'folder') {
-      const deep = target.path.split('/').length >= MAX_FOLDER_DEPTH
+      // Short on purpose (the user's call, 0.4.50): Copy path is one click, not
+      // under a Folder flyout. New folder is the toolbar's, moving is drag and
+      // drop, and F2 still renames — it just isn't printed here.
       return tidyEntries([
         { kind: 'item', id: 'new-note', label: newNoteLabel(target.path), icon: <FilePlus2 />, onSelect: () => void newNote(undefined, target.path) },
-        { kind: 'item', id: 'new-folder', label: 'New folder', icon: <FolderPlus />, disabled: deep, hint: deep ? `Folders nest ${MAX_FOLDER_DEPTH} deep at most` : `A folder inside ${baseName(target.path)}`, onSelect: () => void newFolder(target.path) },
         { kind: 'submenu', id: 'templates', label: 'New from template', icon: <LayoutTemplate />, entries: templateEntries(target.path) },
         { kind: 'sep' },
-        { kind: 'item', id: 'rename', label: 'Rename', icon: <Pencil />, keys: ['F2'], onSelect: () => startRename(target.path, 'folder') },
-        { kind: 'submenu', id: 'move', label: 'Move to', icon: <FolderInput />, entries: moveEntries(target.path, 'folder') },
-        {
-          kind: 'submenu', id: 'folder-actions', label: 'Folder', icon: <FolderOpen />,
-          entries: [
-            { kind: 'item', id: 'reveal', label: 'Reveal in File Explorer', icon: <FolderOpen />, onSelect: () => void window.watch.revealNoteFolder(target.path) },
-            { kind: 'item', id: 'copy-path', label: copied ? 'Copied' : 'Copy path', icon: <Copy />, hint: absPath(target.path), keepOpen: true, onSelect: () => copyPath(target.path) },
-          ],
-        },
+        { kind: 'item', id: 'rename', label: 'Rename', icon: <Pencil />, onSelect: () => startRename(target.path, 'folder') },
+        { kind: 'item', id: 'copy-path', label: copied ? 'Copied' : 'Copy path', icon: <Copy />, hint: absPath(target.path), keepOpen: true, onSelect: () => copyPath(target.path) },
         { kind: 'sep' },
         {
           kind: 'item', id: 'delete', label: 'Delete folder', icon: <Trash2 />,
