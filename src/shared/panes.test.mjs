@@ -5,6 +5,21 @@ import { emptySizes, launchFor, migratePanesV3, readAllSizes, readLaunch, readLa
 const KINDS = ['agents', 'terminal', 'usage', 'activity']
 const opts = { kinds: KINDS, isUnique: (k) => k !== 'terminal', maxPanes: 6 }
 
+test('panes: web panes repeat, keep a loadable URL and label, and drop anything else', () => {
+  const webOpts = { kinds: ['terminal', 'web'], isUnique: (k) => k !== 'terminal' && k !== 'web', maxPanes: 6 }
+  const panes = sanitizePanes([
+    { id: 'a', kind: 'web', web: { url: 'https://example.com', label: 'Example', extra: 1 } },
+    { id: 'b', kind: 'web', web: { url: 'https://example.com/other' } },
+    { id: 'c', kind: 'web', web: { url: 'file:///C:/secret.txt' } },
+    { id: 'd', kind: 'web' },
+    { id: 'e', kind: 'web', web: { url: 'javascript:alert(1)', label: 'x' } }
+  ], webOpts)
+  assert.deepEqual(panes, [
+    { id: 'a', kind: 'web', web: { url: 'https://example.com/', label: 'Example' } },
+    { id: 'b', kind: 'web', web: { url: 'https://example.com/other', label: 'example.com' } }
+  ])
+})
+
 test('panes: unknown kinds drop, unique kinds dedupe, terminals keep only known fields, the cap holds', () => {
   const raw = [
     { id: 'a', kind: 'agents' },

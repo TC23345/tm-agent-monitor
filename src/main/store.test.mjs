@@ -24,6 +24,7 @@ for (const [source, target] of [
 copyFileSync('src/shared/pricing.mjs', join(fixtureRoot, 'shared', 'pricing.mjs'))
 copyFileSync('src/shared/hotkeys.mjs', join(fixtureRoot, 'shared', 'hotkeys.mjs'))
 copyFileSync('src/shared/pickerPlace.mjs', join(fixtureRoot, 'shared', 'pickerPlace.mjs'))
+copyFileSync('src/shared/activityFeed.mjs', join(fixtureRoot, 'shared', 'activityFeed.mjs'))
 after(() => rmSync(fixtureRoot, { recursive: true, force: true }))
 
 const { AgentStore, validateMutableSettingsPatch } = await import(pathToFileURL(join(fixtureRoot, 'main', 'store.js')).href)
@@ -127,6 +128,31 @@ test('the activity ring records root starts, waits, finishes, compactions, and e
   assert.equal(store.recentEvents()[4].text, 'Deploy?')
   assert.equal(store.recentEvents()[0].project, 'api')
   assert.deepEqual(store.recentEvents(2).map((e) => e.kind), ['ended', 'waiting'])
+})
+
+test('file edits fold into one edited row per session until it does something else', () => {
+  const store = new AgentStore()
+  store.applyEvent(event('claude', 's', 'e1', 'session_started', { timestamp: AT + 1_000, cwd: 'C:\\p\\api' }))
+  // Tool starts are not edits yet, and a read is never one.
+  store.applyEvent(event('claude', 's', 'e2', 'tool_started', { timestamp: AT + 2_000, toolName: 'Edit', activity: 'editing App.tsx' }))
+  store.applyEvent(event('claude', 's', 'e3', 'tool_finished', { timestamp: AT + 3_000, toolName: 'Edit', activity: 'editing App.tsx' }))
+  store.applyEvent(event('claude', 's', 'e4', 'tool_finished', { timestamp: AT + 4_000, toolName: 'Read', activity: 'reading a.ts' }))
+  store.applyEvent(event('claude', 's', 'e5', 'tool_finished', { timestamp: AT + 5_000, toolName: 'Write', activity: 'editing styles.css' }))
+  // A subagent's edit counts for its root session.
+  store.applyEvent(event('claude', 's', 'e6', 'tool_finished', { timestamp: AT + 6_000, toolName: 'Edit', activity: 'editing store.ts', actor: { kind: 'subagent', id: 'kid' } }))
+  let feed = store.recentEvents()
+  assert.deepEqual(feed.map((e) => `${e.kind}@${e.at - AT}`), ['edited@6000', 'started@1000'])
+  assert.equal(feed[0].agentId, 'claude:s')
+  assert.deepEqual(feed[0].files, ['store.ts', 'styles.css', 'App.tsx'])
+  assert.equal(feed[0].count, 3)
+  assert.equal(feed[0].text, 'edited store.ts, styles.css +1 more')
+  assert.equal(feed[0].cwd, 'C:\\p\\api')
+  // Finishing the turn closes the burst; the next edit starts a new row.
+  store.applyEvent(event('claude', 's', 'e7', 'turn_completed', { timestamp: AT + 7_000 }))
+  store.applyEvent(event('claude', 's', 'e8', 'tool_finished', { timestamp: AT + 8_000, toolName: 'Edit', activity: 'editing App.tsx' }))
+  feed = store.recentEvents()
+  assert.deepEqual(feed.map((e) => e.kind), ['edited', 'finished', 'edited', 'started'])
+  assert.equal(feed[0].text, 'edited App.tsx')
 })
 
 test('deduplicates event ids and ignores older events per actor', () => {

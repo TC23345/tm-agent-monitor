@@ -22,7 +22,7 @@ for (const [source, target] of [
   writeFileSync(target, output)
 }
 copyFileSync('src/main/daemonCore.mjs', join(fixtureRoot, 'main', 'daemonCore.mjs'))
-for (const name of ['pricing', 'workspaceCommand', 'attention', 'terminalText', 'hotkeys', 'pickerPlace']) {
+for (const name of ['pricing', 'workspaceCommand', 'attention', 'terminalText', 'hotkeys', 'pickerPlace', 'activityFeed']) {
   copyFileSync(`src/shared/${name}.mjs`, join(fixtureRoot, 'shared', `${name}.mjs`))
 }
 

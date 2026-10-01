@@ -1,5 +1,5 @@
 import {
-  Code2, Folder, FolderPlus, Globe, Keyboard, ListRestart, Minus, Play, Power, RefreshCw, Search, SquareTerminal, Terminal, X
+  Code2, Folder, FolderPlus, Globe, Keyboard, ListRestart, Minus, Play, Power, RefreshCw, Rss, Search, SquareTerminal, Terminal, X
 } from 'lucide-react'
 import { Settings } from './Icons'
 import mark from './assets/icon.png'
@@ -43,7 +43,7 @@ interface Props {
   onRouteWaiting: () => void
   health: HealthInput
   panes: PaneInstance[]
-  /** The folder launches and project commands use right now (the launch nav's target). */
+  /** The folder launches and project commands use right now (the selected project badge). */
   context: { cwd?: string; label?: string }
   onNewTerminal: (launch: TerminalLaunch) => void
   onNewProject: () => void
@@ -64,8 +64,10 @@ interface Props {
    * the taskbar and Alt+Tab; the hotkey restores it) and hide-to-tray. */
   onMinimize: () => void
   onHide: () => void
-  /** User → Spend / Insights / History / Activity: open the pane, or bring the open one forward. */
+  /** User → Spend / Insights / History: open the pane, or bring the open one forward. */
   onOpenPane: (kind: PaneKind) => void
+  /** User → Activity: the sidebar's activity stream, shown and opened up. */
+  onActivity: () => void
   /** Root sessions near their context limit and still climbing. */
   hot: { id: string; project: string; pct: number }[]
   onFocusAgent: (id: string) => void
@@ -83,7 +85,7 @@ interface Props {
 export function TopBar(props: Props) {
   const {
     waiting, waitingOnly, onWaitingOnly, onRouteWaiting, health, panes, context, onNewTerminal, onNewProject, commands, onRunCommand,
-    canResetOrder, onResetOrder, onSettings, onKeys, openMenu, onOpenMenu, onPalette, onMinimize, onHide, onOpenPane, hot, onFocusAgent,
+    canResetOrder, onResetOrder, onSettings, onKeys, openMenu, onOpenMenu, onPalette, onMinimize, onHide, onOpenPane, onActivity, hot, onFocusAgent,
     rebuild, onRebuild
   } = props
 
@@ -176,7 +178,7 @@ export function TopBar(props: Props) {
           {openMenu === 'user' && (
             <MenuPop {...away}>
               {/* The data panes, one row each: open it, or bring the open one forward. */}
-              {PANE_KINDS.filter((k) => k.id === 'spend' || k.id === 'insights' || k.id === 'history' || k.id === 'activity').map((k) => {
+              {PANE_KINDS.filter((k) => k.id === 'spend' || k.id === 'insights' || k.id === 'history').map((k) => {
                 const open = panes.some((p) => p.kind === k.id)
                 return (
                   <MenuItem
@@ -189,6 +191,7 @@ export function TopBar(props: Props) {
                   />
                 )
               })}
+              <MenuItem icon={<Rss strokeWidth={2} />} label="Activity" hint="The activity stream at the top of the sidebar — shows the sidebar and opens the stream up" onClick={run(onActivity)} />
               <div className="menu-sep" />
               <MenuItem icon={<Settings strokeWidth={2} />} label="Settings…" hint="Hotkey, notifications, startup, updates, hooks (Ctrl+,)" onClick={run(onSettings)} />
               <MenuItem icon={<Keyboard strokeWidth={2} />} label="Keyboard shortcuts" hint="The Keys pane on and off — every key the workspace, Claude Code, Codex and the shell use (F1)" onClick={run(onKeys)} />

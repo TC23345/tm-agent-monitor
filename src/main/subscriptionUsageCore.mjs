@@ -29,8 +29,13 @@ export function parseClaudeUsage(label, input) {
     if (limit?.kind === 'session' && session) session.severity = severity(limit.severity)
     if (limit?.kind === 'weekly_all' && week) week.severity = severity(limit.severity)
   }
+  // `is_active` is not "applies to you": on 2026-09-30 the endpoint sent the
+  // Fable scope inactive at 13% while a Fable session ran (and the 5-hour
+  // session limit inactive at 13% too) — it seems to mark the limit binding
+  // right now. So a scope shows when it is active *or* has any usage; only an
+  // inactive scope at 0% (a model you have not touched this week) stays hidden.
   const limitQuotas = limits
-    .filter((limit) => limit?.kind === 'weekly_scoped' && limit.is_active !== false && number(limit.percent) !== undefined)
+    .filter((limit) => limit?.kind === 'weekly_scoped' && number(limit.percent) !== undefined && (limit.is_active !== false || number(limit.percent) > 0))
     .map((limit) => ({
       label: `Weekly ${limit.scope?.model?.display_name ?? 'scoped'}`,
       usedPct: Math.max(0, Math.min(100, number(limit.percent))),

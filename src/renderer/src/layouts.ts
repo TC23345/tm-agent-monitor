@@ -1,5 +1,6 @@
 import type { AllSizes, PaneCols, PaneInstance, SidebarView } from './panes'
 import { newPane } from './panes'
+import { sanitizeWebConfig } from '@shared/webPane.mjs'
 
 /**
  * Named workspace layouts: a snapshot of the pane set, the dragged sizes, the
@@ -64,7 +65,11 @@ export function snapshotLayout(state: Omit<SavedLayout, 'savedAt'>): SavedLayout
 
 /** Fresh pane instances for a saved layout, so restoring twice never collides. */
 export function panesFromLayout(layout: SavedLayout): PaneInstance[] {
-  return layout.panes.map((p) => newPane(p.kind, p.term ? { ...p.term, sessionId: undefined } : undefined))
+  // Saved layouts are read back unsanitized; a web pane's URL is checked here
+  // (and again by main before the page attaches). One it cannot load drops.
+  return layout.panes
+    .filter((p) => p.kind !== 'web' || sanitizeWebConfig(p.web))
+    .map((p) => newPane(p.kind, p.term ? { ...p.term, sessionId: undefined } : undefined, sanitizeWebConfig(p.web) ?? undefined))
 }
 
 export const LAYOUT_NAME_MAX = 40

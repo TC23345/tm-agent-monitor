@@ -1,4 +1,5 @@
-import { Activity, Bot, Clipboard, Coins, Keyboard, NotebookPen, Rss, Terminal, ChartColumn, History } from 'lucide-react'
+import { Activity, Bot, Clipboard, Coins, Globe, Keyboard, NotebookPen, Terminal, ChartColumn, History } from 'lucide-react'
+import type { WebPaneConfig } from '@shared/webPane.mjs'
 import type { TerminalLaunch } from '@shared/types'
 import type { SizeBucket } from '@shared/layout.mjs'
 import {
@@ -17,12 +18,13 @@ function readJson(key: string): unknown {
 
 /**
  * The main frame belongs to work: embedded terminal sessions and the reports
- * (Usage, Activity). Starting something is not work — the launch nav lives at
- * the head of the sidebar (`LaunchNav.tsx`), so opening a terminal never costs
- * a pane. At-a-glance status — open windows and limit bars — stacks in the
+ * (Spend, Insights, History). Starting something is not work — the project
+ * badges at the head of the sidebar (`ProjectStrip.tsx`) launch there, and the
+ * activity stream under them left the grid in 0.4.46 (a persisted `activity`
+ * pane just drops), so neither costs a pane. At-a-glance status — open windows and limit bars — stacks in the
  * sidebar as toggleable sections; see `SidebarView`.
  */
-export type PaneKind = 'agents' | 'terminal' | 'spend' | 'insights' | 'history' | 'activity' | 'notes' | 'clipboard' | 'keys'
+export type PaneKind = 'agents' | 'terminal' | 'spend' | 'insights' | 'history' | 'notes' | 'clipboard' | 'keys' | 'web'
 
 /** Retired kinds and what a persisted layout holding one becomes. The old
  * `usage` pane stacked Spend, Insights, and History; it comes back as Spend. */
@@ -47,6 +49,8 @@ export interface PaneInstance {
   id: string
   kind: PaneKind
   term?: TerminalPaneConfig
+  /** `web` panes: the site it opened (its home; the page you navigate to is not persisted). */
+  web?: WebPaneConfig
 }
 
 export const PANE_KINDS: { id: PaneKind; label: string; icon: typeof Activity; hint: string }[] = [
@@ -55,16 +59,21 @@ export const PANE_KINDS: { id: PaneKind; label: string; icon: typeof Activity; h
   { id: 'spend', label: 'Spend', icon: Coins, hint: 'Today’s tokens, estimated value, and budget by provider and project' },
   { id: 'insights', label: 'Insights', icon: ChartColumn, hint: 'What is driving local usage: context size, subagents, skills, MCP servers' },
   { id: 'history', label: 'History', icon: History, hint: 'The last 30 days of usage, by day and model' },
-  { id: 'activity', label: 'Activity', icon: Rss, hint: 'What sessions asked, finished, started, and ended' },
   { id: 'notes', label: 'Notes', icon: NotebookPen, hint: 'A shared notepad — Markdown files you and your agents both read and write' },
   { id: 'clipboard', label: 'Clipboard', icon: Clipboard, hint: 'Everything you copy, in any app — searchable, starred, grouped, and pasteable into a pane' },
+  { id: 'web', label: 'Web', icon: Globe, hint: 'A site in a pane — its own signed-in browser session, shared by every web pane' },
   { id: 'keys', label: 'Keys', icon: Keyboard, hint: 'Every keyboard shortcut — the workspace’s, and the ones Claude Code, Codex and the shell keep (F1)' }
 ]
 
 export const MAX_PANES = 6
 
-export function newPane(kind: PaneKind, term?: TerminalPaneConfig): PaneInstance {
-  return { id: crypto.randomUUID(), kind, term: kind === 'terminal' ? (term ?? { launch: 'shell' }) : undefined }
+export function newPane(kind: PaneKind, term?: TerminalPaneConfig, web?: WebPaneConfig): PaneInstance {
+  return {
+    id: crypto.randomUUID(),
+    kind,
+    term: kind === 'terminal' ? (term ?? { launch: 'shell' }) : undefined,
+    ...(kind === 'web' && web ? { web } : {})
+  }
 }
 
 /** A fresh grid is empty: the agent list lives in the sidebar by default
@@ -73,9 +82,10 @@ export function defaultPanes(): PaneInstance[] {
   return []
 }
 
-/** Kinds that may appear only once. Terminals repeat — one shell per pane. */
+/** Kinds that may appear only once. Terminals repeat — one shell per pane —
+ * and so do web panes, one site each. */
 export function isUniqueKind(kind: PaneKind): boolean {
-  return kind !== 'terminal'
+  return kind !== 'terminal' && kind !== 'web'
 }
 
 const STORAGE_KEY = 'tm.panes.v3'
@@ -223,11 +233,9 @@ export function saveSizes(sizes: AllSizes): void {
 }
 
 /**
- * What the nav's split launch row starts on a plain click. Three verbs that
- * differ only in which agent they run don't each deserve a row, but a picker
- * that always costs a click is worse than the rows were — so the row starts
- * what you started last and the popover is only for changing your mind.
- * Ctrl+Shift+` is unaffected: it always opens a plain shell.
+ * The three starts, in menu order. Each folder remembers the one last started
+ * from its badge menu (the check there). Ctrl+Shift+` is unaffected: it always
+ * opens a plain shell.
  */
 export const LAUNCH_KINDS: TerminalLaunch[] = ['claude', 'codex', 'shell']
 

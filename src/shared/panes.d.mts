@@ -13,6 +13,8 @@ export interface SanitizedPane<K extends string = string> {
   id: string
   kind: K
   term?: SanitizedTerm
+  /** `web` panes only: the site and its name (`sanitizeWebConfig`). */
+  web?: { url: string; label: string }
 }
 export type Fractions = Record<string, number[]>
 export interface Sizes {

@@ -186,6 +186,15 @@ const api = {
       ipcRenderer.removeListener('clips:changed', listener)
     }
   },
+  /** A workspace key pressed inside a web pane's page (main's `before-input-event`,
+   * `webPaneKey`); the renderer runs it like its own keydown. */
+  onWebKey: (cb: (hit: unknown) => void) => {
+    const listener = (_e: unknown, hit: unknown) => cb(hit)
+    ipcRenderer.on('web:key', listener)
+    return () => {
+      ipcRenderer.removeListener('web:key', listener)
+    }
+  },
   /** A command a second instance sent (`tm open …`); the renderer re-validates it. */
   onCommand: (cb: (command: WorkspaceCommand) => void) => {
     const listener = (_e: unknown, command: WorkspaceCommand) => cb(command)

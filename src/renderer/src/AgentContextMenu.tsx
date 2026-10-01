@@ -40,7 +40,7 @@ function resumeCommand(provider: ProviderId, raw?: string): string | null {
 /**
  * Right-click on a session row, in the order you reach for things: answer it
  * if it is waiting, go to it, act on the session, start something next to
- * it, then the folder. Starting opens an embedded pane like the launch nav
+ * it, then the folder. Starting opens an embedded pane like a project badge
  * does (a full grid degrades to a window); nothing here hides the workspace.
  */
 export function AgentContextMenu({ menu, onClose, replySession, inPane, onGoTo, onRename, onLaunch }: {

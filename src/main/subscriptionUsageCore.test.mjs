@@ -21,6 +21,24 @@ test('deduplicates a named weekly quota already present in scoped limits', () =>
   assert.equal(parsed.quotas?.length, 1)
 })
 
+test('shows a scoped weekly limit the endpoint marks inactive once it has usage (the 2026-09-30 response)', () => {
+  // Trimmed from the live response: Fable in use, 13% of its weekly limit, is_active false.
+  const parsed = parseClaudeUsage('You · Max', {
+    five_hour: { utilization: 13, resets_at: '2026-09-30T10:10:00.399878+00:00' },
+    seven_day: { utilization: 15, resets_at: '2026-10-06T11:00:00.399899+00:00' },
+    seven_day_opus: null,
+    seven_day_breakdown: { as_of: '2026-09-30T07:02:54Z', rows: [{ key: 'claude_code', display_name: 'Claude Code', percent: 99 }] },
+    limits: [
+      { kind: 'session', percent: 13, severity: 'normal', scope: null, is_active: false },
+      { kind: 'weekly_all', percent: 15, severity: 'normal', scope: null, is_active: true },
+      { kind: 'weekly_scoped', percent: 13, severity: 'normal', resets_at: '2026-10-06T11:00:00.400068+00:00', scope: { model: { id: null, display_name: 'Fable' }, surface: null }, is_active: false }
+    ]
+  })
+  assert.deepEqual(parsed.quotas, [{ label: 'Weekly Fable', usedPct: 13, resetsAt: Date.parse('2026-10-06T11:00:00.400068+00:00'), tone: 'amber', severity: 'normal' }])
+  assert.equal(parsed.session?.usedPct, 13)
+  assert.equal(parsed.week?.usedPct, 15)
+})
+
 test('reports which windows and limits the response carried, including nulls and inactive limits', () => {
   const parsed = parseClaudeUsage('You · Max', {
     five_hour: { utilization: 14, resets_at: '2026-07-22T10:00:00Z' },

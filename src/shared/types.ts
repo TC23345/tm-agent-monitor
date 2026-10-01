@@ -53,13 +53,17 @@ export interface UsageSample { t: number; pct: number }
 /** One attention-worthy moment across sessions, for the activity feed. */
 export interface ActivityEvent {
   at: number
-  /** `clip`: an agent put something on the user's clipboard (PRD §6). */
-  kind: 'waiting' | 'finished' | 'started' | 'ended' | 'compacted' | 'clip'
+  /** `clip`: an agent put something on the user's clipboard (PRD §6).
+   * `edited`: a session's file edits, folded into one row per burst (`foldEdit`). */
+  kind: 'waiting' | 'finished' | 'started' | 'ended' | 'compacted' | 'clip' | 'edited'
   agentId: string
   provider: ProviderId
   project: string
   cwd?: string
   text?: string
+  /** `edited` only: the files touched, newest first, and how many edits. */
+  files?: string[]
+  count?: number
 }
 
 /** A command a second instance hands the running workspace (`tm …`). */

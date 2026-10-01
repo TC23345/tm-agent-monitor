@@ -1,4 +1,4 @@
-import { useState, type ButtonHTMLAttributes } from 'react'
+import type { ButtonHTMLAttributes } from 'react'
 import type { ProjectGroup as Group } from './group'
 import { AgentRow } from './AgentRow'
 import type { MenuState } from './AgentContextMenu'
@@ -23,17 +23,8 @@ export function ProjectGroup({
   dragHandle?: ButtonHTMLAttributes<HTMLButtonElement>
 }) {
   const [collapsed, toggle] = useCollapse(group.key, false, true)
-  const [expandedChildren, setExpandedChildren] = useState<Set<string>>(() => new Set())
   const displayCollapsed = forceWaitingOpen ? false : collapsed
   const Chevron = displayCollapsed ? ChevronRight : ChevronDown
-  const toggleChildren = (id: string) => {
-    setExpandedChildren((current) => {
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
 
   const git = useGitStatus(group.cwd)
   const gitText = describeGitStatus(git)
@@ -65,18 +56,15 @@ export function ProjectGroup({
       </button>
       {!displayCollapsed && (
         <div className="group-rows">
-          {group.agents.map((a) => {
-            const children = group.childrenByParent.get(a.id) ?? []
-            const expanded = expandedChildren.has(a.id) || (forceWaitingOpen && children.some((child) => child.state === 'waiting'))
-            return (
-              <div key={a.id} className="agent-tree">
-                <AgentRow agent={a} onRowMenu={onRowMenu} childCount={children.length} childrenExpanded={expanded} onToggleChildren={() => toggleChildren(a.id)} />
-                {expanded && children.map((child) => (
-                  <AgentRow key={child.id} agent={child} onRowMenu={onRowMenu} nested />
-                ))}
-              </div>
-            )
-          })}
+          {/* Subagents always show under their session: working, then a green dot when done. */}
+          {group.agents.map((a) => (
+            <div key={a.id} className="agent-tree">
+              <AgentRow agent={a} onRowMenu={onRowMenu} />
+              {(group.childrenByParent.get(a.id) ?? []).map((child) => (
+                <AgentRow key={child.id} agent={child} onRowMenu={onRowMenu} nested />
+              ))}
+            </div>
+          ))}
         </div>
       )}
     </div>

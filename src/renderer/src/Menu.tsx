@@ -62,7 +62,8 @@ export function MenuItem({ icon, label, hint, disabled, keys, onClick }: {
   disabled?: boolean
   /** Shortcut chips at the right (the ContextMenu's `kbd` look). */
   keys?: string[]
-  onClick: () => void
+  /** Gets the event, for rows where Shift means "somewhere else" (a site in the browser). */
+  onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void
 }) {
   return (
     <button className="menu-item" disabled={disabled} onClick={onClick} title={hint} data-testid={tid('menu', label)}>

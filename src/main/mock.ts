@@ -135,24 +135,24 @@ export function mockSnapshot(): StatusSnapshot {
         since: ago(2 * 60_000), updatedAt: now + 1
       },
       {
-        id: 'codex:a4', provider: 'codex', rawSessionId: 'a4', project: 'growth-saloon', state: 'running', tool: 'bash',
+        id: 'codex:a4', provider: 'codex', rawSessionId: 'a4', project: 'growth-saloon', cwd: 'C:\\Projects\\growth-saloon', state: 'running', tool: 'bash',
         activity: '$ npm run build', contextPct: 31, tokensOut: 7_200,
         costUsd: 0.6, model: 'claude-fable-5', permissionMode: 'bypassPermissions',
         since: ago(17_000), updatedAt: now
       },
       {
-        id: 'claude:a7', provider: 'claude', rawSessionId: 'a7', project: 'growth-saloon', state: 'running', tool: 'edit',
+        id: 'claude:a7', provider: 'claude', rawSessionId: 'a7', project: 'growth-saloon', cwd: 'C:\\Projects\\growth-saloon', state: 'running', tool: 'edit',
         activity: 'editing vite.config.ts', contextPct: 22, tokensOut: 3_100,
         costUsd: 0.2, model: 'claude-sonnet-5', permissionMode: 'acceptEdits',
         since: ago(40_000), updatedAt: now
       },
       {
-        id: 'claude:a5', provider: 'claude', rawSessionId: 'a5', project: 'gs-referral', state: 'complete',
+        id: 'claude:a5', provider: 'claude', rawSessionId: 'a5', project: 'gs-referral', cwd: 'C:\\Projects\\gs-referral', state: 'complete',
         activity: 'finished — ready for you', contextPct: 47, tokensOut: 55_000,
         model: 'claude-fable-5', since: ago(4_000), updatedAt: now
       },
       {
-        id: 'codex:a6', provider: 'codex', rawSessionId: 'a6', project: 'watch-firmware', state: 'idle',
+        id: 'codex:a6', provider: 'codex', rawSessionId: 'a6', project: 'watch-firmware', cwd: 'C:\\Projects\\watch-firmware', state: 'idle',
         activity: 'idle', contextPct: 12, since: ago(15 * 60_000), updatedAt: now
       },
       {
@@ -166,13 +166,23 @@ export function mockSnapshot(): StatusSnapshot {
 export function mockEvents(): ActivityEvent[] {
   const now = Date.now()
   const ago = (ms: number) => now - ms
+  const at = (name: string) => `C:\\Projects\\${name}`
   return [
-    { at: ago(60_000), kind: 'waiting', agentId: 'claude:a1', provider: 'claude', project: 'compile-me', text: 'permission to use Bash' },
-    { at: ago(4 * 60_000), kind: 'finished', agentId: 'claude:a5', provider: 'claude', project: 'gs-referral' },
-    { at: ago(6 * 60_000), kind: 'waiting', agentId: 'codex:a2', provider: 'codex', project: 'api-gateway', text: 'Should I switch auth to JWT?' },
-    { at: ago(9 * 60_000), kind: 'compacted', agentId: 'claude:a3', provider: 'claude', project: 'claude-watch' },
-    { at: ago(14 * 60_000), kind: 'started', agentId: 'codex:a4', provider: 'codex', project: 'growth-saloon' },
-    { at: ago(31 * 60_000), kind: 'ended', agentId: 'claude:old', provider: 'claude', project: 'watch-firmware' },
-    { at: ago(48 * 60_000), kind: 'started', agentId: 'claude:a3', provider: 'claude', project: 'claude-watch' }
+    { at: ago(30_000), kind: 'edited', agentId: 'claude:a3', provider: 'claude', project: 'claude-watch', cwd: process.cwd(), files: ['StatusModel.swift', 'App.tsx', 'styles.css'], count: 5, text: 'edited StatusModel.swift, App.tsx +1 more' },
+    { at: ago(60_000), kind: 'waiting', agentId: 'claude:a1', provider: 'claude', project: 'compile-me', cwd: at('compile-me'), text: 'permission to use Bash' },
+    { at: ago(2 * 60_000), kind: 'edited', agentId: 'claude:a7', provider: 'claude', project: 'growth-saloon', cwd: at('growth-saloon'), files: ['vite.config.ts'], count: 1, text: 'edited vite.config.ts' },
+    { at: ago(4 * 60_000), kind: 'finished', agentId: 'claude:a5', provider: 'claude', project: 'gs-referral', cwd: at('gs-referral') },
+    { at: ago(6 * 60_000), kind: 'waiting', agentId: 'codex:a2', provider: 'codex', project: 'api-gateway', cwd: at('api-gateway'), text: 'Should I switch auth to JWT?' },
+    { at: ago(9 * 60_000), kind: 'compacted', agentId: 'claude:a3', provider: 'claude', project: 'claude-watch', cwd: process.cwd() },
+    { at: ago(14 * 60_000), kind: 'started', agentId: 'codex:a4', provider: 'codex', project: 'growth-saloon', cwd: at('growth-saloon') },
+    { at: ago(22 * 60_000), kind: 'edited', agentId: 'codex:a6', provider: 'codex', project: 'watch-firmware', cwd: at('watch-firmware'), files: [], count: 3, text: 'made 3 edits' },
+    { at: ago(31 * 60_000), kind: 'ended', agentId: 'claude:old', provider: 'claude', project: 'higgsfield-api', cwd: at('higgsfield-api') },
+    { at: ago(48 * 60_000), kind: 'started', agentId: 'claude:a3', provider: 'claude', project: 'claude-watch', cwd: process.cwd() },
+    { at: ago(75 * 60_000), kind: 'finished', agentId: 'claude:j1', provider: 'claude', project: 'jev-playground', cwd: at('jev-playground') },
+    { at: ago(95 * 60_000), kind: 'edited', agentId: 'claude:r1', provider: 'claude', project: 'gs-reporting-app', cwd: at('gs-reporting-app'), files: ['report.ts'], count: 2, text: 'edited report.ts' },
+    { at: ago(130 * 60_000), kind: 'ended', agentId: 'codex:t1', provider: 'codex', project: 'gs-toolkit', cwd: at('gs-toolkit') },
+    { at: ago(170 * 60_000), kind: 'finished', agentId: 'claude:tc', provider: 'claude', project: 'taylormade-content', cwd: at('taylormade-content') },
+    { at: ago(200 * 60_000), kind: 'started', agentId: 'claude:rf', provider: 'claude', project: 'references', cwd: at('higgsfield-api\\.claude\\skills\\references') },
+    { at: ago(300 * 60_000), kind: 'ended', agentId: 'claude:stale', provider: 'claude', project: 'too-old', cwd: at('too-old') }
   ]
 }

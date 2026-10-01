@@ -22,14 +22,16 @@ import { SNIPPETS } from './snippets'
 import { NameDialog } from './NameDialog'
 import { SESSION_NAME_MAX, setSessionName, useSessionNames } from './sessionNames'
 import { useProjectCommands } from './useProject'
-import { ActivityPane } from './ActivityPane'
+import { ActivityStream, useActivityEvents } from './ActivityStream'
 import { NotesPane, type NotesPaneHandle } from './NotesPane'
 import { ClipboardPane, type PasteTarget } from './clipboard/ClipboardPane'
 import { KeysPane } from './KeysPane'
+import { WebPane, type WebPaneHandle } from './WebPane'
+import { sanitizeWebConfig, type WebPaneConfig } from '@shared/webPane.mjs'
 import { sourceLabel } from '@shared/clips.mjs'
 import type { ClipSummary } from '@shared/types'
 import { isWorkspaceCommand } from '@shared/workspaceCommand.mjs'
-import { eventChord, matchAppKey } from '@shared/keymap.mjs'
+import { APP_KEYS, eventChord, matchAppKey, type AppKeyAction } from '@shared/keymap.mjs'
 import type { ProjectCommand } from '@shared/types'
 import { LAYOUT_NAME_MAX, loadLayouts, panesFromLayout, saveLayouts, snapshotLayout, type LayoutMap } from './layouts'
 import { tid } from './testid'
@@ -50,11 +52,15 @@ import {
   trackWidths, viewportBucket, type SizeBucket
 } from '@shared/layout.mjs'
 import { launchFor, launchKey, withLaunch, type LaunchPrefs } from '@shared/panes.mjs'
-import { LaunchNav, type LaunchTarget, type NavMenu } from './LaunchNav'
+import { ProjectStrip, WEB_LINKS, type LaunchTarget, type NavMenu, type StripProject } from './ProjectStrip'
 import {
-  AppWindow, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Clipboard, Code2, Code2 as CursorIcon, Columns3, Copy,
-  Eye, EyeOff, Filter, Folder, FolderPlus, Globe, Keyboard, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
-  NotebookPen, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, Rss, Ruler, Save, Shrink, Sparkles, SquareSlash,
+  STREAM_DEFAULT, clampStreamHeight, readStreamHeight, recentList, sanitizeRecent, touchRecent,
+  type ProjectTouch, type RecentMap
+} from '@shared/projectStrip.mjs'
+import {
+  AppWindow, ArrowLeft, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Clipboard, Code2, Code2 as CursorIcon, Columns3, Copy,
+  ExternalLink, Eye, EyeOff, Filter, Folder, FolderPlus, Globe, Keyboard, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
+  NotebookPen, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, RotateCw, Rss, Ruler, Save, Shrink, Sparkles, SquareSlash,
   SquareTerminal, Terminal, Trash2, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
@@ -65,6 +71,10 @@ import type { DesktopWindow } from '@shared/types'
 function colCap(): number {
   return window.innerWidth >= 1400 ? 3 : window.innerWidth >= 1040 ? 2 : 1
 }
+
+/** localStorage keys for the sidebar head: the recent-project map and the stream height. */
+const RECENT_KEY = 'tm.projects.v1'
+const STREAM_KEY = 'tm.stream.v1'
 
 /** Width of the gutter track a column splitter lives in. It replaces the grid's
  * column gap (styles.css `.grid`), so the spacing looks unchanged. */
@@ -86,11 +96,10 @@ export function App() {
   // Named layouts and the save-as prompt; a project group dragged over the grid.
   const [layouts, setLayouts] = useState<LayoutMap>(loadLayouts)
   const [layoutDialog, setLayoutDialog] = useState(false)
-  // What the nav's split launch row starts on a plain click. Deliberately only
-  // the popover changes it: the palette and the Terminal menu are for a one-off
-  // you already named, and should not silently move the nav's default.
-  // Per folder (tm.launch.v2): the split row starts what you last picked *in
-  // this project*; a folder you never picked in follows the global default.
+  // Each folder's usual launch (tm.launch.v2), checked in its badge menu.
+  // Deliberately only a start from that menu changes it: the palette and the
+  // Terminal menu are for a one-off you already named, and should not
+  // silently move it. A folder you never started in follows the global default.
   const [launchPrefs, setLaunchPrefs] = useState<LaunchPrefs<TerminalLaunch>>(loadLaunchPrefs)
   // The session being named, if any (the rows read the same store).
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -122,7 +131,7 @@ export function App() {
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [menu, setMenu] = useState<MenuState | null>(null)
   // One menu open at a time across the whole window — the title-bar menus and
-  // the launch nav's two popovers share this, so opening one closes the other
+  // the project badge menu share this, so opening one closes the other
   // and the Escape chain below sees every one of them.
   const [openMenu, setOpenMenu] = useState<MenuName | 'sidebar' | NavMenu | StatusMenu | null>(null)
   const [waitingOnly, setWaitingOnly] = useState(false)
@@ -157,6 +166,16 @@ export function App() {
   const [clipsPaused, setClipsPaused] = useState(false)
   // Live handles to the terminal panes, for the header tools (clear/restart).
   const termRefs = useRef(new Map<string, TerminalPaneHandle>())
+  // Web panes: their handles (back, reload, focus) and what the header shows —
+  // the page's live URL and whether Back has anywhere to go.
+  const webRefs = useRef(new Map<string, WebPaneHandle>())
+  const [webState, setWebState] = useState<Record<string, { url?: string; back?: boolean; loading?: boolean }>>({})
+  const patchWeb = (paneId: string, patch: { url?: string; back?: boolean; loading?: boolean }) =>
+    setWebState((current) => {
+      const prev = current[paneId] ?? {}
+      if (Object.entries(patch).every(([k, v]) => prev[k as keyof typeof prev] === v)) return current
+      return { ...current, [paneId]: { ...prev, ...patch } }
+    })
   const notesRef = useRef<NotesPaneHandle | null>(null)
   /** The notes folder, once the pane has asked main — the header's copy-to-clipboard path. */
   const [notesDir, setNotesDir] = useState<string | undefined>(undefined)
@@ -203,6 +222,27 @@ export function App() {
   // active; a target pins a folder (picked in the switcher, or dropped from
   // Explorer onto the nav).
   const [launchChoice, setLaunchChoice] = useState<LaunchTarget | null>(null)
+  // Project folders with activity in the last four hours (the sidebar's
+  // badges) — kept in localStorage so a restart does not empty the strip.
+  const [recentMap, setRecentMap] = useState<RecentMap>(() => {
+    try { return sanitizeRecent(JSON.parse(localStorage.getItem(RECENT_KEY) ?? 'null')) } catch { return {} }
+  })
+  const touchProjects = (touches: ProjectTouch[]) => setRecentMap((current) => touchRecent(current, touches, Date.now()))
+  useEffect(() => {
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(recentMap)) } catch { /* the strip rebuilds from live activity */ }
+  }, [recentMap])
+  // The activity stream's height under the badges (its splitter); 0 = folded away.
+  const [streamH, setStreamH] = useState<number>(() => {
+    try { return readStreamHeight(localStorage.getItem(STREAM_KEY)) } catch { return STREAM_DEFAULT }
+  })
+  useEffect(() => {
+    // Trailing write: the splitter changes this on every pointermove.
+    const t = window.setTimeout(() => { try { localStorage.setItem(STREAM_KEY, String(streamH)) } catch { /* preference only */ } }, 200)
+    return () => window.clearTimeout(t)
+  }, [streamH])
+  const streamDrag = useRef({ height: 0, sidebar: 0 })
+  const sidebarRef = useRef<HTMLElement>(null)
+  const activity = useActivityEvents()
   // Drives the slide-up / slide-down transition. Starts closed so the very first
   // painted frame is already off-screen and the card rises into place.
   const [open, setOpen] = useState(false)
@@ -300,6 +340,38 @@ export function App() {
   // test keeps every terminal key off Claude Code's, Codex's and the shell's.
   // Escape closes an open menu, the palette, or a dialog, then un-zooms, and
   // otherwise dismisses the workspace.
+  /** Run one of the keymap's actions; false when it had nothing to act on (Ctrl+5 with four panes). */
+  const runAppKey = (hit: { action: AppKeyAction; arg?: number }): boolean => {
+    switch (hit.action) {
+      case 'focusPane': {
+        const target = panes[(hit.arg ?? 0) - 1]
+        if (!target) return false
+        focusPane(target.id)
+        return true
+      }
+      case 'palette': setPalette((v) => !v); break
+      case 'legend': openLegend(); break
+      case 'settings': setSettingsOpen(true); break
+      case 'sidebar': toggleSidebar(); break
+      case 'waiting': routeToWaiting(); break
+      case 'newTerminal': newTerminal('shell'); break
+      case 'nextPane': stepFocus(1); break
+      case 'prevPane': stepFocus(-1); break
+      case 'zoom': toggleZoomFocused(); break
+    }
+    return true
+  }
+  const runKeyRef = useRef(runAppKey)
+  runKeyRef.current = runAppKey
+  // A web page swallows keys before this document sees them; main hands the
+  // workspace ones back (`webPaneKey`: the same set that works in a terminal).
+  useEffect(() => window.watch.onWebKey((raw) => {
+    const hit = raw as { action?: unknown; arg?: unknown } | null
+    if (!hit || typeof hit.action !== 'string' || !APP_KEYS.some((k) => k.action === hit.action)) return
+    const arg = typeof hit.arg === 'number' && Number.isInteger(hit.arg) ? hit.arg : undefined
+    runKeyRef.current({ action: hit.action as AppKeyAction, arg })
+  }), [])
+
   const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => {})
   onKeyRef.current = (e: KeyboardEvent) => {
       // Settings → Keyboard shortcuts is recording: the next chord is its, not ours.
@@ -307,25 +379,7 @@ export function App() {
       const inTerminal = !!(e.target as HTMLElement)?.closest?.('.termpane')
       const hit = matchAppKey(eventChord(e), inTerminal)
       if (hit) {
-        if (hit.action === 'focusPane') {
-          const target = panes[(hit.arg ?? 0) - 1]
-          if (!target) return
-          e.preventDefault()
-          focusPane(target.id)
-          return
-        }
-        e.preventDefault()
-        switch (hit.action) {
-          case 'palette': setPalette((v) => !v); break
-          case 'legend': openLegend(); break
-          case 'settings': setSettingsOpen(true); break
-          case 'sidebar': toggleSidebar(); break
-          case 'waiting': routeToWaiting(); break
-          case 'newTerminal': newTerminal('shell'); break
-          case 'nextPane': stepFocus(1); break
-          case 'prevPane': stepFocus(-1); break
-          case 'zoom': toggleZoomFocused(); break
-        }
+        if (runAppKey(hit)) e.preventDefault()
         return
       }
       if (inTerminal) return
@@ -363,7 +417,7 @@ export function App() {
     switch (raw.kind) {
       case 'palette': setPalette(true); break
       case 'usage': openUsage(); break
-      case 'activity': openActivity(); break
+      case 'activity': showStream(); break
       case 'notes': openNotes(); break
       case 'layout': applyLayout(raw.name); break
       case 'settings': setSettingsSection(raw.section); setSettingsOpen(true); break
@@ -418,21 +472,48 @@ export function App() {
   const recent = [...agents]
     .filter((a) => a.cwd && !a.parentId)
     .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+  // Until a badge is clicked, launches follow the most recently active session.
   const context: LaunchTarget = launchChoice ?? { cwd: recent?.cwd, label: recent?.project }
-  const launchKind = launchFor(launchPrefs, context.cwd)
-  const setLaunchKind = (kind: TerminalLaunch) => setLaunchPrefs((current) => withLaunch(current, context.cwd, kind))
 
-  /** Folders the switcher can point at: one per live project, newest first. */
-  const launchProjects: LaunchTarget[] = []
-  for (const a of [...agents].sort((x, y) => y.updatedAt - x.updatedAt)) {
-    if (a.cwd && !launchProjects.some((p) => launchKey(p.cwd) === launchKey(a.cwd))) launchProjects.push({ cwd: a.cwd, label: a.project })
+  // Every session event and every live session's last update counts as
+  // activity in its folder; terminals opened in a folder touch it too (addPane,
+  // updateTerm). touchRecent returns the same map when nothing moved.
+  useEffect(() => {
+    const touches: ProjectTouch[] = []
+    for (const e of activity ?? []) if (e.cwd) touches.push({ cwd: e.cwd, label: e.project, at: e.at })
+    for (const a of agents) if (a.cwd) touches.push({ cwd: a.cwd, label: a.project, at: a.updatedAt })
+    if (touches.length) touchProjects(touches)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- touchProjects only calls a state setter
+  }, [activity, agents])
+
+  /** The badges: recent folders newest first, each with its live sessions'
+   * state — plus the launch target, should it be quieter than four hours. */
+  const stripProjects: StripProject[] = recentList(recentMap).map((p) => ({ ...p, sessions: 0, waiting: 0, running: 0 }))
+  if (context.cwd && !stripProjects.some((p) => launchKey(p.cwd) === launchKey(context.cwd))) {
+    stripProjects.push({ cwd: context.cwd, label: context.label ?? context.cwd, at: 0, sessions: 0, waiting: 0, running: 0 })
+  }
+  for (const a of agents) {
+    const p = a.cwd ? stripProjects.find((x) => launchKey(x.cwd) === launchKey(a.cwd)) : undefined
+    if (!p) continue
+    if (!a.parentId) p.sessions++
+    if (a.state === 'waiting') p.waiting++
+    else if (a.state === 'running') p.running++
   }
 
-  /** A folder dropped on the nav: main resolves it (a file means its parent). */
+  /** A folder dropped on the strip: main resolves it (a file means its parent). */
   const dropLaunchFolder = (path: string) => {
     window.watch.describePath(path).then((found) => {
-      if (found) setLaunchChoice({ cwd: found.dir, label: found.label })
+      if (!found) return
+      setLaunchChoice({ cwd: found.dir, label: found.label })
+      touchProjects([{ cwd: found.dir, label: found.label, at: Date.now() }])
     }).catch(() => {})
+  }
+
+  /** User → Activity, the palette, `tm activity`: the sidebar and the stream, open. */
+  const showStream = () => {
+    if (sidebarHidden) toggleSidebar()
+    if (streamH === 0) setStreamH(STREAM_DEFAULT)
+    document.querySelector<HTMLElement>('[data-testid="activity-stream"]')?.scrollTo({ top: 0 })
   }
 
   // When the last waiting session resolves, drop the filter so the list never
@@ -549,22 +630,39 @@ export function App() {
   )
 
   /** Add a pane of `kind` if the layout allows it. Terminals repeat; others don't. */
-  const addPane = (kind: PaneKind, term?: TerminalPaneConfig) => {
+  const addPane = (kind: PaneKind, term?: TerminalPaneConfig, web?: WebPaneConfig) => {
     if (panes.length >= MAX_PANES) return
     if (isUniqueKind(kind) && panes.some((p) => p.kind === kind)) return
-    const pane = newPane(kind, term)
+    const pane = newPane(kind, term, web)
     setPanes([...panes, pane])
     setFocusedPane(pane.id)
+    // A terminal opened in a folder is activity there.
+    if (term?.cwd) touchProjects([{ cwd: term.cwd, label: term.label, at: Date.now() }])
     // One agent list: the pane replaces the sidebar section.
     if (kind === 'agents') setSidebarViews((current) => current.filter((v) => v !== 'agents'))
   }
 
-  /** Give a pane the keyboard: a terminal takes real focus, anything else the slot. */
+  /** Give a pane the keyboard: a terminal or a web page takes real focus, anything else the slot. */
   const focusPane = (paneId: string) => {
     setFocusedPane(paneId)
-    const handle = termRefs.current.get(paneId)
+    const handle = termRefs.current.get(paneId) ?? webRefs.current.get(paneId)
     if (handle) handle.focus()
     else document.querySelector<HTMLElement>(`[data-pane="${paneId}"]`)?.focus()
+  }
+
+  /** A site: its web pane (brought forward when one already shows it), or the
+   * browser on Shift-click or with a full grid. */
+  const openWeb = (link: { url: string; label: string }, external = false) => {
+    const web = sanitizeWebConfig(link)
+    if (!web) return
+    const open = panes.find((p) => p.kind === 'web' && p.web?.url === web.url)
+    if (open && !external) {
+      if (zoom && zoom !== open.id) setZoom(open.id)
+      focusPane(open.id)
+      return
+    }
+    if (external || panes.length >= MAX_PANES) { void window.watch.openExternal(web.url); return }
+    addPane('web', undefined, web)
   }
 
   const stepFocus = (delta: 1 | -1) => {
@@ -622,7 +720,6 @@ export function App() {
   // `tm usage` and the old Usage entry point land on Spend; Insights and
   // History are their own panes now (status bar → Panes).
   const openUsage = () => openUnique('spend')
-  const openActivity = () => openUnique('activity')
   const openNotes = () => openUnique('notes')
   const openClipboard = () => openUnique('clipboard')
 
@@ -714,10 +811,13 @@ export function App() {
     addPane('terminal', { launch, cwd: context.cwd, label: context.label })
   }
 
-  const updateTerm = (paneId: string, patch: Partial<TerminalPaneConfig>) =>
+  const updateTerm = (paneId: string, patch: Partial<TerminalPaneConfig>) => {
+    // A shell that `cd`s somewhere has opened that folder.
+    if (patch.cwd) touchProjects([{ cwd: patch.cwd, at: Date.now() }])
     setPanes((current) => current.map((p) =>
       p.id === paneId && p.term ? { ...p, term: { ...p.term, ...patch } } : p
     ))
+  }
 
   // Remember which provider session each CLI pane hosts (the hooks carry the
   // pane's PTY id as `terminalId`), so a restart resumes exactly that session
@@ -769,8 +869,6 @@ export function App() {
         return <InsightsPane />
       case 'history':
         return <HistoryPane />
-      case 'activity':
-        return <ActivityPane onFocusAgent={focusAgentAnywhere} />
       case 'notes':
         return <NotesPane ref={notesRef} onDir={setNotesDir} preview={notesPreview} />
       case 'clipboard': {
@@ -779,6 +877,19 @@ export function App() {
       }
       case 'keys':
         return <KeysPane refresh={settingsOpen} />
+      case 'web':
+        return (
+          <WebPane
+            ref={(handle) => {
+              if (handle) webRefs.current.set(pane.id, handle)
+              else webRefs.current.delete(pane.id)
+            }}
+            config={pane.web!}
+            onUrl={(url) => patchWeb(pane.id, { url })}
+            onNav={({ back, loading }) => patchWeb(pane.id, { back, loading })}
+            onFocus={() => { if (focusedPane !== pane.id) setFocusedPane(pane.id) }}
+          />
+        )
       case 'terminal':
         return (
           <Suspense fallback={<div className="empty">Starting terminal…</div>}>
@@ -809,7 +920,8 @@ export function App() {
   /** What a terminal pane runs, as its header title. */
   const paneTitle = (pane: PaneInstance) =>
     pane.kind === 'terminal' && pane.term ? (pane.term.launch === 'claude' ? 'Claude Code' : pane.term.launch === 'codex' ? 'Codex' : 'Terminal')
-      : pane.kind === 'notes' ? "TC's NOTES" : undefined
+      : pane.kind === 'notes' ? "TC's NOTES"
+        : pane.kind === 'web' ? pane.web?.label : undefined
 
   const tool = (title: string, icon: ReactNode, onClick: () => void, disabled = false, active = false) => (
     <button className={`iconbtn iconbtn--sm ${active ? 'is-on' : ''}`} onClick={onClick} title={title} aria-label={title} aria-pressed={active || undefined} disabled={disabled} data-testid={tid('pane-tool', title)}>
@@ -843,6 +955,19 @@ export function App() {
             collapseAll,
             groups.length < 2
           )}
+        </>
+      )
+    }
+    if (pane.kind === 'web' && pane.web) {
+      const web = pane.web
+      const state = webState[pane.id] ?? {}
+      const handle = () => webRefs.current.get(pane.id)
+      // Back, reload, and out to the browser — the page's own UI does the rest.
+      return (
+        <>
+          {tool('Back', ic(ArrowLeft), () => handle()?.back(), !state.back)}
+          {tool(state.loading ? 'Loading…' : 'Reload', ic(RotateCw), () => handle()?.reload(), false, !!state.loading)}
+          {tool('Open in your browser', ic(ExternalLink), () => { void window.watch.openExternal(state.url ?? web.url) })}
         </>
       )
     }
@@ -927,7 +1052,7 @@ export function App() {
     )
   }
 
-  // Sections stack under the launch nav in the fixed catalog order (Limits
+  // Sections stack under the Activity head in the fixed catalog order (Limits
   // first), so toggling one never reshuffles the rest.
   const activeViews = SIDEBAR_VIEWS.filter((v) => sidebarViews.includes(v.id))
 
@@ -1012,13 +1137,21 @@ export function App() {
     }
     cmd('cursor', 'Open Cursor', () => window.watch.openCursor(context.cwd), { icon: <Code2 strokeWidth={2} />, detail: context.label, keywords: ['editor'] })
     cmd('chrome', 'Open Chrome', () => window.watch.openChrome(), { icon: <Globe strokeWidth={2} />, keywords: ['browser'] })
+    for (const w of WEB_LINKS) {
+      const shown = panes.some((p) => p.kind === 'web' && p.web?.url === sanitizeWebConfig(w)?.url)
+      cmd(`web:${w.url}`, `Open ${w.label}`, () => openWeb(w), {
+        icon: <Globe strokeWidth={2} />,
+        detail: shown ? 'go to its pane' : full ? 'in your browser — all six panes are open' : 'in a pane',
+        keywords: ['browser', 'web', 'site', 'railway', 'pane', w.url]
+      })
+      cmd(`web-ext:${w.url}`, `Open ${w.label} in your browser`, () => openWeb(w, true), { icon: <ExternalLink strokeWidth={2} />, keywords: ['browser', 'web', 'site', 'external'] })
+    }
     cmd('new-project', 'New project…', () => setNewProjectOpen(true), { icon: <FolderPlus strokeWidth={2} /> })
     cmd('projects-dir', 'Open Projects folder', () => window.watch.openProjectsDir(), { icon: <Folder strokeWidth={2} />, keywords: ['explorer'] })
-    const hasActivity = panes.some((p) => p.kind === 'activity')
-    cmd('activity', 'Activity feed', openActivity, {
+    cmd('activity', 'Activity stream', showStream, {
       icon: <Rss strokeWidth={2} />,
-      keywords: ['events', 'timeline', 'questions', 'history', 'log'],
-      detail: hasActivity ? 'zoom the open pane' : full ? 'all six panes are open' : undefined
+      keywords: ['events', 'timeline', 'questions', 'history', 'log', 'feed', 'projects', 'edits'],
+      detail: 'the top of the sidebar'
     })
     const hasNotes = panes.some((p) => p.kind === 'notes')
     cmd('notes', 'Notes', openNotes, {
@@ -1052,7 +1185,8 @@ export function App() {
     for (const pane of panes) {
       const kindLabel = pane.kind === 'terminal'
         ? `Terminal${pane.term?.label ? ` · ${pane.term.label}` : ''}`
-        : PANE_KINDS.find((k) => k.id === pane.kind)!.label
+        : pane.kind === 'web' && pane.web ? pane.web.label
+          : PANE_KINDS.find((k) => k.id === pane.kind)!.label
       if (panes.length > 1) {
         cmd(`zoom:${pane.id}`, zoomed === pane.id ? `Restore grid` : `Zoom pane: ${kindLabel}`, () => setZoom(zoomed === pane.id ? null : pane.id), { icon: zoomed === pane.id ? <Minimize2 strokeWidth={2} /> : <Maximize2 strokeWidth={2} />, keywords: ['maximize', 'focus'] })
       }
@@ -1187,6 +1321,7 @@ export function App() {
         onMinimize={() => { setOpenMenu(null); window.watch.minimize() }}
         onHide={() => { setOpenMenu(null); window.watch.hide() }}
         onOpenPane={openUnique}
+        onActivity={() => { setOpenMenu(null); showStream() }}
         hot={hot}
         onFocusAgent={focusAgentAnywhere}
       />
@@ -1194,21 +1329,36 @@ export function App() {
 
       <div className="frame" ref={frameRef}>
         {/* Hidden, not unmounted: the sections keep their state and the
-            launch nav its popover wiring, like a zoomed grid's other panes. */}
-        <aside className={`sidebar ${sidebarHidden ? 'is-hidden' : ''}`} style={{ flexBasis: sidebarWidth }} data-testid="sidebar">
-          <LaunchNav
-            context={context}
-            projects={launchProjects}
-            following={launchChoice === null}
-            onChoose={setLaunchChoice}
-            openMenu={openMenu === 'launch-target' ? openMenu : null}
+            project strip its menu wiring, like a zoomed grid's other panes. */}
+        <aside className={`sidebar ${sidebarHidden ? 'is-hidden' : ''}`} ref={sidebarRef} style={{ flexBasis: sidebarWidth }} data-testid="sidebar">
+          <ProjectStrip
+            projects={stripProjects}
+            selected={context.cwd}
+            openMenu={openMenu === 'project' ? openMenu : null}
             onOpenMenu={setOpenMenu}
-            onLaunch={(kind, external) => (external ? window.watch.openTerminal(context.cwd, kind) : newTerminal(kind))}
-            launchKind={launchKind}
-            onLaunchKind={setLaunchKind}
-            recent={launchProjects.filter((p) => launchKey(p.cwd) !== launchKey(context.cwd)).slice(0, 3)}
+            onSelect={setLaunchChoice}
+            onLaunch={(kind, target, external) => {
+              // Starting something records it as that folder's usual launch (the menu's check).
+              setLaunchPrefs((current) => withLaunch(current, target.cwd, kind))
+              if (external || panes.length >= MAX_PANES) window.watch.openTerminal(target.cwd, kind)
+              else addPane('terminal', { launch: kind, cwd: target.cwd, label: target.label })
+            }}
+            launchKindFor={(cwd) => launchFor(launchPrefs, cwd)}
             onNewProject={() => setNewProjectOpen(true)}
+            onOpenWeb={openWeb}
             onDropFolder={dropLaunchFolder}
+          />
+          {streamH > 0 && <ActivityStream events={activity} height={streamH} onFocusAgent={focusAgentAnywhere} />}
+          {/* Drag to size the stream; up past the snap folds it away, down brings it back. */}
+          <Splitter
+            axis="y"
+            className="splitter--stream"
+            testId="splitter-stream"
+            label="Activity stream height"
+            title={streamH > 0 ? 'Activity stream height — drag to resize, double-click to reset' : 'Drag down to show the activity stream'}
+            onStart={() => { streamDrag.current = { height: streamH, sidebar: sidebarRef.current?.clientHeight ?? 800 } }}
+            onMove={(delta) => setStreamH(clampStreamHeight(streamDrag.current.height + delta, streamDrag.current.sidebar))}
+            onReset={() => setStreamH(STREAM_DEFAULT)}
           />
           {activeViews.map((v, i) => sideSection(v, i === 0))}
         </aside>
@@ -1257,7 +1407,7 @@ export function App() {
             <div className="gridempty" data-testid="grid-empty">
               <SquareTerminal strokeWidth={1.5} style={{ width: 28, height: 28 }} />
               <div className="gridempty-hint">
-                Nothing open. Pick a project at the top of the sidebar, then start Claude Code or Codex there.
+                Nothing open. Click a project at the top of the sidebar to start Claude Code or Codex there.
                 <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>`</kbd> opens a plain terminal; <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd> finds everything else.
               </div>
             </div>
@@ -1294,11 +1444,12 @@ export function App() {
                 title={paneTitle(pane)}
                 plainTitle={pane.kind === 'notes'}
                 context={paneContext(pane)}
-                path={pane.kind === 'terminal' ? pane.term?.cwd : pane.kind === 'notes' ? notesDir : undefined}
+                path={pane.kind === 'terminal' ? pane.term?.cwd : pane.kind === 'notes' ? notesDir : pane.kind === 'web' ? (webState[pane.id]?.url ?? pane.web?.url) : undefined}
                 onCopyPath={
                   pane.kind === 'terminal' && pane.term?.cwd ? () => window.watch.copyText(pane.term!.cwd!)
                     : pane.kind === 'notes' && notesDir ? () => window.watch.copyText(notesDir)
-                      : undefined
+                      : pane.kind === 'web' ? () => window.watch.copyText(webState[pane.id]?.url ?? pane.web?.url ?? '')
+                        : undefined
                 }
                 tools={paneTools(pane)}
                 attention={paneAttention.get(pane.id)}
@@ -1402,7 +1553,7 @@ export function App() {
           onGoTo={focusAgentAnywhere}
           onRename={(id) => { setMenu(null); setRenaming(id) }}
           onLaunch={(launch, cwd) => {
-            // Same as the launch nav: a pane in that folder; a full grid opens a window.
+            // Same as a project badge: a pane in that folder; a full grid opens a window.
             if (panes.length >= MAX_PANES) window.watch.openTerminal(cwd, launch)
             else addPane('terminal', { launch, cwd, label: cwd.split(/[\\/]/).filter(Boolean).pop() })
           }}

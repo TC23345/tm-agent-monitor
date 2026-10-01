@@ -536,124 +536,169 @@ kbd {
 .gpane-tools .menu-wrap { display: inline-flex; }
 .gpane-tools .menu-pop { left: auto; right: 0; top: calc(100% + 8px); }
 
-/* ---- launch nav: the head of the sidebar — where launches land, then what
-   to start. Rows, not buttons: this is navigation, like a chat app's "new
-   chat" over its pages. ---- */
-.launchnav {
+/* ---- sidebar head: the project badges over the activity stream ----
+   Badges are every folder active in the last four hours, newest first, in
+   two rows (ProjectStrip.tsx packs them with packRows). Past two rows the
+   strip scrolls sideways under an edge fade with an arrow; Shift+wheel
+   scrolls it too. The stream under it is sized by the splitter below it. */
+.projects {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+}
+.projects.is-drop { box-shadow: inset 0 0 0 2px rgba(217, 119, 87, 0.5); background: rgba(217, 119, 87, 0.06); }
+.projects-head { margin-bottom: 10px; }
+.projects-title { display: flex; align-items: center; gap: 5px; }
+.projstrip { position: relative; }
+.projstrip-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  /* Room for a selected badge's ring and a focus outline, which overflow would clip. */
+  padding: 2px;
+  margin: -2px;
+}
+.projstrip-scroll::-webkit-scrollbar { display: none; }
+/* The content fades where more badges wait, whatever sits behind the sidebar
+   (a mask, not a painted gradient — the card may be translucent). */
+.projstrip.can-right .projstrip-scroll { mask-image: linear-gradient(90deg, #000 calc(100% - 56px), transparent calc(100% - 4px)); }
+.projstrip.can-left .projstrip-scroll { mask-image: linear-gradient(90deg, transparent 4px, #000 56px); }
+.projstrip.can-left.can-right .projstrip-scroll { mask-image: linear-gradient(90deg, transparent 4px, #000 56px, #000 calc(100% - 56px), transparent calc(100% - 4px)); }
+.projrows { display: flex; flex-direction: column; gap: 6px; width: max-content; min-width: 100%; }
+/* The gap must match GAP in ProjectStrip.tsx: packRows plans with it. */
+.projrow { display: flex; gap: 6px; }
+.projchip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  height: 26px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 100ms ease, background-color 100ms ease, border-color 100ms ease;
+}
+.projchip:hover { color: var(--text); background: var(--elev); }
+.projchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.projchip.is-selected { color: var(--text); border-color: rgba(217, 119, 87, 0.75); background: rgba(217, 119, 87, 0.12); }
+.projchip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Red only when a session there waits on you; state blue while one works. */
+.projchip-dot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; }
+.projchip-dot.is-waiting { background: var(--st-question); }
+.projchip-dot.is-running { background: var(--st-running); animation: pulse-soft 1.6s ease-in-out infinite; }
+.projstrip-empty { padding: 2px 2px 4px; font-size: 12px; line-height: 1.5; color: var(--faint); white-space: normal; }
+.projstrip-arrow {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-top: -12px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--elev);
+  box-shadow: 0 0 0 1px var(--border), 0 2px 8px rgba(0, 0, 0, 0.35);
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 100ms ease, background-color 100ms ease;
+}
+.projstrip-arrow svg { width: 15px; height: 15px; }
+.projstrip-arrow:hover { color: var(--text); background: #332f37; }
+.projstrip-arrow.is-right { right: 0; }
+.projstrip-arrow.is-left { left: 0; }
+/* The badge menu hangs under its badge (ProjectStrip measures the spot), outside the scroller that would clip it. */
+.projmenu-anchor { position: absolute; z-index: 60; width: 0; height: 0; }
+.projmenu-anchor .menu-pop { min-width: 250px; max-width: 340px; padding: 6px; }
+.projmenu-head { position: relative; z-index: 1; display: flex; align-items: flex-start; gap: 8px; padding: 5px 8px 3px; }
+.projmenu-ic { width: 16px; height: 16px; flex: 0 0 16px; margin-top: 1px; color: var(--accent-bright); }
+.projmenu-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.projmenu-name { font-size: 13px; font-weight: 650; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.projmenu-path { font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; unicode-bidi: plaintext; text-align: left; }
+.projmenu-anchor .menu-sep { margin: 6px 2px; }
+
+/* The stream: one compact line per event, newest first. */
+.stream {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding-bottom: 10px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid var(--hairline);
-  border-radius: 8px;
+  min-height: 0;
+  margin: 10px -4px 0;
+  padding: 0 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--track) transparent;
 }
-.launchnav.is-drop { box-shadow: inset 0 0 0 2px rgba(217, 119, 87, 0.5); background: rgba(217, 119, 87, 0.06); }
-.navswitch-wrap { position: relative; margin-bottom: 6px; }
-.navswitch-wrap .menu-pop { top: calc(100% + 4px); left: 0; }
-.navswitch {
-  display: flex;
+.stream::-webkit-scrollbar { width: 6px; }
+.stream::-webkit-scrollbar-thumb { background: var(--track); border-radius: 999px; }
+.stream-row {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 14px 16px auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
   width: 100%;
-  padding: 5px 8px;
+  min-height: 26px;
+  padding: 3px 6px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 13px;
-  font-weight: 650;
-  cursor: pointer;
-  transition: background-color 100ms ease;
-}
-.navswitch:hover { background: var(--elev); }
-.navswitch:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.navswitch-ic { width: 15px; height: 15px; flex: 0 0 15px; color: var(--accent-bright); }
-.navswitch-name { flex: 1 1 auto; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.navswitch-follow {
-  flex: 0 0 auto;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--faint);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-}
-/* Start-a-session is one row with two targets: the button runs the remembered
-   launch, the chevron opens the picker. They share a hover so it reads as one
-   control, and a hairline keeps the smaller target findable. */
-.navrow { background: transparent; color: var(--text); }
-.navsplit:hover .navsplit-pick { color: var(--muted); }
-/* Scoped past `.navrow`, which sets a full radius later in this file at the
-   same specificity and would otherwise round the split's inner edge. */
-.navsplit .navsplit-go { flex: 1 1 auto; min-width: 0; border-radius: 7px 0 0 7px; }
-.navsplit-pick {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  padding: 0;
-  border: 0;
-  border-left: 1px solid transparent;
-  border-radius: 0 7px 7px 0;
-  background: transparent;
-  color: var(--faint);
-  cursor: pointer;
-  transition: background-color 100ms ease, color 100ms ease;
-}
-.navsplit:hover .navsplit-pick { border-left-color: var(--hairline); }
-.navsplit .navsplit-pick:hover, .navsplit .navsplit-pick[aria-expanded='true'] { background: rgba(255, 255, 255, 0.06); color: var(--text); }
-.navsplit-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.navrow {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  padding: 5px 8px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color 100ms ease, color 100ms ease;
-}
-.navrow:hover { background: var(--elev); color: var(--text); }
-.navrow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.navrow-ic { width: 16px; height: 16px; flex: 0 0 16px; display: flex; align-items: center; justify-content: center; }
-.navrow-ic svg { width: 15px; height: 15px; }
-.navrow-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.navrow-meta { flex: 0 0 auto; color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
-.navgroup {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 5px 8px;
-  margin-top: 4px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--faint);
-  font: inherit;
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
+  font-size: 12px;
   text-align: left;
   cursor: pointer;
 }
-.navgroup:hover { background: var(--elev); color: var(--muted); }
-.navgroup-caret { width: 12px; height: 12px; flex: 0 0 12px; }
-.navgroup + .navrow { padding-left: 22px; }
-.navrule { height: 1px; margin: 7px 4px; background: var(--hairline); }
+.stream-row:hover { background: var(--elev); }
+.stream-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.stream-ic { width: 14px; height: 14px; color: var(--faint); }
+.stream-row.is-waiting .stream-ic { color: var(--st-question); }
+.stream-row.is-finished .stream-ic { color: var(--st-complete); }
+.stream-row.is-edited .stream-ic { color: var(--st-running); }
+.stream-row.is-compacted .stream-ic { color: var(--st-permission); }
+.stream-row.is-clip .stream-ic { color: var(--accent); }
+.stream-project { max-width: 140px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stream-text { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stream-when { color: var(--faint); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stream-empty { padding: 6px 2px; font-size: 12px; line-height: 1.5; color: var(--faint); }
+
+/* The stream's splitter doubles as the rule between the head and the
+   sections: a hairline with a small pill, the accent while dragged. */
+.splitter--stream { height: 15px; margin: 2px -4px 8px; }
+.splitter--stream .splitter-grip { width: 100%; height: 1px; background: var(--hairline); }
+.splitter--stream::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 4px;
+  margin: -2px 0 0 -14px;
+  border-radius: 999px;
+  background: var(--track);
+  transition: background-color 120ms ease;
+}
+.splitter--stream:hover .splitter-grip,
+.splitter--stream:focus-visible .splitter-grip,
+.splitter--stream.is-dragging .splitter-grip { height: 2px; }
+.splitter--stream:hover::after,
+.splitter--stream:focus-visible::after,
+.splitter--stream.is-dragging::after { background: var(--accent); }
+
 
 /* ---- empty grid: no panes open ---- */
 .gridempty {
@@ -671,22 +716,6 @@ kbd {
 .gridempty kbd { margin: 0 2px; }
 .gridempty-hint { max-width: 380px; line-height: 1.6; }
 
-/* ---- activity feed ---- */
-.feed { display: flex; flex-direction: column; gap: 2px; }
-.feed-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-.feed-chip { padding: 3px 9px; border: 1px solid var(--hairline); border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 11.5px; cursor: pointer; }
-.feed-chip:hover { color: var(--text); background: var(--elev); }
-.feed-chip.is-active { color: var(--text); border-color: rgba(217, 119, 87, 0.5); background: rgba(217, 119, 87, 0.12); }
-.feed-row { display: grid; grid-template-columns: 16px auto minmax(60px, 0.6fr) 1.4fr auto; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
-.feed-row:hover { background: var(--elev); }
-.feed-ic { width: 14px; height: 14px; color: var(--muted); }
-.feed-row.is-waiting .feed-ic { color: var(--st-question); }
-.feed-row.is-finished .feed-ic { color: var(--st-complete); }
-.feed-row.is-compacted .feed-ic { color: var(--st-permission); }
-.feed-row.is-clip .feed-ic { color: var(--accent); }
-.feed-project { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.feed-text { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.feed-when { color: var(--faint); font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* Text settings (push URL, minutes). */
 .sinput { width: 260px; max-width: 100%; padding: 5px 8px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 12.5px; }
 .sinput:focus { outline: none; border-color: var(--accent); }
@@ -871,19 +900,40 @@ kbd {
 .ic--running { color: var(--st-running); }
 .ic--complete { color: var(--st-complete); }
 .ic--idle { color: var(--st-idle); }
-
-.spinner { width: 13px; height: 13px; color: var(--accent); animation: spin 0.8s linear infinite; }
+/* Done: a solid dot in the state colour, popping in as the work settles. */
+.ic-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: ic-dot-in 260ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+/* Idle is the same dot, hollow and quiet. */
+.ic--idle .ic-dot { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; opacity: 0.8; animation: none; }
+/* Working: a small core with an arc orbiting it — the same footprint as the
+   dot it settles into, so nothing on the row moves when it finishes. */
+.ic-work { position: relative; width: 14px; height: 14px; }
+.ic-work::before {
+  content: '';
+  position: absolute;
+  inset: 4.5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse-soft 1.6s ease-in-out infinite;
+}
+.ic-work::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid transparent;
+  border-top-color: currentColor;
+  border-right-color: currentColor;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes ic-dot-in { from { transform: scale(0.3); opacity: 0; } to { transform: none; opacity: 1; } }
 
 .row-tokens { font-size: 12px; font-weight: 600; color: var(--faint); }
-/* Permission-mode chip — only shown for non-default modes. */
-.row-mode { font-size: 10px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; padding: 1px 6px; border-radius: 999px; border: 1px solid; }
-.mode--plan { color: var(--st-running); border-color: var(--st-running); }
-.mode--auto { color: var(--st-complete); border-color: var(--st-complete); }
-.mode--bypass { color: var(--st-question); border-color: var(--st-question); }
-.mode--other { color: var(--faint); border-color: var(--faint); }
-/* Running-subagent count. */
-.row-tasks { background: none; border: 0; padding: 1px 3px; border-radius: 4px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; color: var(--st-running); }
-.row-tasks:hover { background: var(--track); }
 .ctx { display: inline-flex; align-items: center; font-size: 13px; font-weight: 600; color: var(--muted); }
 .ctx--high { color: var(--pressure); }
 .ctx--critical { color: var(--pressure-hot); }
@@ -1153,7 +1203,7 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 @keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 .is-waiting .ic-svg { animation: pulse 1.6s ease-in-out infinite; transform-origin: center; }
 @media (prefers-reduced-motion: reduce) {
-  .spinner, .is-waiting .ic-svg, .group-dot, .ctx--hot, .update-btn.is-busy .update-ic { animation: none; }
+  .ic-work::before, .ic-work::after, .ic-dot, .is-waiting .ic-svg, .projchip-dot.is-running, .group-dot, .ctx--hot, .update-btn.is-busy .update-ic { animation: none; }
 }
 
 /* ---- settings panel ---- */
@@ -1423,6 +1473,29 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 
 /* ---- embedded terminal panes: xterm over a darker inset well ---- */
 .gpane-body--term { padding: 0; overflow: hidden; }
+/* Web pane: the <webview> fills the body edge to edge (it is DOM, so the grid,
+   zoom and the app's menus all work over it). White behind it, the way a
+   browser tab starts, so a page that paints late does not flash the card. */
+.webpane { position: relative; width: 100%; height: 100%; background: #fff; }
+.webpane webview { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.webpane-fail {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+.webpane-fail > svg { width: 28px; height: 28px; color: var(--faint); }
+.webpane-fail-text { max-width: 420px; line-height: 1.5; overflow-wrap: anywhere; }
+.webpane-fail .hotkey-btn { display: inline-flex; align-items: center; gap: 6px; }
+.webpane-fail .hotkey-btn svg { width: 13px; height: 13px; }
 .termpane {
   position: relative;
   width: 100%;
@@ -1808,74 +1881,13 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .gpane-ctxwrap { display: contents; }
 .gpane-ctxwrap .pane-context { cursor: copy; }
 
-/* Recent projects under the switcher: one click retargets the launch row.
-   Hidden when there is nothing but the current target. */
-.navrecent { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 2px 6px; }
-.navchip {
-  font: inherit;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--muted);
-  background: transparent;
-  border: 1px solid var(--hairline);
-  border-radius: 999px;
-  padding: 1px 9px;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.navchip:hover { color: var(--text); border-color: var(--accent); }
-.navchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
 /* First-run: the Agents pane offers the hooks instead of an empty sentence. */
 .empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
 .empty-note { margin-top: 10px; font-size: 12px; color: var(--faint); }
 
-/* Project switcher rows: name over path, so two folders that share a name
-   are still telling you which is which. */
-.navpick { align-items: flex-start; }
-.navpick-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
-.navpick-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.navpick-path { font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; unicode-bidi: plaintext; text-align: left; }
-.navpick .menu-check { margin-top: 2px; }
-.navswitch-wrap .menu-pop { min-width: 100%; max-width: 380px; padding: 6px; }
-
 /* The Agents section takes whatever the sidebar has left and scrolls. */
 .sideview--fill { flex: 1 1 auto; min-height: 120px; }
 .sideview--fill.is-collapsed { flex: 0 0 auto; min-height: 0; }
-
-/* Switcher popover rhythm: labels sit tight over their group, rows keep one
-   height, and the path line under a project name stays quiet. */
-.navswitch-wrap .menu-label { height: 22px; margin-top: 2px; font-size: 10.5px; letter-spacing: 0.06em; }
-.navswitch-wrap .menu-label:first-child { margin-top: 0; }
-.navswitch-wrap .menu-sep { margin: 6px 2px; }
-.navswitch-wrap .navpick { height: auto; padding: 5px 8px; }
-.navswitch-wrap .navpick-name { line-height: 16px; }
-.navswitch-wrap .navpick-path { line-height: 13px; margin-top: 1px; }
-
-/* The activity row under the switcher: four flat icons, the folder's usual
-   launch on a square (the editor activity-bar shape). */
-.navicons { display: flex; align-items: center; gap: 4px; padding: 2px 2px 6px; }
-.navicons-gap { flex: 1 1 auto; }
-.naviconbtn {
-  width: 30px;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-.naviconbtn svg { width: 17px; height: 17px; }
-.naviconbtn:hover { background: var(--elev); color: var(--text); }
-.naviconbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.naviconbtn.is-usual { background: rgba(255, 255, 255, 0.07); color: var(--text); box-shadow: inset 0 0 0 1px var(--hairline); }
 
 /* Settings: a three-way segment, reusing the compact button. */
 .sseg { display: inline-flex; gap: 4px; }

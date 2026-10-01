@@ -115,7 +115,7 @@ export function Pane({ kind, title, plainTitle, onClose, context, path, onCopyPa
           </button>
         </span>
       </div>
-      <div className={`gpane-body ${kind === 'terminal' ? 'gpane-body--term' : ''}`}>{children}</div>
+      <div className={`gpane-body ${kind === 'terminal' || kind === 'web' ? 'gpane-body--term' : ''}`}>{children}</div>
     </section>
   )
 }

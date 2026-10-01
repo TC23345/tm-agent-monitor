@@ -67,6 +67,8 @@ test('commandGroup files ids under the browse headings', () => {
   assert.equal(commandGroup('cmd:run:npm run dev'), 'Run')
   assert.equal(commandGroup('cmd:snippet:/compact'), 'Snippets')
   assert.equal(commandGroup('cmd:cursor'), 'Project')
+  assert.equal(commandGroup('cmd:web:https://taylormade-content-production.up.railway.app/'), 'Project')
+  assert.equal(commandGroup('cmd:web-ext:https://taylormade-content-production.up.railway.app/'), 'Project')
   assert.equal(commandGroup('cmd:zoom:pane-1'), 'Panes')
   assert.equal(commandGroup('cmd:view:limits'), 'Panes')
   assert.equal(commandGroup('cmd:cols-2'), 'Layout')

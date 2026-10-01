@@ -1,5 +1,6 @@
 import { DEFAULTS, type Agent, type AgentEventV1, type AppSettingsPatch, type HookReport, type ProviderId, type ToolKind, type ActivityEvent } from '../shared/types.js'
 import { estimateCostUsd } from '../shared/pricing.mjs'
+import { foldEdit } from '../shared/activityFeed.mjs'
 import { isPickerFavoriteModifier, normalizeAccelerator, normalizeFavoriteHotkeys } from '../shared/hotkeys.mjs'
 import { sanitizePickerSize } from '../shared/pickerPlace.mjs'
 
@@ -395,6 +396,12 @@ export class AgentStore {
         setState('running')
         next.tool = toolKind(event.toolName)
         next.activity = activityFor(next.tool, event.activity)
+        // A finished edit is project activity: it folds into the session's
+        // `edited` row (a subagent's edits count for its root session).
+        if (event.kind === 'tool_finished' && next.tool === 'edit') {
+          foldEdit(this.events, { at: event.timestamp, agentId: rootId, provider: event.provider, project, cwd: next.cwd, activity: event.activity })
+          if (this.events.length > MAX_EVENTS) this.events.splice(0, this.events.length - MAX_EVENTS)
+        }
         next.waitReason = undefined
         next.question = undefined
         break

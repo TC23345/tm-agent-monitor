@@ -1,42 +1,30 @@
 import type { Agent } from '@shared/types'
 import type { MenuState } from './AgentContextMenu'
-import { AgentIcon, RunningSpinner, ArrowUp } from './Icons'
+import { AgentIcon, ArrowUp } from './Icons'
 import { ProviderBadge } from './ProviderBadge'
 import { shortDuration, contextTone, compactNumber, modelShort, money } from './format'
 import { useNow } from './useNow'
 import { useSessionNames } from './sessionNames'
 import { tid } from './testid'
 
-/** Short chip label + class for a non-default permission mode. */
-function modeChip(mode?: string): { label: string; cls: string } | null {
-  if (!mode || mode === 'default') return null
-  if (/plan/i.test(mode)) return { label: 'plan', cls: 'mode--plan' }
-  if (/acceptedits/i.test(mode)) return { label: 'auto', cls: 'mode--auto' }
-  if (/bypass/i.test(mode)) return { label: 'bypass', cls: 'mode--bypass' }
-  return { label: mode, cls: 'mode--other' }
-}
-
-/** One session within a project group. Project name lives in the group header. */
+/**
+ * One session within a project group. Project name lives in the group header;
+ * subagents sit nested under their session. The permission mode (auto,
+ * bypass, plan) is not a chip on the row since 0.4.46 — it is in the tooltip.
+ */
 export function AgentRow({
   agent,
   onRowMenu,
-  nested = false,
-  childCount = 0,
-  childrenExpanded = false,
-  onToggleChildren
+  nested = false
 }: {
   agent: Agent
   onRowMenu: (menu: MenuState) => void
   nested?: boolean
-  childCount?: number
-  childrenExpanded?: boolean
-  onToggleChildren?: () => void
 }) {
   const now = useNow()
   // What a person called this session, if anything. The activity text says what
   // it is doing; only a name says what it is for.
   const name = useSessionNames()[agent.id]
-  const running = agent.state === 'running'
   const alert = agent.state === 'waiting' && agent.waitReason === 'question'
   const tone = contextTone(agent.contextPct)
   const text =
@@ -47,11 +35,10 @@ export function AgentRow({
 
   const where = agent.cwd ?? agent.project
   const model = modelShort(agent.model)
-  const mode = modeChip(agent.permissionMode)
   const info = [
     model,
     agent.costUsd !== undefined && agent.costUsd > 0 ? `~${money(agent.costUsd)} so far` : undefined,
-    mode ? `${agent.permissionMode} mode` : undefined
+    agent.permissionMode && agent.permissionMode !== 'default' ? `${agent.permissionMode} mode` : undefined
   ].filter(Boolean).join(' · ')
   const rowTitle = `${where}${info ? `\n${info}` : ''}\nClick to focus its terminal · right-click for actions`
   const ctxTitle = `Context window used by this session${agent.contextRising ? ' — and climbing' : ''}`
@@ -85,11 +72,6 @@ export function AgentRow({
         <ProviderBadge provider={agent.provider} />
         {name && <span className="row-name" title={name}>{name}</span>}
         <span className={`row-text ${name ? 'row-text--dim' : ''}`}>{text}</span>
-        {mode && (
-          <span className={`row-mode ${mode.cls}`} title={`Permission mode: ${agent.permissionMode}`}>
-            {mode.label}
-          </span>
-        )}
         {agent.tokensOut !== undefined && agent.tokensOut > 0 && (
           <span className="row-tokens" title={`Output tokens this session has produced so far${agent.costUsd ? ` (~${money(agent.costUsd)})` : ''}`}>
             {compactNumber(agent.tokensOut)}
@@ -102,20 +84,9 @@ export function AgentRow({
               {Math.round(agent.contextPct)}%
             </span>
           )}
-          {running && <RunningSpinner />}
           <span className="dur" title="Time in the current state">{shortDuration(agent.since, now)}</span>
         </span>
       </button>
-      {(childCount > 0 || (agent.activeTasks ?? 0) > 0) && (
-        <button
-          className="row-tasks"
-          title={`${childCount || agent.activeTasks} subagent${(childCount || agent.activeTasks) === 1 ? '' : 's'} · click to ${childrenExpanded ? 'hide' : 'show'}`}
-          onClick={onToggleChildren}
-          aria-expanded={childrenExpanded}
-        >
-          +{childCount || agent.activeTasks}
-        </button>
-      )}
     </div>
   )
 }

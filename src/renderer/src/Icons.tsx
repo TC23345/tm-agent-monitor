@@ -1,16 +1,6 @@
 import {
-  Terminal,
-  FilePen,
-  FileText,
-  Search,
-  Globe,
-  Bot,
-  Sparkles,
   MessageSquareWarning,
   ShieldAlert,
-  CircleCheck,
-  Moon,
-  Loader2,
   ChevronDown,
   ChevronRight,
   ArrowUp,
@@ -18,18 +8,6 @@ import {
   type LucideIcon
 } from 'lucide-react'
 import type { Agent, ToolKind } from '@shared/types'
-
-function toolIcon(tool: ToolKind | undefined): LucideIcon {
-  switch (tool) {
-    case 'bash': return Terminal
-    case 'edit': return FilePen
-    case 'read': return FileText
-    case 'search': return Search
-    case 'web': return Globe
-    case 'task': return Bot
-    default: return Sparkles
-  }
-}
 
 /** Short label describing an agent's state (used for hover tooltips). */
 export function stateLabel(agent: Agent): string {
@@ -45,42 +23,44 @@ export function stateLabel(agent: Agent): string {
   }
 }
 
-/** State icon + color class for an agent (Lucide, crisp single-stroke). */
-export function AgentIcon({ agent }: { agent: Agent }) {
-  let Icon: LucideIcon
-  let cls: string
-  switch (agent.state) {
-    case 'waiting':
-      if (agent.waitReason === 'question') {
-        Icon = MessageSquareWarning
-        cls = 'ic ic--question'
-      } else {
-        Icon = ShieldAlert
-        cls = 'ic ic--permission'
-      }
-      break
-    case 'complete':
-      Icon = CircleCheck
-      cls = 'ic ic--complete'
-      break
-    case 'idle':
-      Icon = Moon
-      cls = 'ic ic--idle'
-      break
-    default:
-      Icon = toolIcon(agent.tool)
-      cls = 'ic ic--running'
+/** What a running session is doing, for the working indicator's tooltip. */
+function toolLabel(tool: ToolKind | undefined): string {
+  switch (tool) {
+    case 'bash': return 'running a command'
+    case 'edit': return 'editing'
+    case 'read': return 'reading'
+    case 'search': return 'searching'
+    case 'web': return 'on the web'
+    case 'task': return 'running a subagent'
+    default: return 'working'
   }
-  return (
-    <span className={cls} title={stateLabel(agent)}>
-      <Icon className="ic-svg" strokeWidth={2} />
-    </span>
-  )
 }
 
-/** Small spinning indicator for a live (running) session. */
-export function RunningSpinner() {
-  return <Loader2 className="spinner" strokeWidth={2.5} />
+/**
+ * State mark for an agent. Waiting keeps its icons (red means *you*, amber a
+ * permission), because those ask for something. The rest are dots: a
+ * working session is a small orbit — a dot with an arc turning around it —
+ * that settles into a solid green dot when it is done, and a quiet hollow dot
+ * when idle. Same slot, same size, so a row never shifts as it changes state.
+ */
+export function AgentIcon({ agent }: { agent: Agent }) {
+  switch (agent.state) {
+    case 'waiting': {
+      const question = agent.waitReason === 'question'
+      const Icon: LucideIcon = question ? MessageSquareWarning : ShieldAlert
+      return (
+        <span className={`ic ${question ? 'ic--question' : 'ic--permission'}`} title={stateLabel(agent)}>
+          <Icon className="ic-svg" strokeWidth={2} />
+        </span>
+      )
+    }
+    case 'complete':
+      return <span className="ic ic--complete" title={stateLabel(agent)}><span className="ic-dot" /></span>
+    case 'idle':
+      return <span className="ic ic--idle" title={stateLabel(agent)}><span className="ic-dot" /></span>
+    default:
+      return <span className="ic ic--running" title={`Running — ${toolLabel(agent.tool)}`}><span className="ic-work" /></span>
+  }
 }
 
 export { ChevronDown, ChevronRight, ArrowUp, Settings }

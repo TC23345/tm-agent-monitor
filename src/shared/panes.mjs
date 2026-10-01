@@ -6,6 +6,8 @@
  * `panes.ts` only reads/writes localStorage and hands the JSON here.
  */
 
+import { sanitizeWebConfig } from './webPane.mjs'
+
 function isRecord(v) {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
@@ -41,6 +43,11 @@ export function sanitizePanes(raw, { kinds, isUnique, maxPanes, launches = ['she
           resumeId: typeof t.resumeId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(t.resumeId) ? t.resumeId : undefined
         }
       })
+    } else if (kind === 'web') {
+      // A site the pane can no longer load (not http/https) drops, like an unknown kind.
+      const web = sanitizeWebConfig(item.web)
+      if (!web) continue
+      out.push({ id, kind, web })
     } else {
       out.push({ id, kind })
     }

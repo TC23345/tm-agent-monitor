@@ -30,6 +30,7 @@ import { mockSnapshot, mockHistory, mockUsageInsights, mockWindows, mockEvents }
 import { parseWorkspaceArgs } from '../shared/workspaceCommand.mjs'
 import { focusHwnd, focusByPid, listDesktopWindows, clipboardOwner, foregroundWindowInfo, sendPasteKeys, available as winAvailable } from '../native/win32.mjs'
 import { startClipboardWatch, type ClipboardWatch } from './clipboardWatch.js'
+import { installWebPaneGuards } from './webPanes.js'
 import { clipboardHasImage, makeThumbnail, protectText, protectionAvailable, readClipboardSnapshot, readClipboardText, unprotectText, writeClipboardImage, writeClipboardText } from './clipboardIo.js'
 import { ClipStore, type ClipSettingsPatch } from './clipStoreCore.mjs'
 import { cleanNote, clipTitle, describeSource, domainBlocked, filterClips, hotkeyProblem, orderFavorites, parseSnippetNote, shortcutProblem, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, MAX_NOTE, MAX_TITLE, type ClipSource } from '../shared/clips.mjs'
@@ -428,7 +429,10 @@ function createWindow(): void {
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       sandbox: true,
-      contextIsolation: true
+      contextIsolation: true,
+      // Web panes (WebPane.tsx). Every guest is checked and locked down at
+      // attach time by installWebPaneGuards (webPanes.ts); no other window has it.
+      webviewTag: true
     }
   })
 
@@ -2945,6 +2949,8 @@ if (!gotLock) {
     // Loaded after the first registerAllHotkeys (below): the clip keybinds join once the list is in memory.
     const clipsLoaded = store.load().then(() => { startClipboardCapture(); clipHotkeysChanged() })
 
+    // Before the window exists, so its first <webview> is already guarded.
+    installWebPaneGuards(() => win)
     createWindow()
     createPicker({
       preload: join(__dirname, '../preload/picker.cjs'),

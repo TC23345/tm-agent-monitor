@@ -18,6 +18,18 @@ Layout customization, on top of the 0.3.0 workspace.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
 
+## 0.4.47 — 2026-09-30
+
+- **The Fable weekly limit shows again.** Limits hid any model-scoped weekly limit the usage endpoint marked inactive. The endpoint now marks the Fable limit inactive even while you use Fable (13% on 2026-09-30), and it marks the 5-hour session limit the same way, so "inactive" doesn't mean "doesn't apply". A model's weekly bar now shows once it has any usage; one you haven't touched this week (inactive at 0%) stays hidden.
+
+## 0.4.46 — 2026-09-29
+
+- **Activity moved to the top of the sidebar.** The head of the sidebar now shows every project folder you worked in over the last four hours, newest first, as badges in two rows. A folder counts when a session there did anything, or when you opened a terminal in it. When there are more than two rows can hold, a → arrow appears and **Shift+scroll** slides the badges sideways. A red dot on a badge means a session there is waiting on you. A blue dot means one is working.
+- **A badge opens that project's menu.** Click a badge and it becomes the selected project. Its menu offers only *New Claude Code*, *New Codex* and *New terminal* for that folder, with the one you usually start checked; Shift-click opens a separate window. The old folder switcher, the recent chips and the icon row are gone. *New project* is the folder icon in the Activity header. Under the starts, **TaylorMade Content** opens the content production app in your browser (also in the palette as *Open TaylorMade Content*).
+- **An activity stream under the badges.** It lists questions, permission requests, finished turns, session starts and ends, compactions and now **file edits**. A burst of edits is one row, such as *edited App.tsx, styles.css +2 more*. Drag the handle under it to resize it, drag it up to fold it away, and double-click the handle to reset it. The Activity pane is gone from the grid, and User → Activity (or `tm activity`) now opens the stream.
+- **Agent rows lost their mode chips and the `+1`.** The AUTO, BYPASS and PLAN chips are gone; the mode is still in the row tooltip. Subagents always show under their session.
+- **Working and done are dots.** A running session shows a small arc circling a dot. When it finishes, that settles into a solid green dot, replacing the green check. Idle is a hollow dot.
+
 ## 0.4.13 — 2026-09-21
 
 - **The red flash over panes is gone.** When a session started waiting, a red burst spread from its pane's header, and hovering a session in the sidebar drew a beam to its pane. Both were one GPU overlay across the whole workspace, and both are removed. A waiting session is still flagged by the tray badge, the taskbar count and flash, the pane's bell badge, and the waiting chip in the title bar.
