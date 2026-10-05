@@ -247,9 +247,15 @@ export function weekdayRows(profile: WeekdayRow[], metric: HistoryMetric): Break
   }))
 }
 
-const DAY_LABELS = ['', 'Mon', '', 'Wed', '', 'Fri', '']
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-/** A year of days at most, one square each: where the busy weeks and the gaps are. */
+/**
+ * A year of days at most, one cell each: where the busy weeks and the gaps
+ * are. The week columns share the pane's width, so a short history is wide
+ * cells and a long one narrow ones; only when a year cannot fit at the minimum
+ * column width does the grid scroll sideways. Every weekday has its own
+ * labelled row.
+ */
 export function CalendarHeat({ grid, metric }: { grid: CalendarGrid; metric: HistoryMetric }) {
   const scroller = useRef<HTMLDivElement>(null)
   const [over, setOver] = useState<string | null>(null)
@@ -268,25 +274,29 @@ export function CalendarHeat({ grid, metric }: { grid: CalendarGrid; metric: His
     <div className="hist-mix">
       <div className="hist-mix-head">
         <span>Calendar</span>
-        <span className="hist-readout">{over ?? 'each square is a day'}</span>
+        <span className="hist-readout">{over ?? 'each cell is a day'}</span>
       </div>
       <div className="hist-cal">
-        <div className="hist-cal-days" aria-hidden="true">{DAY_LABELS.map((d, i) => <span key={i}>{d}</span>)}</div>
+        <div className="hist-cal-days" aria-hidden="true">{DAY_LABELS.map((d) => <span key={d}>{d}</span>)}</div>
         <div className="hist-cal-scroll" ref={scroller}>
-          <div className="hist-cal-months" style={{ gridTemplateColumns: `repeat(${grid.weeks.length}, var(--cal-cell))` }} aria-hidden="true">
-            {months.map((m) => <span key={m.week} style={{ gridColumn: m.week + 1 }}>{m.label}</span>)}
-          </div>
-          <div className="hist-cal-grid" role="img" aria-label={`Daily ${metric === 'tokens' ? 'tokens out' : 'estimated value'} since ${grid.since}`} onPointerLeave={() => setOver(null)}>
-            {grid.weeks.map((week, w) => week.map((cell, d) => cell
-              ? (
-                <span
-                  key={cell.date}
-                  className={`hist-cell lv-${heatLevel(cell[metric], scale)}`}
-                  title={`${cell.title}: ${compactNumber(cell.tokens)} tokens · ~${usd(cell.value)}`}
-                  onPointerEnter={() => setOver(`${cell.title} · ${compactNumber(cell.tokens)} · ~${usd(cell.value)}`)}
-                />
-              )
-              : <span key={`${w}:${d}`} className="hist-cell is-out" />))}
+          {/* One grid: the month names are its first row, so they track the columns at any width. */}
+          <div
+            className="hist-cal-grid"
+            style={{ gridTemplateColumns: `repeat(${grid.weeks.length}, minmax(var(--cal-min), 1fr))` }}
+            role="img"
+            aria-label={`Daily ${metric === 'tokens' ? 'tokens out' : 'estimated value'} since ${grid.since}`}
+            onPointerLeave={() => setOver(null)}
+          >
+            {months.map((m) => <span key={`m${m.week}`} className="hist-cal-month" style={{ gridColumn: m.week + 1 }} aria-hidden="true">{m.label}</span>)}
+            {grid.weeks.map((week, w) => week.map((cell, d) => cell && (
+              <span
+                key={cell.date}
+                className={`hist-cell lv-${heatLevel(cell[metric], scale)}`}
+                style={{ gridColumn: w + 1, gridRow: d + 2 }}
+                title={`${cell.title}: ${compactNumber(cell.tokens)} tokens · ~${usd(cell.value)}`}
+                onPointerEnter={() => setOver(`${cell.title} · ${compactNumber(cell.tokens)} · ~${usd(cell.value)}`)}
+              />
+            )))}
           </div>
         </div>
       </div>

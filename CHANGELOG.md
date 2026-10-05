@@ -18,6 +18,10 @@ Layout customization, on top of the 0.3.0 workspace.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
 
+## 0.4.53 — 2026-10-05
+
+- **The History calendar fills the pane.** Its week columns now share the full width instead of sitting in a small block at the left, the rows are taller, and every weekday — Sun through Sat — has its own label. A full year in a narrow pane still scrolls sideways rather than squeezing the columns to slivers.
+
 ## 0.4.52 — 2026-10-05
 
 - **History has a 7D range.** The filter is now 1D · 3D · 7D · 30D · ALL. 7D is the last seven days by day, each bar named for its weekday, with the tiles and the running total compared against the seven days before.

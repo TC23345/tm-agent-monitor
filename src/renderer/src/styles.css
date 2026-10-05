@@ -835,21 +835,24 @@ kbd {
 .hist-mix-row.is-short .hist-mix-num { text-align: right; }
 .hist-mix-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
 
-/* Calendar: one square a day, a single hue stepping light to full. */
-.hist-cal { --cal-cell: 11px; display: flex; gap: 6px; }
-.hist-cal-days { flex: 0 0 auto; display: grid; grid-template-rows: repeat(7, var(--cal-cell)); gap: 2px; margin-top: 16px; font-size: 9.5px; line-height: var(--cal-cell); color: var(--faint); }
+/* Calendar: one cell a day, a single hue stepping light to full. The week
+   columns share the pane's width — never narrower than --cal-min, past which
+   the grid scrolls sideways — and a row is tall enough to carry its weekday's
+   name. The month names are the grid's own first row, so they follow the
+   columns at any width. */
+.hist-cal { --cal-row: 18px; --cal-gap: 3px; --cal-min: 9px; --cal-head: 16px; display: flex; gap: 8px; }
+.hist-cal-days { flex: 0 0 auto; display: grid; grid-template-rows: repeat(7, var(--cal-row)); gap: var(--cal-gap); margin-top: calc(var(--cal-head) + var(--cal-gap)); font-size: 10.5px; line-height: var(--cal-row); color: var(--faint); }
 .hist-cal-scroll { flex: 1 1 auto; min-width: 0; overflow-x: auto; padding-bottom: 4px; }
-.hist-cal-months { display: grid; gap: 2px; width: max-content; height: 14px; font-size: 10px; line-height: 12px; color: var(--faint); }
-.hist-cal-months span { width: 0; white-space: nowrap; }
-.hist-cal-grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, var(--cal-cell)); grid-auto-columns: var(--cal-cell); gap: 2px; width: max-content; }
-.hist-cell { display: block; width: var(--cal-cell); height: var(--cal-cell); border-radius: 2px; background: var(--track); }
-.hist-cell.is-out { background: transparent; }
+.hist-cal-grid { display: grid; grid-template-rows: var(--cal-head) repeat(7, var(--cal-row)); gap: var(--cal-gap); }
+.hist-cal-month { grid-row: 1; width: 0; font-size: 10.5px; line-height: var(--cal-head); color: var(--faint); white-space: nowrap; }
+.hist-cell { display: block; border-radius: 3px; background: var(--track); }
 .hist-cell.lv-1 { background: rgba(217, 119, 87, 0.3); }
 .hist-cell.lv-2 { background: rgba(217, 119, 87, 0.52); }
 .hist-cell.lv-3 { background: rgba(217, 119, 87, 0.76); }
 .hist-cell.lv-4 { background: var(--accent); }
-.hist-cal-grid .hist-cell:not(.is-out):hover { outline: 1px solid var(--text); }
-.hist-cal-scale { --cal-cell: 9px; display: flex; align-items: center; justify-content: flex-end; gap: 3px; margin-top: 6px; font-size: 10px; color: var(--faint); }
+.hist-cal-grid .hist-cell:hover { outline: 1px solid var(--text); outline-offset: -1px; }
+.hist-cal-scale { display: flex; align-items: center; justify-content: flex-end; gap: 3px; margin-top: 6px; font-size: 10px; color: var(--faint); }
+.hist-cal-scale .hist-cell { width: 11px; height: 11px; border-radius: 2px; }
 .hist-cal-scale span:first-child { margin-right: 3px; }
 .hist-cal-scale span:last-child { margin-left: 3px; }
 .hist-mix-track { height: 6px; border-radius: 999px; background: var(--track); overflow: hidden; }
