@@ -291,7 +291,7 @@ export async function scanCodexUsage({
       addTokens(totals, event.tokens)
       let day = days.get(event.date)
       if (!day) {
-        day = { date: event.date, tokens: zeroTokens(), byProject: new Map(), byModel: new Map(), byProjectModel: new Map() }
+        day = { date: event.date, tokens: zeroTokens(), byProject: new Map(), byModel: new Map(), byProjectModel: new Map(), byHourModel: new Map() }
         days.set(event.date, day)
       }
       addTokens(day.tokens, event.tokens)
@@ -305,6 +305,13 @@ export async function scanCodexUsage({
       const pm = day.byProjectModel.get(pmKey) || zeroTokens()
       addTokens(pm, event.tokens)
       day.byProjectModel.set(pmKey, pm)
+      // Local hour × model, so a caller can price an hour with the model that spent it.
+      if (Number.isFinite(eventMs)) {
+        const hmKey = `${new Date(eventMs).getHours()}\0${event.model}`
+        const hm = day.byHourModel.get(hmKey) || zeroTokens()
+        addTokens(hm, event.tokens)
+        day.byHourModel.set(hmKey, hm)
+      }
     }
   }
 
@@ -318,7 +325,11 @@ export async function scanCodexUsage({
     byProjectModel: [...day.byProjectModel].map(([key, tokens]) => {
       const [project, model] = key.split('\0')
       return { project, model, ...tokens }
-    }).sort((a, b) => b.totalTokens - a.totalTokens)
+    }).sort((a, b) => b.totalTokens - a.totalTokens),
+    byHourModel: [...day.byHourModel].map(([key, tokens]) => {
+      const [hour, model] = key.split('\0')
+      return { hour: Number(hour), model, ...tokens }
+    }).sort((a, b) => a.hour - b.hour)
   }))
 
   return {

@@ -18,6 +18,16 @@ Layout customization, on top of the 0.3.0 workspace.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
 
+## 0.4.51 — 2026-10-05
+
+- **History has a range filter: 1D · 3D · 30D · ALL.** One control at the top of the pane scopes everything under it, and the choice is remembered. 1D is today by hour and 3D is the last three days by hour (new: the local ledgers now keep each day's tokens and value by hour, for Claude Code and Codex); 30D is by day, as before; ALL goes back to the first day this machine recorded and switches from days to weeks to months as the history grows. A **Tokens / Value** switch picks what the charts measure.
+- **Headline tiles with a comparison.** Tokens out, estimated value, API spend (when there is any), the peak hour / day / week, and how many hours or days were active. Tokens and value show ▲ / ▼ against the period before — and 1D compares against yesterday *up to the same hour*, so a morning never looks quiet next to a whole day.
+- **The bar chart follows the range.** Hours not reached yet stay blank and the current hour or day is marked; there are labelled gridlines, an axis that names hours, days or dates as fits, and a readout that shows the bar under the pointer — the legend switches to that bar's Claude Code / Codex split.
+- **Running total.** A new chart under the bars: this period's cumulative total against the period before on the same axis, so you can see whether you are ahead of or behind yesterday (or the previous 3 or 30 days) at this point. Hovering either chart marks the same hour or day on both.
+- **Projects.** The per-project breakdown History always stored and never drew, next to Models — both now for the selected range instead of fixed *today* and *30 days* lists.
+- **Typical week** (30D and ALL): the average day of each weekday. **Calendar** (ALL): one square per day for up to a year.
+- The mock data is now five months long with hourly detail, so every range has something to show in `debug:app`.
+
 ## 0.4.50 — 2026-10-01
 
 - **Copy path is one click on a folder.** A folder's right-click menu is now New note, New from template, Rename, Copy path and Delete folder. *Copy path* no longer hides under a *Folder* flyout. *New folder* (it's in the toolbar), *Move to* (drag the folder instead), *Reveal in File Explorer* and the F2 label are gone from that menu; F2 still renames.

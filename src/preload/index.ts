@@ -96,7 +96,9 @@ const api = {
   edgeDrag: (edge: 'left' | 'right', delta: number) => ipcRenderer.send('window:edge-drag', edge, delta),
   /** A real minimize: the workspace stays in the taskbar and Alt+Tab; the hotkey restores it. */
   minimize: () => ipcRenderer.send('window:minimize'),
-  getHistory: (): Promise<DailyUsageDay[]> => ipcRenderer.invoke('history:recent'),
+  /** 'recent' covers the 1D / 3D / 30D ranges and the period before each; 'all' is the whole history. */
+  getHistory: (scope: 'recent' | 'all' = 'recent'): Promise<DailyUsageDay[]> =>
+    ipcRenderer.invoke('history:recent', scope === 'all' ? 'all' : 'recent'),
   /** Per-folder facts: `.tm.json` + package.json scripts, and git branch/dirty state. */
   getProjectCommands: (cwd: string): Promise<ProjectCommand[]> => ipcRenderer.invoke('project:commands', cwd),
   getGitStatus: (cwd: string): Promise<GitStatus | null> => ipcRenderer.invoke('git:status', cwd),

@@ -108,7 +108,11 @@ export class UsageHistorySync {
       try {
         const col = await this.connect()
         if (!col) return []
-        const docs = await col.find({ machineId: UsageHistorySync.machineId() }).sort({ date: -1 }).limit(limit).toArray()
+        // Nothing reads a provider's own project list back (the day's merged
+        // one is what History draws), and over a long range it is most of the payload.
+        const docs = await col.find({ machineId: UsageHistorySync.machineId() })
+          .project({ 'byProvider.claude.byProject': 0, 'byProvider.codex.byProject': 0 })
+          .sort({ date: -1 }).limit(limit).toArray()
         this.state = 'ok'
         return docs.map((d) => normalizeDailyDocument(d as Record<string, unknown>)).reverse()
       } catch (error) {

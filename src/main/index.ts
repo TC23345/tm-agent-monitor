@@ -27,6 +27,7 @@ import { readCodexAuth, fetchCodexWindow } from './codexSubscriptionUsage.js'
 import type { scanCodexUsage, CodexRateLimits } from './codexUsage.mjs'
 import { PendingCalls, WORKER_TIMEOUT_MS, type WorkerKind } from '../shared/usageWorkerProtocol.mjs'
 import { mockSnapshot, mockHistory, mockUsageInsights, mockWindows, mockEvents } from './mock.js'
+import { HISTORY_MAX_DAYS, HISTORY_RECENT_DAYS } from '../shared/history.mjs'
 import { parseWorkspaceArgs } from '../shared/workspaceCommand.mjs'
 import { focusHwnd, focusByPid, listDesktopWindows, clipboardOwner, foregroundWindowInfo, sendPasteKeys, available as winAvailable } from '../native/win32.mjs'
 import { startClipboardWatch, type ClipboardWatch } from './clipboardWatch.js'
@@ -1150,7 +1151,7 @@ function liveHistoryDay(date: string, previous?: DailyUsageDay): DailyUsageDay |
   const claudeDay = localUsage.dayTotals(date)
   const claude = claudeDay ? {
     tokensOut: claudeDay.tokensOut, costUsd: claudeDay.costUsd, valueComplete: claudeDay.valueComplete,
-    byProject: claudeDay.byProject, byModel: claudeDay.byModel
+    byProject: claudeDay.byProject, byModel: claudeDay.byModel, byHour: claudeDay.byHour
   } : undefined
   const codex = codexDays.get(date)
   if (!claude && !codex) return undefined
@@ -1626,7 +1627,13 @@ function codexDayTotals(day: CodexScan['byDay'][number]): ProviderUsageTotals {
       valueComplete: complete
     }
   })
-  return { tokensOut: day.outputTokens, costUsd, valueComplete, byProject, byModel }
+  const byHour = { tokensOut: new Array<number>(24).fill(0), costUsd: new Array<number>(24).fill(0) }
+  for (const bucket of day.byHourModel) {
+    if (!Number.isInteger(bucket.hour) || bucket.hour < 0 || bucket.hour > 23) continue
+    byHour.tokensOut[bucket.hour] += bucket.outputTokens
+    byHour.costUsd[bucket.hour] += codexTokensCost(bucket, bucket.model) ?? 0
+  }
+  return { tokensOut: day.outputTokens, costUsd, valueComplete, byProject, byModel, byHour }
 }
 
 async function refreshCodexUsage(): Promise<void> {
@@ -2166,11 +2173,16 @@ function registerIpc(): void {
       })
     })
   })
-  ipcMain.handle('history:recent', async () => {
-    if (mockMode) return mockHistory()
+  // `scope` is the History pane's range filter as main sees it: 'recent' is
+  // enough for 1D / 3D / 30D and the period before each, 'all' is everything
+  // this machine has written (bounded). Anything else reads as 'recent'.
+  ipcMain.handle('history:recent', async (_e, scope: unknown) => {
+    const limit = scope === 'all' ? HISTORY_MAX_DAYS : HISTORY_RECENT_DAYS
+    if (mockMode) return mockHistory().slice(-limit)
     // Mongo history first, then overlay the locally-retained days — LocalUsage
-    // is 30s fresh vs the 5-min flush cadence, so today reads live.
-    const byDate = new Map((await history.recentDays(30)).map((d) => [d.date, d]))
+    // is 30s fresh vs the 5-min flush cadence, so today reads live, and only
+    // the live days carry the hourly split.
+    const byDate = new Map((await history.recentDays(limit)).map((d) => [d.date, d]))
     const liveDates = new Set([...localUsage.retainedDays(), ...codexDays.keys()])
     for (const day of liveDates) {
       const live = liveHistoryDay(day, byDate.get(day))

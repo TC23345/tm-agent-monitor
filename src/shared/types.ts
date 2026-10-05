@@ -110,12 +110,20 @@ export interface ProjectUsage {
   valueComplete?: boolean
 }
 
+/** One day by local hour, 24 entries each. Only days the local ledgers still retain carry it. */
+export interface HourlyUsage {
+  tokensOut: number[]
+  costUsd: number[]
+}
+
 export interface ProviderUsageTotals {
   tokensOut: number
   costUsd: number
   valueComplete?: boolean
   byProject?: ProjectUsage[]
   byModel?: { model: string; tokensOut: number; costUsd: number; valueComplete?: boolean }[]
+  /** Live days only — history documents never store it. */
+  byHour?: HourlyUsage
 }
 
 export interface DailyUsageDay extends ProviderUsageTotals {

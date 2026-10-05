@@ -61,6 +61,8 @@ export function scanCodexUsage(options?: {
     byProject: Array<CodexTokenTotals & { project: string }>
     byModel: Array<CodexTokenTotals & { model: string }>
     byProjectModel: Array<CodexTokenTotals & { project: string; model: string }>
+    /** Local hour (0–23) × model, for the days' hourly view. */
+    byHourModel: Array<CodexTokenTotals & { hour: number; model: string }>
   }>
   rateLimits?: CodexRateLimits
   filesScanned: number

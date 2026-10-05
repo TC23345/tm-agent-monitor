@@ -173,3 +173,23 @@ test('LocalUsageView answers from a snapshot exactly as the ledger does', async 
   view.apply({ garbage: true })
   assert.equal(view.todayTokensOut(), ledger.todayTokensOut(), 'a malformed snapshot is ignored')
 })
+
+test('a day carries its tokens and value by local hour', async (t) => {
+  const fixture = await transcriptFixture(t)
+  await writeFile(fixture.file, [
+    assistant('nine', 40, 'claude-opus-4', NOW - 3 * 3_600_000),
+    assistant('noon-a', 100, 'claude-opus-4', NOW),
+    assistant('noon-b', 25, 'claude-opus-4', NOW + 60_000),
+    assistant('yesterday', 7, 'claude-opus-4', NOW - 24 * 3_600_000)
+  ].join('\n'))
+  const usage = new LocalUsage({ projectsDir: fixture.root, now: () => NOW + 60_000 })
+  await usage.refresh()
+
+  const today = usage.dayTotals(TODAY)
+  assert.equal(today.byHour.tokensOut.length, 24)
+  assert.equal(today.byHour.tokensOut[9], 40)
+  assert.equal(today.byHour.tokensOut[12], 125)
+  assert.equal(today.byHour.tokensOut.reduce((sum, n) => sum + n, 0), today.tokensOut)
+  assert.equal(today.byHour.costUsd.reduce((sum, n) => sum + n, 0).toFixed(6), today.costUsd.toFixed(6))
+  assert.equal(usage.dayTotals(localDay(NOW - 24 * 3_600_000)).byHour.tokensOut[12], 7, 'each retained day has its own slots')
+})

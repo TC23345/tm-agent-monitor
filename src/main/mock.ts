@@ -43,34 +43,62 @@ export function mockUsageInsights(): UsageInsights {
   }
 }
 
-/** Two weeks of plausible daily history for the trends tab in mock mode. */
+// A working day's shape by local hour: a morning block, a lunch dip, a longer
+// afternoon, a little in the evening. Sums to 1.
+const MOCK_HOUR_SHAPE = [0, 0, 0, 0, 0, 0, 0, 0.01, 0.04, 0.09, 0.12, 0.1, 0.03, 0.07, 0.12, 0.13, 0.11, 0.08, 0.03, 0.01, 0.02, 0.03, 0.01, 0]
+const MOCK_HISTORY_DAYS = 150
+/** How many of the newest days carry the hourly split, like the real ledgers' retention. */
+const MOCK_HOURLY_DAYS = 7
+
+/**
+ * Five months of plausible daily history for the History pane in mock mode —
+ * long enough that ALL buckets by week, with hourly detail on the last week
+ * (and today only up to the current hour) so 1D and 3D have something to draw.
+ */
 export function mockHistory(): DailyUsageDay[] {
   const out: DailyUsageDay[] = []
-  const day = 86_400_000
-  const now = Date.now()
-  for (let i = 13; i >= 0; i--) {
-    const d = new Date(now - i * day)
+  const now = new Date()
+  for (let i = MOCK_HISTORY_DAYS - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i)
     const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    // Deterministic wave: busier midweek, one heavy spike, quiet weekend.
+    // Deterministic wave: busier midweek, the odd heavy spike, quiet weekends,
+    // a week off, and usage that grows over the months.
     const dow = d.getDay()
     const base = dow === 0 || dow === 6 ? 90 : 320
-    const spike = i === 4 ? 460 : 0
-    const cost = base + spike + ((i * 37) % 90)
+    const spike = i % 23 === 4 ? 460 : 0
+    const growth = 0.45 + 0.55 * (1 - i / MOCK_HISTORY_DAYS)
+    const off = i >= 61 && i <= 67
+    const dayCost = off ? 0 : (base + spike + ((i * 37) % 90)) * growth
+    if (dayCost === 0) continue
+    // Today is only as far along as the clock.
+    const elapsed = i === 0 ? MOCK_HOUR_SHAPE.slice(0, now.getHours() + 1).reduce((sum, v) => sum + v, 0) : 1
+    const cost = dayCost * elapsed
     const tokens = cost * 2100
+    const hours = (share: number) => i >= MOCK_HOURLY_DAYS ? undefined : {
+      tokensOut: MOCK_HOUR_SHAPE.map((v, h) => (i === 0 && h > now.getHours() ? 0 : Math.round(dayCost * 2100 * share * v))),
+      costUsd: MOCK_HOUR_SHAPE.map((v, h) => (i === 0 && h > now.getHours() ? 0 : dayCost * share * v))
+    }
+    const claudeModels = [
+      { model: 'claude-fable-5-1', tokensOut: Math.round(tokens * 0.5), costUsd: cost * 0.55 },
+      { model: 'claude-sonnet-5-5', tokensOut: Math.round(tokens * 0.22), costUsd: cost * 0.17 }
+    ]
+    const codexModels = [{ model: 'gpt-5.6', tokensOut: Math.round(tokens * 0.28), costUsd: cost * 0.28, valueComplete: i !== 3 }]
     out.push({
       date,
       tokensOut: Math.round(tokens),
       costUsd: cost,
-      valueComplete: true,
+      valueComplete: i !== 3,
       byProvider: {
-        claude: { tokensOut: Math.round(tokens * 0.72), costUsd: cost * 0.72, valueComplete: true },
-        codex: { tokensOut: Math.round(tokens * 0.28), costUsd: cost * 0.28, valueComplete: i !== 3 }
+        claude: { tokensOut: Math.round(tokens * 0.72), costUsd: cost * 0.72, valueComplete: true, byModel: claudeModels, byHour: hours(0.72) },
+        codex: { tokensOut: Math.round(tokens * 0.28), costUsd: cost * 0.28, valueComplete: i !== 3, byModel: codexModels, byHour: hours(0.28) }
       },
+      byModel: [...claudeModels, ...codexModels],
       byProject: [
         { project: 'claude-watch', tokensOut: Math.round(tokens * 0.45), costUsd: cost * 0.45 },
         { project: 'growth-saloon', tokensOut: Math.round(tokens * 0.3), costUsd: cost * 0.3 },
         { project: 'api-gateway', tokensOut: Math.round(tokens * 0.25), costUsd: cost * 0.25 }
-      ]
+      ],
+      ...(i % 9 === 2 ? { apiCostUsd: 3.4 + (i % 5) } : {})
     })
   }
   return out

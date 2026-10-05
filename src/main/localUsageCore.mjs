@@ -198,6 +198,8 @@ export class LocalUsage {
     }, model)
     const contribution = {
       day,
+      // Local hour of the day: the History pane's 1D and 3D views are hourly.
+      hour: timestamp.getHours(),
       model,
       tokensOut: output,
       // Unknown models still contribute tokens. Provider-neutral history can
@@ -225,6 +227,7 @@ export class LocalUsage {
         if (!contribution.costKnown) next.valueCompleteByDay.set(contribution.day, false)
         addBucket(next.byDayProject, `${contribution.day}\0${project}`, contribution)
         addBucket(next.byDayModel, `${contribution.day}\0${contribution.model}`, contribution)
+        addHour(next.byDayHour, contribution)
       }
     }
     next.cache = buildTodayCache(next, now)
@@ -263,7 +266,8 @@ export class LocalUsage {
       costUsd: aggregate.costByDay.get(day) ?? 0,
       valueComplete: aggregate.valueCompleteByDay.get(day) ?? true,
       byProject,
-      byModel
+      byModel,
+      byHour: hoursForDay(aggregate.byDayHour, day)
     }
   }
 
@@ -351,6 +355,7 @@ function emptyAggregate() {
     valueCompleteByDay: new Map(),
     byDayProject: new Map(),
     byDayModel: new Map(),
+    byDayHour: new Map(),
     cache: { day: '', costUsd: 0, byProject: [] }
   }
 }
@@ -388,6 +393,24 @@ function addBucket(map, key, contribution) {
   bucket.costUsd += contribution.costUsd
   if (!contribution.costKnown) bucket.valueComplete = false
   map.set(key, bucket)
+}
+
+/** 24 local-hour slots per retained day. */
+function addHour(map, contribution) {
+  let slots = map.get(contribution.day)
+  if (!slots) {
+    slots = { tokensOut: new Array(24).fill(0), costUsd: new Array(24).fill(0) }
+    map.set(contribution.day, slots)
+  }
+  slots.tokensOut[contribution.hour] += contribution.tokensOut
+  slots.costUsd[contribution.hour] += contribution.costUsd
+}
+
+function hoursForDay(map, day) {
+  const slots = map.get(day)
+  return slots
+    ? { tokensOut: [...slots.tokensOut], costUsd: [...slots.costUsd] }
+    : { tokensOut: new Array(24).fill(0), costUsd: new Array(24).fill(0) }
 }
 
 function retainedDayKeys(now) {

@@ -1,4 +1,4 @@
-import type { ProjectUsage } from '../shared/types.js'
+import type { HourlyUsage, ProjectUsage } from '../shared/types.js'
 
 export interface DayTotals {
   day: string
@@ -7,6 +7,8 @@ export interface DayTotals {
   valueComplete: boolean
   byProject: ProjectUsage[]
   byModel: { model: string; tokensOut: number; costUsd: number; valueComplete?: boolean }[]
+  /** Local-hour buckets for the day; live only, never written to history. */
+  byHour?: HourlyUsage
 }
 
 export interface LocalUsageOptions {

@@ -753,27 +753,101 @@ kbd {
 .ctxmenu-reply-send { padding: 5px 10px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
 .ctxmenu-reply-send:disabled { opacity: 0.45; cursor: default; }
 
-/* ---- history: thirty stacked bars, then the model mix ---- */
-.hist { display: flex; flex-direction: column; gap: 10px; }
-.hist-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.hist-summary-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--muted); }
-.hist-summary-total { font-size: 13px; font-weight: 600; color: var(--text); text-align: right; }
-.hist-bars { display: flex; align-items: flex-end; gap: 3px; height: 96px; padding: 0 1px; border-bottom: 1px solid var(--hairline); }
+/* ---- history: one range filter (1D · 3D · 30D · ALL), then tiles and charts
+   all cut from the same slice. The bar chart and the running total share an
+   x axis and a left gutter for the gridline labels, so their marks line up. ---- */
+.hist { display: flex; flex-direction: column; gap: 14px; }
+.hist-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.hist-caption { flex: 1 1 120px; min-width: 0; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-seg-group { display: inline-flex; flex: 0 0 auto; overflow: hidden; border: 1px solid var(--border); border-radius: 7px; background: var(--track); }
+.hist-seg-group button { -webkit-app-region: no-drag; min-width: 40px; padding: 4px 10px; border: 0; border-right: 1px solid var(--border); background: transparent; color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.hist-seg-group button:last-child { border-right: 0; }
+.hist-seg-group button:hover { color: var(--text); }
+.hist-seg-group button.is-active { color: #fff; background: var(--accent); }
+.hist-seg-group button:focus-visible { position: relative; outline: 2px solid var(--accent-bright); outline-offset: -2px; }
+/* A range whose data is still on its way holds the last render, dimmed. */
+.hist-body { display: flex; flex-direction: column; gap: 18px; transition: opacity 0.15s ease; }
+.hist-body.is-stale { opacity: 0.55; }
+
+.hist-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 8px; }
+.hist-tile { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 9px 11px 10px; border: 1px solid var(--hairline); border-radius: 8px; background: rgba(255, 255, 255, 0.02); }
+.hist-tile-label { font-size: 11px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-tile-value { font-size: 20px; font-weight: 600; line-height: 1.25; color: var(--text); white-space: nowrap; }
+.hist-tile-sub { font-size: 11.5px; line-height: 1.35; color: var(--muted); }
+/* Direction, not judgement: more usage is neither good nor bad, so no colour. */
+.hist-delta { color: var(--text); font-weight: 600; white-space: nowrap; }
+
+.hist-chart { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.hist-chart .hist-mix-head { margin-bottom: 4px; }
+.hist-readout { min-width: 0; font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; font-variant-numeric: tabular-nums; }
+.hist-note { font-size: 11.5px; line-height: 1.45; color: var(--faint); }
+.hist-plot, .hist-axis { margin-left: 38px; }
+.hist-plot { position: relative; height: 112px; border-bottom: 1px solid var(--hairline); }
+.hist-plot--line { height: 84px; }
+.hist-grid { position: absolute; inset: 0; pointer-events: none; }
+.hist-gridline { position: absolute; left: 0; right: 0; height: 0; border-top: 1px solid var(--hairline); }
+.hist-gridline.is-top { top: 0; }
+.hist-gridline.is-mid { top: 50%; }
+.hist-gridline i { position: absolute; right: 100%; top: -7px; margin-right: 6px; font-style: normal; font-size: 10px; line-height: 13px; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hist-bars { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 100%; }
+.hist-bars.is-dense { gap: 1px; }
 .hist-bar { flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column-reverse; border-radius: 2px 2px 0 0; overflow: hidden; background: rgba(255, 255, 255, 0.025); }
-.hist-bar.is-today { outline: 1px solid rgba(217, 119, 87, 0.5); outline-offset: 1px; }
-.hist-seg { display: block; width: 100%; transition: height 220ms ease; }
+/* Hours that have not happened leave no slot; the one holding now is a shade lighter. */
+.hist-bar.is-future { background: transparent; }
+.hist-bar.is-current { background: rgba(255, 255, 255, 0.075); }
+.hist-bar.is-hover { background: rgba(255, 255, 255, 0.11); }
+.hist-bar.is-hover .hist-seg { filter: brightness(1.18); }
+.hist-bar.is-daystart { margin-left: 4px; }
+.hist-seg { display: block; flex: 0 0 auto; width: 100%; min-height: 1px; transition: height 220ms ease; }
+.hist-seg + .hist-seg { margin-bottom: 1px; }
+.hist-seg:last-child { border-radius: 2px 2px 0 0; }
 .hist-seg.is-claude, .hist-swatch.is-claude { background: var(--accent); }
 .hist-seg.is-codex, .hist-swatch.is-codex { background: #5aa9ff; }
 .hist-seg.is-other, .hist-swatch.is-other { background: var(--faint); }
-.hist-axis { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--faint); }
-.hist-providers { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted); }
+.hist-axis { position: relative; height: 14px; font-size: 10.5px; color: var(--faint); }
+.hist-axis span { position: absolute; top: 0; white-space: nowrap; }
+.hist-axis span.is-end { right: 0; }
+/* The running total is every provider together, so it wears ink, not a provider's colour. */
+.hist-line { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.hist-line polyline { fill: none; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.hist-line-now { stroke: var(--text); stroke-width: 2; }
+.hist-line-prev { stroke: var(--faint); stroke-width: 1.5; }
+.hist-line-wash { fill: rgba(236, 234, 230, 0.07); stroke: none; }
+.hist-cross { position: absolute; top: 0; bottom: 0; width: 1px; margin-left: -0.5px; background: var(--border); pointer-events: none; }
+.hist-dot { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 2px var(--card); pointer-events: none; }
+.hist-key { width: 14px; height: 0; border-top: 2px solid var(--text); border-radius: 1px; }
+.hist-key.is-prev { border-top-color: var(--faint); }
+.hist-providers { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .hist-prov { display: inline-flex; align-items: center; gap: 6px; }
 .hist-swatch { width: 9px; height: 9px; border-radius: 2px; }
-.hist-mix { margin-top: 6px; }
-.hist-mix-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--muted); }
-.hist-mix-flag { font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--pressure); }
-.hist-mix-row { display: grid; grid-template-columns: minmax(80px, 1.2fr) 3fr auto auto 3.2em; align-items: center; gap: 10px; padding: 3px 0; font-size: 12.5px; }
+
+.hist-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px 24px; align-items: start; }
+.hist-mix { min-width: 0; }
+.hist-mix-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 6px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--muted); }
+.hist-mix-head > span:first-child { flex: 0 0 auto; }
+.hist-mix-flag { font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--pressure); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-mix-row { display: grid; grid-template-columns: minmax(70px, 1.2fr) minmax(36px, 2fr) auto auto 2.6em; align-items: center; gap: 8px; padding: 3px 0; font-size: 12.5px; }
+.hist-mix-row.is-short { grid-template-columns: 2.6em 1fr 4.6em; }
+.hist-mix-row.is-short .hist-mix-num { text-align: right; }
 .hist-mix-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+
+/* Calendar: one square a day, a single hue stepping light to full. */
+.hist-cal { --cal-cell: 11px; display: flex; gap: 6px; }
+.hist-cal-days { flex: 0 0 auto; display: grid; grid-template-rows: repeat(7, var(--cal-cell)); gap: 2px; margin-top: 16px; font-size: 9.5px; line-height: var(--cal-cell); color: var(--faint); }
+.hist-cal-scroll { flex: 1 1 auto; min-width: 0; overflow-x: auto; padding-bottom: 4px; }
+.hist-cal-months { display: grid; gap: 2px; width: max-content; height: 14px; font-size: 10px; line-height: 12px; color: var(--faint); }
+.hist-cal-months span { width: 0; white-space: nowrap; }
+.hist-cal-grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, var(--cal-cell)); grid-auto-columns: var(--cal-cell); gap: 2px; width: max-content; }
+.hist-cell { display: block; width: var(--cal-cell); height: var(--cal-cell); border-radius: 2px; background: var(--track); }
+.hist-cell.is-out { background: transparent; }
+.hist-cell.lv-1 { background: rgba(217, 119, 87, 0.3); }
+.hist-cell.lv-2 { background: rgba(217, 119, 87, 0.52); }
+.hist-cell.lv-3 { background: rgba(217, 119, 87, 0.76); }
+.hist-cell.lv-4 { background: var(--accent); }
+.hist-cal-grid .hist-cell:not(.is-out):hover { outline: 1px solid var(--text); }
+.hist-cal-scale { --cal-cell: 9px; display: flex; align-items: center; justify-content: flex-end; gap: 3px; margin-top: 6px; font-size: 10px; color: var(--faint); }
+.hist-cal-scale span:first-child { margin-right: 3px; }
+.hist-cal-scale span:last-child { margin-left: 3px; }
 .hist-mix-track { height: 6px; border-radius: 999px; background: var(--track); overflow: hidden; }
 .hist-mix-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
 .hist-mix-num { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }

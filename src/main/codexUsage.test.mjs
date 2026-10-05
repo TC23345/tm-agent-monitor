@@ -90,6 +90,10 @@ test('scans recent files and aggregates by day, project, and model', async () =>
     assert.equal(result.byDay[0].date, '2026-07-16')
     assert.equal(result.byDay[0].byProject[0].project, 'alpha')
     assert.equal(result.byDay[0].byModel[0].model, 'gpt-5.6')
+    // The hourly split is the same tokens, keyed by local hour and model.
+    const hours = result.byDay[0].byHourModel
+    assert.equal(hours.reduce((sum, row) => sum + row.outputTokens, 0), result.byDay[0].outputTokens)
+    assert.ok(hours.every((row) => Number.isInteger(row.hour) && row.hour >= 0 && row.hour <= 23 && row.model === 'gpt-5.6'))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
