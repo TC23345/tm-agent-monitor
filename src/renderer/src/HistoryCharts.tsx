@@ -52,7 +52,13 @@ export function Axis({ view }: { view: HistoryView }) {
   return (
     <div className="hist-axis" aria-hidden="true">
       {view.ticks.map((t) => (
-        <span key={t.index} className={t.end ? 'is-end' : ''} style={t.end ? undefined : { left: `${(t.index / n) * 100}%` }}>{t.label}</span>
+        <span
+          key={t.index}
+          className={t.end ? 'is-end' : t.center ? 'is-center' : ''}
+          style={t.end ? undefined : { left: `${((t.index + (t.center ? 0.5 : 0)) / n) * 100}%` }}
+        >
+          {t.label}
+        </span>
       ))}
     </div>
   )
@@ -81,7 +87,7 @@ export function BarChart({ view, metric, hover, onHover }: {
     >
       <Gridlines metric={metric} top={top} />
       <div
-        className={`hist-bars ${buckets.length > 40 ? 'is-dense' : ''}`}
+        className={`hist-bars ${buckets.length > 40 ? 'is-dense' : buckets.length <= 10 ? 'is-sparse' : ''}`}
         role="img"
         aria-label={`${what} per ${view.unit}, ${buckets[0]?.title} to ${buckets[buckets.length - 1]?.title}`}
       >

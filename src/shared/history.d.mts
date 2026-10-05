@@ -1,6 +1,6 @@
 import type { DailyUsageDay, ProviderId } from './types.js'
 
-export type HistoryRange = '1d' | '3d' | '30d' | 'all'
+export type HistoryRange = '1d' | '3d' | '7d' | '30d' | 'all'
 export type HistoryMetric = 'tokens' | 'value'
 export type HistoryUnit = 'hour' | 'day' | 'week' | 'month'
 export type HistoryScope = 'recent' | 'all'
@@ -62,6 +62,8 @@ export interface HistoryTick {
   label: string
   /** Pinned to the right edge rather than starting at its bucket. */
   end?: boolean
+  /** Sits under the middle of its bucket rather than starting at it. */
+  center?: boolean
 }
 export interface HistoryPace {
   current: number[]

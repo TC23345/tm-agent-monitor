@@ -791,6 +791,8 @@ kbd {
 .hist-gridline i { position: absolute; right: 100%; top: -7px; margin-right: 6px; font-style: normal; font-size: 10px; line-height: 13px; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .hist-bars { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 100%; }
 .hist-bars.is-dense { gap: 1px; }
+/* A handful of buckets (7D): the slot stays the hover target, the bar inside it stays a bar. */
+.hist-bars.is-sparse .hist-seg { width: 40%; align-self: center; }
 .hist-bar { flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column-reverse; border-radius: 2px 2px 0 0; overflow: hidden; background: rgba(255, 255, 255, 0.025); }
 /* Hours that have not happened leave no slot; the one holding now is a shade lighter. */
 .hist-bar.is-future { background: transparent; }
@@ -807,6 +809,7 @@ kbd {
 .hist-axis { position: relative; height: 14px; font-size: 10.5px; color: var(--faint); }
 .hist-axis span { position: absolute; top: 0; white-space: nowrap; }
 .hist-axis span.is-end { right: 0; }
+.hist-axis span.is-center { transform: translateX(-50%); }
 /* The running total is every provider together, so it wears ink, not a provider's colour. */
 .hist-line { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .hist-line polyline { fill: none; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
@@ -821,7 +824,8 @@ kbd {
 .hist-prov { display: inline-flex; align-items: center; gap: 6px; }
 .hist-swatch { width: 9px; height: 9px; border-radius: 2px; }
 
-.hist-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px 24px; align-items: start; }
+/* Projects, then Models, then the typical week: one above the other, each the pane's full width. */
+.hist-cols { display: flex; flex-direction: column; gap: 18px; }
 .hist-mix { min-width: 0; }
 .hist-mix-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 6px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: var(--muted); }
 .hist-mix-head > span:first-child { flex: 0 0 auto; }

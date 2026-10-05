@@ -3,9 +3,9 @@
  * live local days overlaid) into what the History pane draws. Pure and tested;
  * the components only map these to marks.
  *
- * The pane has four ranges. 1D and 3D are drawn by local hour, from the
- * `byHour` split only the live days carry; 30D by day; ALL by day, week or
- * month depending on how far back the history goes. `historyView` is the one
+ * The pane has five ranges. 1D and 3D are drawn by local hour, from the
+ * `byHour` split only the live days carry; 7D and 30D by day; ALL by day, week
+ * or month depending on how far back the history goes. `historyView` is the one
  * entry point — every chart on the pane reads the same buckets, so a filter
  * change cannot leave two of them disagreeing.
  */
@@ -15,16 +15,16 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
-export const HISTORY_RANGES = /** @type {const} */ (['1d', '3d', '30d', 'all'])
+export const HISTORY_RANGES = /** @type {const} */ (['1d', '3d', '7d', '30d', 'all'])
 export const HISTORY_METRICS = /** @type {const} */ (['tokens', 'value'])
-/** What main reads for the 'recent' scope: 30 days and the 30 before them. */
+/** What main reads for the 'recent' scope: 30 days and the 30 before them (7D and its week before fit inside). */
 export const HISTORY_RECENT_DAYS = 60
 /** The bound on 'all': five years of days. */
 export const HISTORY_MAX_DAYS = 1830
 /** The calendar heatmap shows at most a year of weeks. */
 export const CALENDAR_MAX_WEEKS = 53
 
-const RANGE_DAYS = { '1d': 1, '3d': 3, '30d': 30 }
+const RANGE_DAYS = { '1d': 1, '3d': 3, '7d': 7, '30d': 30 }
 /** ALL never draws fewer days than this, so two days of history are not two fat bars. */
 const ALL_MIN_DAYS = 14
 const ALL_DAILY_MAX = 62
@@ -300,11 +300,15 @@ function sum(buckets, field) {
 }
 
 /**
- * Where the axis labels go: `index` is the bucket a label starts at, and `end`
- * marks the one pinned to the right edge instead.
+ * Where the axis labels go: `index` is the bucket a label starts at, `end`
+ * marks the one pinned to the right edge instead, and `center` one that sits
+ * under the middle of its bucket (7D names every day).
  */
 function axisTicks(buckets, range, unit) {
   const n = buckets.length
+  if (range === '7d') {
+    return buckets.map((b, index) => ({ index, label: b.current ? 'Today' : WEEKDAYS[weekdayOf(b.date)], center: true }))
+  }
   if (unit === 'hour' && range === '1d') {
     return [0, 6, 12, 18].map((index) => ({ index, label: hourLabel(index) }))
   }
@@ -336,7 +340,7 @@ function clampHour(hour) {
  * Everything the History pane draws for one range.
  *
  * - `buckets`: the x axis every chart shares — hours for 1D / 3D, days for
- *   30D, days / weeks / months for ALL. `future` hours are after `hour` today.
+ *   7D / 30D, days / weeks / months for ALL. `future` hours are after `hour` today.
  * - `totals`: from the days themselves, never from the hour slots, so a
  *   provider without an hourly split still counts. `unplacedTokens` is what
  *   the hourly chart cannot show for that reason.
@@ -364,7 +368,7 @@ export function historyView(days, options = {}) {
   const dates = series.days.map((d) => d.date)
   const since = dates[0]
   const unit = range === '1d' || range === '3d' ? 'hour'
-    : range === '30d' || count <= ALL_DAILY_MAX ? 'day'
+    : range !== 'all' || count <= ALL_DAILY_MAX ? 'day'
       : count <= ALL_WEEKLY_MAX ? 'week' : 'month'
 
   const dayBuckets = series.days.map((d) => dayBucket(d, today))

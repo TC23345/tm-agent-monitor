@@ -18,6 +18,11 @@ Layout customization, on top of the 0.3.0 workspace.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
 
+## 0.4.52 — 2026-10-05
+
+- **History has a 7D range.** The filter is now 1D · 3D · 7D · 30D · ALL. 7D is the last seven days by day, each bar named for its weekday, with the tiles and the running total compared against the seven days before.
+- **Projects sits above Models** (and the typical week below them), each the full width of the pane, instead of side by side.
+
 ## 0.4.51 — 2026-10-05
 
 - **History has a range filter: 1D · 3D · 30D · ALL.** One control at the top of the pane scopes everything under it, and the choice is remembered. 1D is today by hour and 3D is the last three days by hour (new: the local ledgers now keep each day's tokens and value by hour, for Claude Code and Codex); 30D is by day, as before; ALL goes back to the first day this machine recorded and switches from days to weeks to months as the history grows. A **Tokens / Value** switch picks what the charts measure.

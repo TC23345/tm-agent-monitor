@@ -12,9 +12,9 @@ import { Axis, BarChart, Breakdown, CalendarHeat, LineLegend, PaceChart, Provide
 const REFRESH_MS = 5 * 60_000
 const PREFS_KEY = 'tm.history.v1'
 
-const RANGE_LABEL: Record<HistoryRange, string> = { '1d': '1D', '3d': '3D', '30d': '30D', all: 'ALL' }
-const RANGE_NAME: Record<HistoryRange, string> = { '1d': 'Today', '3d': 'Last 3 days', '30d': 'Last 30 days', all: 'All time' }
-const BEFORE_NAME: Record<HistoryRange, string> = { '1d': 'Yesterday', '3d': 'The 3 days before', '30d': 'The 30 days before', all: '' }
+const RANGE_LABEL: Record<HistoryRange, string> = { '1d': '1D', '3d': '3D', '7d': '7D', '30d': '30D', all: 'ALL' }
+const RANGE_NAME: Record<HistoryRange, string> = { '1d': 'Today', '3d': 'Last 3 days', '7d': 'Last 7 days', '30d': 'Last 30 days', all: 'All time' }
+const BEFORE_NAME: Record<HistoryRange, string> = { '1d': 'Yesterday', '3d': 'The 3 days before', '7d': 'The 7 days before', '30d': 'The 30 days before', all: '' }
 const METRIC_LABEL: Record<HistoryMetric, string> = { tokens: 'Tokens', value: 'Value' }
 const UNIT_NOUN = { hour: 'hour', day: 'day', week: 'week', month: 'month' } as const
 
@@ -30,8 +30,8 @@ interface Loaded {
 }
 
 /**
- * Usage over time behind one range filter — 1D and 3D by hour, 30D by day,
- * ALL by day, week or month — with every tile and chart below it drawn from
+ * Usage over time behind one range filter — 1D and 3D by hour, 7D and 30D by
+ * day, ALL by day, week or month — with every tile and chart below it drawn from
  * the same slice. Polls `history:recent` every five minutes while visible (the
  * Mongo read is cheap; the live-day overlay is what keeps today current), and
  * asks for the whole history only while ALL is selected.
@@ -87,7 +87,8 @@ export function HistorySection() {
       view,
       models: modelMix(data.days, span),
       projects: projectMix(data.days, span),
-      weekdays: view.unit === 'hour' ? null : weekdayProfile(data.days, span),
+      // A typical week needs several of each weekday; over 7D it would only repeat the bars.
+      weekdays: range === '30d' || range === 'all' ? weekdayProfile(data.days, span) : null,
       calendar: range === 'all' ? calendarWeeks(data.days, span) : null
     }
   }, [data, range])
@@ -213,7 +214,7 @@ export function HistorySection() {
 function caption(view: HistoryView): string {
   if (view.range === '1d') return `${dateLabel(view.until)}, by hour`
   if (view.range === '3d') return `${dateLabel(view.since)} – ${dateLabel(view.until)}, by hour`
-  if (view.range === '30d') return `${dateLabel(view.since)} – ${dateLabel(view.until)}, by day`
+  if (view.range !== 'all') return `${dateLabel(view.since)} – ${dateLabel(view.until)}, by day`
   return `Since ${dateLabel(view.since)} ${view.since.slice(0, 4)} · ${view.totals.days} days, by ${view.unit}`
 }
 
