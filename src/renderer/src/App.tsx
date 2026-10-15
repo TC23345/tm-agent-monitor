@@ -1034,12 +1034,15 @@ export function App() {
     }
   }
 
-  const sideSection = (v: (typeof SIDEBAR_VIEWS)[number], top = false) => {
+  const sideSection = (v: (typeof SIDEBAR_VIEWS)[number], top = false, last = false) => {
     const rolled = sidebarCollapsed.includes(v.id)
-    const height = rolled ? undefined : sectionH[v.id]
+    // Only a section with another beneath it has a handle: sizing the last one would just leave space under it,
+    // so it always takes the default sizing (even with a height stored from when something followed it).
+    const hasGrip = !last
+    const height = rolled || !hasGrip ? undefined : sectionH[v.id]
     return (
       <section
-        className={`sideview has-grip ${top ? 'sideview--top' : ''} ${v.id === 'agents' ? 'sideview--fill' : ''} ${rolled ? 'is-collapsed' : ''}`}
+        className={`sideview ${hasGrip ? 'has-grip' : ''} ${top ? 'sideview--top' : ''} ${v.id === 'agents' ? 'sideview--fill' : ''} ${rolled ? 'is-collapsed' : ''}`}
         key={v.id}
         ref={(el) => { sectionEls.current[v.id] = el }}
         // A dragged height pins the section (its body scrolls inside); otherwise the stylesheet's stack rules size it.
@@ -1076,9 +1079,10 @@ export function App() {
           </span>
         </div>
         {!rolled && <div className="sideview-body">{sidebarBody(v.id)}</div>}
-        {/* The stream's handle, under every section: drag to size it, up past the snap folds it to its header,
-            down on a folded one opens it; double-click (or Home) goes back to the default sizing. */}
-        <Splitter
+        {/* The stream's handle, under a section another one follows (its pill shows while the section is hovered):
+            drag to size it, up past the snap folds it to its header, down on a folded one opens it; double-click
+            (or Home) goes back to the default sizing. */}
+        {hasGrip && <Splitter
           axis="y"
           className="splitter--stream splitter--section"
           testId={`splitter-section-${v.id}`}
@@ -1095,7 +1099,7 @@ export function App() {
             setSidebarCollapsed((current) => current.filter((x) => x !== v.id))
             setSectionH((current) => { if (!(v.id in current)) return current; const next = { ...current }; delete next[v.id]; return next })
           }}
-        />
+        />}
       </section>
     )
   }
@@ -1408,7 +1412,7 @@ export function App() {
             onMove={(delta) => setStreamH(clampStreamHeight(streamDrag.current.height + delta, streamDrag.current.sidebar))}
             onReset={() => setStreamH(STREAM_DEFAULT)}
           />
-          {activeViews.map((v, i) => sideSection(v, i === 0))}
+          {activeViews.map((v, i) => sideSection(v, i === 0, i === activeViews.length - 1))}
         </aside>
 
         <Splitter

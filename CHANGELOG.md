@@ -18,6 +18,10 @@ Layout customization, on top of the 0.3.0 workspace.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
 
+## 0.4.55 — 2026-10-15
+
+- **Sidebar handles are quieter.** A section's drag handle shows its pill only while you hover the section (the hairline between sections stays), and a section gets a handle only when another section sits beneath it — so Agents, last in the stack, has none; sizing it would only leave empty space under it.
+
 ## 0.4.54 — 2026-10-15
 
 - **The picker's menu bar is two icons.** The Clips and Keys text menus are gone; at the right of the bar sit an export icon (Export to JSON…, straight away) and a gear. The gear opens settings **inside the card**, in the list's place, with the pages as chips where the filters were — **Keybinds**, **Groups**, **Window** — and a back circle (or Escape, or the gear again) to return to the clips.

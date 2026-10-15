@@ -698,9 +698,14 @@ kbd {
 .splitter--stream:hover::after,
 .splitter--stream:focus-visible::after,
 .splitter--stream.is-dragging::after { background: var(--accent); }
-/* Every sidebar section ends in the same handle: drag to size it, up past the snap folds it, double-click resets.
-   Its hairline is the rule between sections, so a section after one draws no rule of its own. */
+/* Every sidebar section with another beneath it ends in the same handle: drag to size it, up past the snap folds
+   it, double-click resets. At rest only its hairline shows — the rule between the sections, so the next one draws
+   none of its own; the pill appears while the section is hovered, or the handle focused or dragged. */
 .splitter--section { margin: 6px -4px 0; }
+.splitter--section::after { opacity: 0; transition: opacity 120ms ease, background-color 120ms ease; }
+.sideview:hover .splitter--section::after,
+.splitter--section:focus-visible::after,
+.splitter--section.is-dragging::after { opacity: 1; }
 .sideview.has-grip { padding-bottom: 0; }
 .sideview--top.has-grip { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
 .sideview.has-grip + .sideview { margin-top: 0; padding-top: 6px; border-top: 0; }
