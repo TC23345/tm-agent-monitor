@@ -41,21 +41,21 @@ import { ProviderBadge } from './ProviderBadge'
 import { Settings as SettingsIcon } from './Icons'
 import {
   MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, defaultPanes, emptySizes, isUniqueKind, loadPaneCols,
-  loadLaunchPrefs, loadPanes, loadSidebarCollapsed, loadSidebarViews, loadSizes, newPane, saveLaunchPrefs, savePaneCols,
-  savePanes, saveSidebarCollapsed, saveSidebarViews, saveSizes,
-  type AllSizes, type PaneCols, type PaneInstance, type PaneKind, type PaneSizes, type SidebarView,
+  loadLaunchPrefs, loadPanes, loadSectionHeights, loadSidebarCollapsed, loadSidebarViews, loadSizes, newPane, saveLaunchPrefs, savePaneCols,
+  savePanes, saveSectionHeights, saveSidebarCollapsed, saveSidebarViews, saveSizes,
+  type AllSizes, type PaneCols, type PaneInstance, type PaneKind, type PaneSizes, type SectionHeights, type SidebarView,
   type TerminalPaneConfig
 } from './panes'
 import { Splitter } from './Splitter'
 import {
-  PANE_MIN, PANE_MIN_ROW, clampSidebarWidth, columnTemplate, normalizeFractions, resizeFractions,
+  PANE_MIN, PANE_MIN_ROW, clampSectionHeight, clampSidebarWidth, columnTemplate, normalizeFractions, resizeFractions,
   trackWidths, viewportBucket, type SizeBucket
 } from '@shared/layout.mjs'
 import { launchFor, launchKey, withLaunch, type LaunchPrefs } from '@shared/panes.mjs'
 import { ProjectStrip, WEB_LINKS, type LaunchTarget, type NavMenu, type StripProject } from './ProjectStrip'
 import {
-  STREAM_DEFAULT, clampStreamHeight, readStreamHeight, recentList, sanitizeRecent, touchRecent,
-  type ProjectTouch, type RecentMap
+  STREAM_DEFAULT, clampStreamHeight, projectRoot, readStreamHeight, recentList, sanitizeRecent, touchRecent,
+  type ProjectRoots, type ProjectTouch, type RecentMap
 } from '@shared/projectStrip.mjs'
 import {
   AppWindow, ArrowLeft, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Clipboard, Code2, Code2 as CursorIcon, Columns3, Copy,
@@ -222,15 +222,30 @@ export function App() {
   // active; a target pins a folder (picked in the switcher, or dropped from
   // Explorer onto the nav).
   const [launchChoice, setLaunchChoice] = useState<LaunchTarget | null>(null)
+  // The Projects folder and home, from settings once: a folder under Projects
+  // is activity in its project, not a badge of its own (`projectRoot`).
+  const [projectRoots, setProjectRoots] = useState<ProjectRoots>({})
+  const rootOf = useMemo(() => (cwd: string) => projectRoot(cwd, projectRoots), [projectRoots])
   // Project folders with activity in the last four hours (the sidebar's
   // badges) — kept in localStorage so a restart does not empty the strip.
   const [recentMap, setRecentMap] = useState<RecentMap>(() => {
     try { return sanitizeRecent(JSON.parse(localStorage.getItem(RECENT_KEY) ?? 'null')) } catch { return {} }
   })
-  const touchProjects = (touches: ProjectTouch[]) => setRecentMap((current) => touchRecent(current, touches, Date.now()))
+  const touchProjects = (touches: ProjectTouch[]) => setRecentMap((current) => touchRecent(current, touches, Date.now(), rootOf))
+  // Once the roots are known the stored map folds into projects too.
+  useEffect(() => { setRecentMap((current) => sanitizeRecent(current, Date.now(), rootOf)) }, [rootOf])
   useEffect(() => {
     try { localStorage.setItem(RECENT_KEY, JSON.stringify(recentMap)) } catch { /* the strip rebuilds from live activity */ }
   }, [recentMap])
+  // Each sidebar section's dragged height (the handle under it, `tm.sidebar.sections.v1`); absent = its default sizing.
+  const [sectionH, setSectionH] = useState<SectionHeights>(loadSectionHeights)
+  useEffect(() => {
+    // Trailing write: a handle changes this on every pointermove.
+    const t = window.setTimeout(() => saveSectionHeights(sectionH), 200)
+    return () => window.clearTimeout(t)
+  }, [sectionH])
+  const sectionEls = useRef<Partial<Record<SidebarView, HTMLElement | null>>>({})
+  const sectionDrag = useRef({ height: 0, sidebar: 800 })
   // The activity stream's height under the badges (its splitter); 0 = folded away.
   const [streamH, setStreamH] = useState<number>(() => {
     try { return readStreamHeight(localStorage.getItem(STREAM_KEY)) } catch { return STREAM_DEFAULT }
@@ -306,6 +321,7 @@ export function App() {
     window.watch.getSettings().then((s) => {
       setSizeMode(s.sizeMode)
       setAppInfo({ version: s.version, debugPort: s.debugPort })
+      setProjectRoots({ projectsDir: s.projectsDir, home: s.home })
       // The system backdrop (Windows 11) shows through a translucent card;
       // styles.css keys off this attribute, main pushes changes live.
       document.documentElement.dataset.material = s.windowMaterial ?? 'none'
@@ -489,11 +505,15 @@ export function App() {
   /** The badges: recent folders newest first, each with its live sessions'
    * state — plus the launch target, should it be quieter than four hours. */
   const stripProjects: StripProject[] = recentList(recentMap).map((p) => ({ ...p, sessions: 0, waiting: 0, running: 0 }))
-  if (context.cwd && !stripProjects.some((p) => launchKey(p.cwd) === launchKey(context.cwd))) {
-    stripProjects.push({ cwd: context.cwd, label: context.label ?? context.cwd, at: 0, sessions: 0, waiting: 0, running: 0 })
+  // Badges are projects: a session's subfolder counts for its project (`rootOf`), and so does the launch target.
+  const contextRoot = context.cwd ? rootOf(context.cwd) : undefined
+  if (contextRoot && !stripProjects.some((p) => launchKey(p.cwd) === launchKey(contextRoot))) {
+    const own = context.cwd && launchKey(contextRoot) === launchKey(context.cwd)
+    stripProjects.push({ cwd: contextRoot, label: own ? context.label ?? contextRoot : contextRoot.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || contextRoot, at: 0, sessions: 0, waiting: 0, running: 0 })
   }
   for (const a of agents) {
-    const p = a.cwd ? stripProjects.find((x) => launchKey(x.cwd) === launchKey(a.cwd)) : undefined
+    const root = a.cwd ? rootOf(a.cwd) : undefined
+    const p = root ? stripProjects.find((x) => launchKey(x.cwd) === launchKey(root)) : undefined
     if (!p) continue
     if (!a.parentId) p.sessions++
     if (a.state === 'waiting') p.waiting++
@@ -1016,8 +1036,16 @@ export function App() {
 
   const sideSection = (v: (typeof SIDEBAR_VIEWS)[number], top = false) => {
     const rolled = sidebarCollapsed.includes(v.id)
+    const height = rolled ? undefined : sectionH[v.id]
     return (
-      <section className={`sideview ${top ? 'sideview--top' : ''} ${v.id === 'agents' ? 'sideview--fill' : ''} ${rolled ? 'is-collapsed' : ''}`} key={v.id}>
+      <section
+        className={`sideview has-grip ${top ? 'sideview--top' : ''} ${v.id === 'agents' ? 'sideview--fill' : ''} ${rolled ? 'is-collapsed' : ''}`}
+        key={v.id}
+        ref={(el) => { sectionEls.current[v.id] = el }}
+        // A dragged height pins the section (its body scrolls inside); otherwise the stylesheet's stack rules size it.
+        style={height ? { flex: '0 0 auto', height, minHeight: 0 } : undefined}
+        data-testid={tid('sideview-section', v.id)}
+      >
         <div className="pane-head sideview-head">
           <button
             className="sidebar-title"
@@ -1048,6 +1076,26 @@ export function App() {
           </span>
         </div>
         {!rolled && <div className="sideview-body">{sidebarBody(v.id)}</div>}
+        {/* The stream's handle, under every section: drag to size it, up past the snap folds it to its header,
+            down on a folded one opens it; double-click (or Home) goes back to the default sizing. */}
+        <Splitter
+          axis="y"
+          className="splitter--stream splitter--section"
+          testId={`splitter-section-${v.id}`}
+          label={`${v.label} height`}
+          title={rolled ? `Drag down to open ${v.label}` : `${v.label} height — drag to resize, up to fold, double-click to reset`}
+          onStart={() => { sectionDrag.current = { height: rolled ? 0 : sectionEls.current[v.id]?.offsetHeight ?? 0, sidebar: sidebarRef.current?.clientHeight ?? 800 } }}
+          onMove={(delta) => {
+            const h = clampSectionHeight(sectionDrag.current.height + delta, sectionDrag.current.sidebar)
+            if (h === 0) { setSidebarCollapsed((current) => (current.includes(v.id) ? current : [...current, v.id])); return }
+            setSidebarCollapsed((current) => (current.includes(v.id) ? current.filter((x) => x !== v.id) : current))
+            setSectionH((current) => (current[v.id] === h ? current : { ...current, [v.id]: h }))
+          }}
+          onReset={() => {
+            setSidebarCollapsed((current) => current.filter((x) => x !== v.id))
+            setSectionH((current) => { if (!(v.id in current)) return current; const next = { ...current }; delete next[v.id]; return next })
+          }}
+        />
       </section>
     )
   }
@@ -1333,7 +1381,7 @@ export function App() {
         <aside className={`sidebar ${sidebarHidden ? 'is-hidden' : ''}`} ref={sidebarRef} style={{ flexBasis: sidebarWidth }} data-testid="sidebar">
           <ProjectStrip
             projects={stripProjects}
-            selected={context.cwd}
+            selected={contextRoot}
             openMenu={openMenu === 'project' ? openMenu : null}
             onOpenMenu={setOpenMenu}
             onSelect={setLaunchChoice}

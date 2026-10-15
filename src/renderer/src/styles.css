@@ -698,6 +698,12 @@ kbd {
 .splitter--stream:hover::after,
 .splitter--stream:focus-visible::after,
 .splitter--stream.is-dragging::after { background: var(--accent); }
+/* Every sidebar section ends in the same handle: drag to size it, up past the snap folds it, double-click resets.
+   Its hairline is the rule between sections, so a section after one draws no rule of its own. */
+.splitter--section { margin: 6px -4px 0; }
+.sideview.has-grip { padding-bottom: 0; }
+.sideview--top.has-grip { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+.sideview.has-grip + .sideview { margin-top: 0; padding-top: 6px; border-top: 0; }
 
 
 /* ---- empty grid: no panes open ---- */

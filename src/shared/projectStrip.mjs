@@ -17,23 +17,62 @@ function baseName(cwd) {
   return cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || cwd
 }
 
+const sameFolder = (a, b) => launchKey(a) === launchKey(b)
+
+/**
+ * The project a folder belongs to — the badge it should show as. A session in
+ * `~/Projects/app/web` or in `~/Projects/app/.claude/worktrees/x` is activity
+ * in `~/Projects/app`, not a project of its own:
+ *   - under the Projects folder (`projectsDir`), the project is the first
+ *     folder below it;
+ *   - anywhere else, a hidden folder (`.claude`, `.git`, …) ends the project
+ *     path, unless that would leave the home folder, a drive or nothing —
+ *     then the folder stands as it is.
+ * Separators come back as they went in; a non-string comes back untouched.
+ */
+export function projectRoot(cwd, { projectsDir, home } = {}) {
+  if (typeof cwd !== 'string' || !cwd.trim()) return cwd
+  const trimmed = cwd.replace(/[\\/]+$/, '')
+  const sep = trimmed.includes('\\') ? '\\' : '/'
+  const parts = trimmed.split(/[\\/]+/)
+  const under = (root) => {
+    if (typeof root !== 'string' || !root.trim()) return null
+    const rootParts = root.replace(/[\\/]+$/, '').split(/[\\/]+/)
+    if (parts.length <= rootParts.length) return null
+    for (let i = 0; i < rootParts.length; i++) if (parts[i].toLowerCase() !== rootParts[i].toLowerCase()) return null
+    return rootParts.length
+  }
+  const below = under(projectsDir)
+  if (below !== null) return parts.slice(0, below + 1).join(sep)
+  const hidden = parts.findIndex((p, i) => i > 0 && p.startsWith('.'))
+  if (hidden <= 1) return trimmed || cwd
+  const cut = parts.slice(0, hidden).join(sep)
+  if (home && sameFolder(cut, home)) return trimmed || cwd
+  return cut
+}
+
 /**
  * Parse the persisted map (`tm.projects.v1`): `{ [launchKey]: { cwd, label, at } }`.
  * Anything malformed drops, and entries older than the window are pruned.
+ * `rootOf` folds each folder into its project (`projectRoot`); a folded
+ * entry takes the project's name, and the newest time wins when several fold
+ * into one.
  */
-export function sanitizeRecent(raw, now = Date.now()) {
+export function sanitizeRecent(raw, now = Date.now(), rootOf = (cwd) => cwd) {
   const out = {}
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
   for (const value of Object.values(raw)) {
     if (!value || typeof value !== 'object') continue
-    const { cwd, label, at } = value
-    if (typeof cwd !== 'string' || !cwd.trim() || cwd.length > MAX_PATH) continue
+    const { cwd: folder, label, at } = value
+    if (typeof folder !== 'string' || !folder.trim() || folder.length > MAX_PATH) continue
     if (typeof at !== 'number' || !Number.isFinite(at) || now - at > RECENT_WINDOW_MS) continue
+    const cwd = rootOf(folder)
+    const folded = !sameFolder(cwd, folder)
     const key = launchKey(cwd)
     if (out[key] && out[key].at >= at) continue
     out[key] = {
       cwd,
-      label: typeof label === 'string' && label.trim() ? label.slice(0, MAX_LABEL) : baseName(cwd),
+      label: !folded && typeof label === 'string' && label.trim() ? label.slice(0, MAX_LABEL) : baseName(cwd),
       at: Math.min(at, now)
     }
   }
@@ -53,9 +92,11 @@ function capRecent(map) {
  * Fold activity into the map: each touch is `{ cwd, label?, at }` — a session
  * event, a live agent's last update, a terminal opened in the folder. A folder
  * keeps its newest time. Returns the *same* object when nothing changed, so a
- * caller can skip a re-render and a localStorage write.
+ * caller can skip a re-render and a localStorage write. `rootOf` folds each
+ * touch into its project (`projectRoot`): a touch from a subfolder counts for
+ * the project and carries the project's name, not the subfolder's.
  */
-export function touchRecent(map, touches, now = Date.now()) {
+export function touchRecent(map, touches, now = Date.now(), rootOf = (cwd) => cwd) {
   let next = null
   const write = () => (next ??= { ...map })
   for (const key of Object.keys(map)) {
@@ -64,11 +105,14 @@ export function touchRecent(map, touches, now = Date.now()) {
   for (const t of touches) {
     if (!t || typeof t.cwd !== 'string' || !t.cwd.trim()) continue
     if (typeof t.at !== 'number' || !Number.isFinite(t.at) || now - t.at > RECENT_WINDOW_MS) continue
-    const key = launchKey(t.cwd)
+    const cwd = rootOf(t.cwd)
+    const folded = !sameFolder(cwd, t.cwd)
+    const key = launchKey(cwd)
     const current = (next ?? map)[key]
     const at = Math.min(t.at, now)
     if (current && current.at >= at) continue
-    write()[key] = { cwd: t.cwd, label: (typeof t.label === 'string' && t.label.trim()) ? t.label.slice(0, MAX_LABEL) : current?.label ?? baseName(t.cwd), at }
+    const label = !folded && typeof t.label === 'string' && t.label.trim() ? t.label.slice(0, MAX_LABEL) : current?.label ?? baseName(cwd)
+    write()[key] = { cwd, label, at }
   }
   return next ? capRecent(next) : map
 }

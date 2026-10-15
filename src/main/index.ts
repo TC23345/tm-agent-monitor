@@ -1715,6 +1715,8 @@ function settingsView() {
     pushUrl,
     pushAfterMin,
     repoDir: config.repoDir,
+    projectsDir: NEW_PROJECT_DIR,
+    home,
     providers: buildSnapshot().providers,
     extension: extensionStatus(),
     historySync: history.status(),

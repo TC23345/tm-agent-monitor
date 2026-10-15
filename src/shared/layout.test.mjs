@@ -1,10 +1,23 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  PANE_MIN, PANE_MIN_ROW, SIDEBAR_MAX, SIDEBAR_MIN, clampSidebarWidth, columnTemplate,
-  defaultSidebarWidth, equalFractions, normalizeFractions, resizeFractions, trackWidths,
+  PANE_MIN, PANE_MIN_ROW, SECTION_RESERVE, SECTION_SNAP, SIDEBAR_MAX, SIDEBAR_MIN, clampSectionHeight, clampSidebarWidth, columnTemplate,
+  defaultSidebarWidth, equalFractions, normalizeFractions, resizeFractions, sanitizeSectionHeights, trackWidths,
   viewportBucket
 } from './layout.mjs'
+
+test('a sidebar section folds under the snap, caps at the sidebar minus its reserve, and persists only sane sizes', () => {
+  assert.equal(clampSectionHeight(SECTION_SNAP - 1, 900), 0)
+  assert.equal(clampSectionHeight(SECTION_SNAP, 900), SECTION_SNAP)
+  assert.equal(clampSectionHeight(250.4, 900), 250)
+  assert.equal(clampSectionHeight(5_000, 900), 900 - SECTION_RESERVE)
+  assert.equal(clampSectionHeight(120, 100), SECTION_SNAP, 'a tiny sidebar still allows the smallest section')
+  assert.equal(clampSectionHeight(NaN, 900), 0)
+  assert.deepEqual(sanitizeSectionHeights({ limits: 240.6, agents: 10, other: 300, bad: 'x' }, ['limits', 'agents']), { limits: 241 }, 'unknown ids and sizes under the snap drop')
+  assert.deepEqual(sanitizeSectionHeights(null, ['limits']), {})
+  assert.deepEqual(sanitizeSectionHeights([200], ['limits']), {})
+  assert.deepEqual(sanitizeSectionHeights({ limits: 9_999 }, ['limits']), {}, 'an absurd height drops')
+})
 
 test('an undragged sidebar starts tighter on a narrow frame', () => {
   assert.equal(defaultSidebarWidth(1600), 400)

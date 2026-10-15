@@ -457,6 +457,10 @@ export interface AppSettings {
   pushAfterMin: number
   /** Local source checkout used by "Rebuild & relaunch" (CLAUDE_WATCH_REPO). */
   repoDir: string
+  /** The Projects folder (File → New project lands there; CLAUDE_WATCH_NEW_PROJECT_DIR): a folder under it is activity in its first segment there (`projectRoot`). */
+  projectsDir: string
+  /** The user's home folder — never folded into as a project. */
+  home: string
   providers: Record<ProviderId, ProviderHealth>
   /** The Chrome extension's native-messaging host (PRD §3.3) and where to load the extension from. */
   extension: ExtensionStatus

@@ -16,6 +16,38 @@ export const PANE_MIN = 200
  * few lines of shell. */
 export const PANE_MIN_ROW = 120
 
+/** A sidebar section dragged under this folds to its header (the stream's rule, `STREAM_SNAP`, but a
+ * section's header row and handle are ~52 px, so the smallest open section still shows a sliver of body). */
+export const SECTION_SNAP = 72
+/** What the sidebar keeps for everything but the section being dragged. */
+export const SECTION_RESERVE = 120
+const SECTION_MAX = 4_000
+
+/**
+ * The height a drag on a sidebar section's handle asks for, against the
+ * sidebar it lives in: 0 means fold it to its header; otherwise whole pixels
+ * from the snap up to what leaves the rest of the sidebar its reserve.
+ */
+export function clampSectionHeight(height, sidebarHeight) {
+  if (!Number.isFinite(height)) return 0
+  if (height < SECTION_SNAP) return 0
+  const max = Math.max(SECTION_SNAP, (Number.isFinite(sidebarHeight) ? sidebarHeight : 800) - SECTION_RESERVE)
+  return Math.round(Math.min(height, max))
+}
+
+/** The persisted section heights (`tm.sidebar.sections.v1`): `{ [view]: px }` for known views only, each a sane whole number. */
+export function sanitizeSectionHeights(raw, ids) {
+  const out = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  const known = new Set(ids)
+  for (const [id, value] of Object.entries(raw)) {
+    if (!known.has(id) || typeof value !== 'number' || !Number.isFinite(value)) continue
+    if (value < SECTION_SNAP || value > SECTION_MAX) continue
+    out[id] = Math.round(value)
+  }
+  return out
+}
+
 /**
  * The sidebar width for a user who has never dragged the splitter. Half-screen
  * and narrow displays start tighter, which is what the old `max-width: 1040px`

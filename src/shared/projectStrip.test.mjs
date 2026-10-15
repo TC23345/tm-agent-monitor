@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   MAX_RECENT, RECENT_WINDOW_MS, STREAM_DEFAULT, STREAM_RESERVE, STREAM_SNAP,
-  clampStreamHeight, packRows, readStreamHeight, recentList, sanitizeRecent, touchRecent
+  clampStreamHeight, packRows, projectRoot, readStreamHeight, recentList, sanitizeRecent, touchRecent
 } from './projectStrip.mjs'
 
 const NOW = Date.UTC(2026, 8, 29, 18)
@@ -77,6 +77,42 @@ test('packRows: overflow balances both rows so the newest sit at the left of eac
 
 test('packRows: a single badge wider than the strip still reads as overflow', () => {
   assert.deepEqual(packRows([300], 200, 6), { rows: [[0]], overflow: true })
+})
+
+test('projectRoot: a folder under Projects is its first segment there; a hidden folder ends a path elsewhere; home and drives stand', () => {
+  const roots = { projectsDir: 'C:\\Users\\me\\Projects', home: 'C:\\Users\\me' }
+  assert.equal(projectRoot('C:\\Users\\me\\Projects\\app', roots), 'C:\\Users\\me\\Projects\\app')
+  assert.equal(projectRoot('C:\\Users\\me\\Projects\\app\\web\\src', roots), 'C:\\Users\\me\\Projects\\app')
+  assert.equal(projectRoot('C:\\Users\\me\\Projects\\app\\.claude\\worktrees\\x\\', roots), 'C:\\Users\\me\\Projects\\app')
+  assert.equal(projectRoot('c:/users/ME/projects/app/web', roots), 'c:/users/ME/projects/app', 'case- and slash-insensitive, separators kept')
+  assert.equal(projectRoot('C:\\Users\\me\\Projects', roots), 'C:\\Users\\me\\Projects', 'the Projects folder itself is not a project of its own')
+  assert.equal(projectRoot('D:\\repos\\tool\\.git\\hooks', roots), 'D:\\repos\\tool', 'a hidden folder ends the project path anywhere')
+  assert.equal(projectRoot('D:\\repos\\tool\\packages\\ui', roots), 'D:\\repos\\tool\\packages\\ui', 'nothing to fold outside Projects')
+  assert.equal(projectRoot('C:\\Users\\me\\.claude\\skills', roots), 'C:\\Users\\me\\.claude\\skills', 'never folds to the home folder')
+  assert.equal(projectRoot('C:\\.hidden\\x', roots), 'C:\\.hidden\\x', 'never folds to a drive')
+  assert.equal(projectRoot('/home/me/code/app/.venv/bin', { home: '/home/me' }), '/home/me/code/app')
+  assert.equal(projectRoot('/home/me/code/app', {}), '/home/me/code/app', 'no roots configured: a plain path stands')
+  assert.equal(projectRoot(undefined, roots), undefined)
+  assert.equal(projectRoot('', roots), '')
+})
+
+test('recent: touches and stored entries fold into their project, which takes the newest time and its own name', () => {
+  const roots = { projectsDir: 'C:\\Users\\me\\Projects', home: 'C:\\Users\\me' }
+  const rootOf = (cwd) => projectRoot(cwd, roots)
+  let map = touchRecent({}, [
+    { cwd: 'C:\\Users\\me\\Projects\\app\\.claude\\worktrees\\feature', label: 'feature', at: NOW - 10 * MIN },
+    { cwd: 'C:\\Users\\me\\Projects\\app\\web', label: 'web', at: NOW - 5 * MIN },
+    { cwd: 'C:\\Users\\me\\Projects\\other', label: 'Other!', at: NOW - 20 * MIN }
+  ], NOW, rootOf)
+  assert.deepEqual(recentList(map, NOW).map((p) => [p.cwd, p.label]), [['C:\\Users\\me\\Projects\\app', 'app'], ['C:\\Users\\me\\Projects\\other', 'Other!']], 'one badge per project, the project name, a direct touch keeps its label')
+  assert.equal(map[Object.keys(map).find((k) => k.endsWith('app'))].at, NOW - 5 * MIN)
+  const same = touchRecent(map, [{ cwd: 'C:\\Users\\me\\Projects\\app\\web\\src', at: NOW - 6 * MIN }], NOW, rootOf)
+  assert.equal(same, map, 'an older touch of a subfolder changes nothing')
+  const stored = sanitizeRecent({
+    a: { cwd: 'C:\\Users\\me\\Projects\\app\\web', label: 'web', at: NOW - 3 * MIN },
+    b: { cwd: 'C:\\Users\\me\\Projects\\app', label: 'app', at: NOW - 30 * MIN }
+  }, NOW, rootOf)
+  assert.deepEqual(Object.values(stored).map((p) => [p.cwd, p.label, p.at]), [['C:\\Users\\me\\Projects\\app\\web', 'app', NOW - 3 * MIN]].map(([, l, at]) => ['C:\\Users\\me\\Projects\\app', l, at]), 'a stored subfolder entry folds in on load, newest time kept')
 })
 
 test('stream height: snaps shut near zero, leaves room for the sections under it', () => {

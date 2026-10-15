@@ -1,7 +1,7 @@
 import { Activity, Bot, Clipboard, Coins, Globe, Keyboard, NotebookPen, Terminal, ChartColumn, History } from 'lucide-react'
 import type { WebPaneConfig } from '@shared/webPane.mjs'
 import type { TerminalLaunch } from '@shared/types'
-import type { SizeBucket } from '@shared/layout.mjs'
+import { sanitizeSectionHeights, type SizeBucket } from '@shared/layout.mjs'
 import {
   emptySizes as emptySizesShared, migratePanesV3, readAllSizes, readLaunchPrefs, readPaneCols, sanitizeCollapsed,
   sanitizePanes, sanitizeSidebarViews, type LaunchPrefs, type Sizes
@@ -171,6 +171,22 @@ export function loadSidebarCollapsed(): SidebarView[] {
 export function saveSidebarCollapsed(views: SidebarView[]): void {
   try {
     localStorage.setItem(COLLAPSED_KEY, JSON.stringify(views))
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Each section's dragged height (its handle under the body), by view; absent = the stylesheet's stack sizing. */
+export type SectionHeights = Partial<Record<SidebarView, number>>
+const SECTIONS_KEY = 'tm.sidebar.sections.v1'
+
+export function loadSectionHeights(): SectionHeights {
+  return sanitizeSectionHeights(readJson(SECTIONS_KEY), SIDEBAR_IDS) as SectionHeights
+}
+
+export function saveSectionHeights(heights: SectionHeights): void {
+  try {
+    localStorage.setItem(SECTIONS_KEY, JSON.stringify(heights))
   } catch {
     /* non-fatal */
   }
