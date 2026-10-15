@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AppWindow, Bot, Check, Clipboard, ClipboardPaste, Copy, Download, Files, Globe, Image, Keyboard, Layers, MousePointerClick, Pencil, Scaling, Search, SquarePen, Star, Terminal, Trash2, X } from 'lucide-react'
-import type { ClipSummary, ClipsListing } from '@shared/types'
+import { AppWindow, ArrowLeft, Bot, Check, Clipboard, ClipboardPaste, Copy, Download, Files, FolderPlus, Globe, Image, Keyboard, Layers, MousePointerClick, Pencil, Scaling, Search, Settings, SquarePen, Star, Terminal, Trash2, X } from 'lucide-react'
+import type { ClipSummary, ClipsListing, PickerKeybinds } from '@shared/types'
 import { chordLabel, fromSource, inGroup, orderFavorites, sizeLabel } from '@shared/clips.mjs'
 import { fuzzyScore } from '@shared/palette.mjs'
 import { isPickerFavoriteModifier, modifierLabel } from '@shared/hotkeys.mjs'
 import { ContextMenu, tidyEntries, type ContextEntry } from '../ContextMenu'
-import { FilterChips } from '../clipboard/FilterChips'
+import { FilterChips, type FilterChip } from '../clipboard/FilterChips'
 import { SourceCell } from '../clipboard/SourceCell'
 import { ClipEditCard } from '../clipboard/ClipEditCard'
+import { GroupManager, type GroupRequest } from '../clipboard/GroupManager'
 import { gripAt, useClipColumns } from '../clipboard/ClipColumns'
 import { tid } from '../testid'
-import { MenuItem, MenuPop } from '../Menu'
 import mark from '../assets/icon.png'
 
 /** How many rows the enter animation staggers (Beautiful UI: 20 ms each, at most 8). */
@@ -44,7 +44,10 @@ function groupDot(name: string): string {
   return `hsl(${[...name].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 0) % 7 * 51 + 18} 60% 62%)`
 }
 
-type Chip = { id: string; label: string; count: number; dot?: string; star?: boolean; icon?: React.ReactNode }
+type Chip = { id: string; label: string; count: number; dot?: string; star?: boolean; icon?: React.ReactNode; hint?: string }
+
+/** The in-card settings pages, in the chip row's order: Keybinds · Groups · Window. */
+type SettingsSection = 'keybinds' | 'groups' | 'window'
 
 /**
  * A resize grip on the card's right edge, bottom edge or corner (a
@@ -73,7 +76,7 @@ function ResizeGrip({ edge, onEnd }: { edge: 'right' | 'bottom' | 'corner'; onEn
     <div
       className={`picker-grip picker-grip--${edge}`}
       aria-hidden
-      title="Drag to resize — Keys → Reset size puts it back"
+      title="Drag to resize — Settings → Window puts it back"
       data-testid={`picker-grip-${edge}`}
       onPointerDown={(e) => {
         if (e.button !== 0) return
@@ -130,10 +133,15 @@ export function Picker() {
   const [now, setNow] = useState(Date.now())
   /** The favorite keys' modifier, as main sent it with the last open. */
   const [favMod, setFavMod] = useState<'Alt' | 'Control'>('Alt')
-  /** The card size is a remembered one (resized by its grips): Keys → Reset size is live. */
+  /** The card size is a remembered one (resized by its grips): Settings → Window → Reset is live. */
   const [customSize, setCustomSize] = useState(false)
-  /** The menu bar's open dropdown (one at a time, like App's `openMenu`). */
-  const [openMenu, setOpenMenu] = useState<'clips' | 'keys' | null>(null)
+  /** The in-card settings view (the menu bar's gear): the open page, or null for the list. */
+  const [settings, setSettings] = useState<SettingsSection | null>(null)
+  /** Settings → Keybinds: the chords as main registered them, read when that page opens. */
+  const [keybinds, setKeybinds] = useState<PickerKeybinds | null>(null)
+  /** Settings → Groups arrived with a form to open (the row menu's Manage groups…). */
+  const [groupRequest, setGroupRequest] = useState<GroupRequest | null>(null)
+  const settingsRef = useRef<HTMLDivElement>(null)
   /** The row menu, at the right-click point. */
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   /** A row whose title is being renamed in place (F2 or the menu). */
@@ -170,12 +178,15 @@ export function Picker() {
         setMenu(null)
         setRenaming(null)
         setEditing(null)
+        // An open is for picking: the list, never the settings page it was closed on.
+        setSettings(null)
+        setGroupRequest(null)
         void refresh()
         requestAnimationFrame(() => { setOpen(true); inputRef.current?.focus() })
       } else {
         setOpen(false)
         setMenu(null)
-        setOpenMenu(null)
+        setSettings(null)
         setFlash(null)
         followId.current = null
         // Unmounting the edit card also ends a Keybind Record (the global chords come back).
@@ -188,6 +199,7 @@ export function Picker() {
 
   const clips = listing?.clips ?? []
   const groups = listing?.groups ?? []
+  const groupInfo = listing?.groupInfo ?? {}
   const favorites = useMemo(() => orderFavorites(clips, listing?.favoritesOrder ?? []), [clips, listing?.favoritesOrder])
   const byId = useMemo(() => new Map(clips.map((c) => [c.id, c])), [clips])
 
@@ -199,14 +211,25 @@ export function Picker() {
     if (images) out.push({ id: 'images', label: 'Images', count: images, icon: <Image strokeWidth={2} /> })
     for (const g of groups) {
       const n = clips.filter((c) => c.groups.includes(g)).length
-      if (n) out.push({ id: g, label: g, count: n, dot: groupDot(g) })
+      // A group's description is its chip's hover text (Settings → Groups sets it).
+      if (n) out.push({ id: g, label: g, count: n, dot: groupDot(g), hint: groupInfo[g]?.description })
     }
     for (const [id, label] of [['src:terminal', 'Panes'], ['src:chrome', 'Browser'], ['src:agent', 'Agents']] as const) {
       const n = clips.filter((c) => c.source.kind === id.slice(4)).length
       if (n) out.push({ id, label, count: n })
     }
     return out
-  }, [clips, favorites, groups])
+  }, [clips, favorites, groups, groupInfo])
+
+  // Settings → Keybinds reads the chords from main when it opens, and again when the list changes (a clip's keybind may have moved).
+  useEffect(() => {
+    if (settings !== 'keybinds') return
+    let live = true
+    void window.picker.keybinds().then((k) => { if (live && k) setKeybinds(k) })
+    return () => { live = false }
+  }, [settings, listing])
+  // The settings panel holds the keyboard while it is open (the search field is not on screen then).
+  useEffect(() => { if (settings) settingsRef.current?.focus() }, [settings])
 
   /**
    * Rows never move under the pointer while the picker is open: each view's
@@ -340,6 +363,20 @@ export function Picker() {
     setEditing(clip.id)
   }
   const closeEdit = () => { setEditing(null); refocus() }
+  /** The gear, or the row menu's Manage groups…: the settings view on one page, with a group form opened when asked. */
+  const openSettings = (section: SettingsSection, open?: GroupRequest['kind']) => {
+    setMenu(null)
+    setRenaming(null)
+    setEditing(null)
+    setSettings(section)
+    if (open) setGroupRequest((r) => ({ kind: open, n: (r?.n ?? 0) + 1 }))
+  }
+  /** Back to the list (the back circle, the gear again, or Escape). */
+  const closeSettings = () => {
+    setSettings(null)
+    setGroupRequest(null)
+    refocus()
+  }
 
   const menuEntries = (clip: ClipSummary): ContextEntry[] => tidyEntries([
     { kind: 'item', id: 'edit', label: 'Edit…', icon: <SquarePen />, onSelect: () => startEdit(clip) },
@@ -351,12 +388,16 @@ export function Picker() {
     { kind: 'item', id: 'rename', label: clip.custom ? 'Rename title' : 'Give it a title', icon: <Pencil />, keys: ['F2'], onSelect: () => startRename(clip) },
     {
       kind: 'submenu', id: 'groups', label: 'Add to group', icon: <Layers />,
-      disabled: !groups.length, hint: groups.length ? undefined : 'Make groups in the Clipboard pane',
-      entries: groups.map((g): ContextEntry => ({
-        kind: 'item', id: `group:${g}`, label: g, keepOpen: true,
-        icon: clip.groups.includes(g) ? <Check /> : <span className="clip-dot" style={{ background: groupDot(g) }} />,
-        onSelect: () => toggleGroup(clip, g)
-      }))
+      entries: [
+        ...groups.map((g): ContextEntry => ({
+          kind: 'item', id: `group:${g}`, label: g, keepOpen: true, hint: groupInfo[g]?.description,
+          icon: clip.groups.includes(g) ? <Check /> : <span className="clip-dot" style={{ background: groupDot(g) }} />,
+          onSelect: () => toggleGroup(clip, g)
+        })),
+        ...(groups.length ? [{ kind: 'sep' } as ContextEntry] : []),
+        // Groups are made and described in Settings → Groups; a new one gets its form straight away.
+        { kind: 'item', id: 'manage-groups', label: groups.length ? 'Manage groups…' : 'New group…', icon: <FolderPlus />, onSelect: () => openSettings('groups', groups.length ? undefined : 'new') }
+      ]
     },
     { kind: 'sep' },
     { kind: 'item', id: 'delete', label: 'Delete', icon: <Trash2 />, onSelect: () => remove(clip) }
@@ -379,6 +420,14 @@ export function Picker() {
         e.stopPropagation()
         owner.dispatchEvent(new CustomEvent('tm-escape'))
       }
+      return
+    }
+    // The settings view: its fields and buttons keep every key (Tab walks them); Escape goes back to the list.
+    if (settings) {
+      if (e.key !== 'Escape') return
+      closeSettings()
+      e.preventDefault()
+      e.stopPropagation()
       return
     }
     if (e.key === 'ArrowDown') setActive((i) => Math.min(i + 1, Math.max(0, rows.length - 1)))
@@ -409,33 +458,140 @@ export function Picker() {
     return () => el.removeEventListener('tm-escape', esc)
   }, [renaming?.id])
 
-  // An open menu-bar dropdown carries data-escape-close, so Escape closes it before the picker.
-  const menubarRef = useRef<HTMLElement>(null)
-  useEffect(() => {
-    const el = menubarRef.current
-    if (!el || !openMenu) return
-    const esc = () => { setOpenMenu(null); refocus() }
-    el.addEventListener('tm-escape', esc)
-    return () => el.removeEventListener('tm-escape', esc)
-  }, [openMenu])
-  const runMenu = (action: () => void) => () => { setOpenMenu(null); action(); refocus() }
-  const menuButton = (name: 'clips' | 'keys', label: string) => (
-    <button
-      className={`menu-btn ${openMenu === name ? 'menu-btn--open' : ''}`}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => setOpenMenu(openMenu === name ? null : name)}
-      onMouseEnter={() => { if (openMenu && openMenu !== name) setOpenMenu(name) }}
-      aria-expanded={openMenu === name}
-      data-testid={tid('menu-btn', name)}
-    >
-      {label}
-    </button>
-  )
-  const away = { onAway: () => setOpenMenu(null), ignoreSelector: '.picker-menubar' }
   const favLabel = modifierLabel(favMod)
-
   const menuClip = menu ? byId.get(menu.id) : undefined
   const modKey = modifierLabel(favMod)
+
+  // ---- the settings view: three pages in the chip row's place, one panel in the list's ----
+  const sectionChips: FilterChip[] = [
+    { id: 'keybinds', label: 'Keybinds', icon: <Keyboard strokeWidth={2} />, count: clips.filter((c) => c.hotkey).length || undefined, active: settings === 'keybinds' },
+    { id: 'groups', label: 'Groups', icon: <Layers strokeWidth={2} />, count: groups.length || undefined, active: settings === 'groups' },
+    { id: 'window', label: 'Window', icon: <AppWindow strokeWidth={2} />, active: settings === 'window' }
+  ]
+  const keyRow = (label: string, keys: string[], icon: React.ReactNode, hint?: string) => (
+    <div className="pset-row" key={label}>
+      {icon}
+      <span className="pset-row-label"><span>{label}</span>{hint && <span className="pset-hint">{hint}</span>}</span>
+      <span className="pset-keys">{keys.map((k) => <kbd key={k}>{k}</kbd>)}</span>
+    </div>
+  )
+  const chordRows = (keybinds?.rows ?? []).filter((r) => r.id === 'pickerHotkey' || /^favorite[123]$/.test(r.id))
+  const clipRowNote = (id: string) => keybinds?.rows.find((r) => r.id === `clip:${id}`)?.note
+  const withKeybind = clips.filter((c) => c.hotkey)
+  const withCode = clips.filter((c) => c.shortcut)
+  const settingsPanel = settings && (
+    <div
+      className="picker-settings"
+      ref={settingsRef}
+      tabIndex={-1}
+      role="region"
+      aria-label="Settings"
+      // A button that unmounts under the pointer (Cancel, Delete) would drop focus on the body and the keys with it.
+      onBlur={(e) => { if (!e.relatedTarget) requestAnimationFrame(() => { if (document.activeElement === document.body) settingsRef.current?.focus() }) }}
+      data-testid={tid('picker-settings', settings)}
+    >
+      {settings === 'keybinds' && (
+        <>
+          <section className="pset-section">
+            <h3 className="pset-h">Global shortcuts</h3>
+            {chordRows.map((r) => {
+              const fav = /^favorite([123])$/.exec(r.id)
+              const clip = fav ? favorites[Number(fav[1]) - 1] : undefined
+              return (
+                <div className="pset-row" key={r.id} data-testid={tid('picker-chord', r.id)}>
+                  {fav ? <Star className="picker-ic" strokeWidth={2} /> : <Clipboard className="picker-ic" strokeWidth={2} />}
+                  <span className="pset-row-label">
+                    <span>{r.label}</span>
+                    <span className="pset-hint">{fav ? (clip ? `“${clip.title}”` : 'No favorite there yet — star a clip') : 'Opens this picker from any app'}</span>
+                  </span>
+                  {r.note && <span className="pset-note" title={r.note}>{r.note}</span>}
+                  <kbd className="clip-chord">{r.active ? chordLabel(r.active) : '—'}</kbd>
+                </div>
+              )
+            })}
+            {!keybinds && <div className="pset-hint">Reading the shortcuts…</div>}
+            <div className="pset-actions">
+              <button className="picker-btn is-small" onClick={() => window.picker.openKeySettings()} data-testid="picker-settings:keys">Change in Settings…</button>
+              <span className="pset-hint">Record or reset them, and pick {favLabel} or {favMod === 'Alt' ? 'Ctrl' : 'Alt'} for the favorite keys here.</span>
+            </div>
+          </section>
+          <section className="pset-section">
+            <h3 className="pset-h">Clip keybinds</h3>
+            {withKeybind.map((c) => (
+              <button className="pset-row" key={c.id} onClick={() => startEdit(c)} title="Edit this clip's keybind" data-testid={tid('picker-keybind', c.id)}>
+                <Glyph clip={c} />
+                <span className="pset-row-label"><span>{c.title || '(blank)'}</span><span className="pset-hint">Pastes this clip from any app</span></span>
+                {clipRowNote(c.id) && <span className="pset-note" title={clipRowNote(c.id)}>{clipRowNote(c.id)}</span>}
+                <kbd className="clip-chord">{chordLabel(c.hotkey!)}</kbd>
+              </button>
+            ))}
+            {!withKeybind.length && <div className="pset-hint">None yet. Edit… a clip and record a keybind; it pastes that clip wherever you are.</div>}
+          </section>
+          <section className="pset-section">
+            <h3 className="pset-h">Expansion codes</h3>
+            {withCode.map((c) => (
+              <button className="pset-row" key={c.id} onClick={() => startEdit(c)} title="Edit this clip's expansion code" data-testid={tid('picker-code', c.id)}>
+                <Glyph clip={c} />
+                <span className="pset-row-label"><span>{c.title || '(blank)'}</span><span className="pset-hint">Typed in Chrome, it expands to this clip</span></span>
+                <span className="clip-short">{c.shortcut}</span>
+              </button>
+            ))}
+            {!withCode.length && <div className="pset-hint">None yet. Edit… a clip and give it a code like ;sig; typing it in Chrome expands to the clip.</div>}
+          </section>
+          <section className="pset-section">
+            <h3 className="pset-h">In the picker</h3>
+            {keyRow('Copy', ['Click'], <MousePointerClick className="picker-ic" strokeWidth={2} />, 'The picker stays open')}
+            {keyRow('Paste where you were', ['↵'], <ClipboardPaste className="picker-ic" strokeWidth={2} />, 'Also a double-click')}
+            {keyRow('Copy and close', ['⇧', '↵'], <Copy className="picker-ic" strokeWidth={2} />)}
+            {keyRow('Paste a favorite', [favLabel, '1–3'], <Star className="picker-ic" strokeWidth={2} />)}
+            {keyRow('Rename', ['F2'], <Pencil className="picker-ic" strokeWidth={2} />)}
+            {keyRow('Next filter', ['Tab'], <Layers className="picker-ic" strokeWidth={2} />)}
+            {keyRow('Close', ['Esc'], <X className="picker-ic" strokeWidth={2} />, 'An open search collapses first')}
+          </section>
+        </>
+      )}
+      {settings === 'groups' && (
+        <section className="pset-section">
+          <GroupManager
+            groups={groups}
+            groupInfo={groupInfo}
+            count={(g) => clips.filter((c) => c.groups.includes(g)).length}
+            dot={groupDot}
+            manage={window.picker.manageGroup}
+            request={groupRequest}
+            onPick={(g) => { setFilter(g); closeSettings() }}
+            onIdle={() => settingsRef.current?.focus()}
+            testPrefix="picker-group"
+          />
+        </section>
+      )}
+      {settings === 'window' && (
+        <>
+          <section className="pset-section">
+            <h3 className="pset-h">Size</h3>
+            <div className="pset-row">
+              <Scaling className="picker-ic" strokeWidth={2} />
+              <span className="pset-row-label"><span>Card size</span><span className="pset-hint">Drag the right edge, the bottom edge or the corner; the size is remembered for the next open.</span></span>
+              <button className="picker-btn is-small" disabled={!customSize} title={customSize ? 'Back to the default size, now and on the next open' : 'Already the default size'} onClick={() => { window.picker.resetSize(); setCustomSize(false) }} data-testid="picker-settings:reset-size">Reset to default</button>
+            </div>
+          </section>
+          <section className="pset-section">
+            <h3 className="pset-h">Workspace</h3>
+            <div className="pset-row">
+              <Clipboard className="picker-ic" strokeWidth={2} />
+              <span className="pset-row-label"><span>Clipboard pane</span><span className="pset-hint">The whole history in the workspace: capture settings, import, select and merge.</span></span>
+              <button className="picker-btn is-small" onClick={() => window.picker.openClipboardPane()} data-testid="picker-settings:pane">Open</button>
+            </div>
+            <div className="pset-row">
+              <Keyboard className="picker-ic" strokeWidth={2} />
+              <span className="pset-row-label"><span>Keyboard shortcuts</span><span className="pset-hint">Every global chord, recorded or reset, in the workspace's Settings.</span></span>
+              <button className="picker-btn is-small" onClick={() => window.picker.openKeySettings()} data-testid="picker-settings:shortcuts">Open</button>
+            </div>
+          </section>
+        </>
+      )}
+    </div>
+  )
 
   return (
     <div className="picker-root" onPointerDown={(e) => { if (e.target === e.currentTarget) window.picker.close() }} data-testid="picker-root">
@@ -450,79 +606,93 @@ export function Picker() {
         data-menu-host=""
         data-testid="picker"
       >
-        {/* The menu bar: the workspace title bar's brand mark and menus (Menu.tsx), not a restyle. */}
+        {/* The menu bar: the workspace title bar's brand mark and menu-button look, with two icon buttons at the right
+            — export, and the in-card settings — instead of text menus. */}
         <header className="titlebar picker-titlebar">
-          <nav className="menubar picker-menubar" ref={menubarRef} {...(openMenu ? { 'data-escape-close': '' } : {})} data-testid="picker-menubar">
+          <nav className="menubar picker-menubar" data-testid="picker-menubar">
             <img className="brand-mark" src={mark} alt="" draggable={false} title="TaylorMade Agent Monitor" />
-            <div className="menu-wrap">
-              {menuButton('clips', 'Clips')}
-              {openMenu === 'clips' && (
-                <MenuPop {...away}>
-                  <MenuItem icon={<Download strokeWidth={2} />} label="Export to JSON…" hint="Writes every clip in the clear to a file you choose" onClick={runMenu(() => { void window.picker.exportClips() })} />
-                  <div className="menu-sep" />
-                  <MenuItem icon={<Clipboard strokeWidth={2} />} label="Open Clipboard pane" hint="Close the picker and open the workspace on the Clipboard pane" onClick={runMenu(() => window.picker.openClipboardPane())} />
-                  <div className="menu-sep" />
-                  <MenuItem icon={<X strokeWidth={2} />} label="Close" keys={['Esc']} onClick={runMenu(() => window.picker.close())} />
-                </MenuPop>
-              )}
-            </div>
-            <div className="menu-wrap">
-              {menuButton('keys', 'Keys')}
-              {openMenu === 'keys' && (
-                <MenuPop {...away}>
-                  <MenuItem icon={<Keyboard strokeWidth={2} />} label="Keyboard shortcuts…" hint="Settings → Keyboard shortcuts: the global chords and the picker's favorite modifier" onClick={runMenu(() => window.picker.openKeySettings())} />
-                  <div className="menu-sep" />
-                  {/* The picker's own keys, read-only: there is no hint footer. */}
-                  <MenuItem icon={<MousePointerClick strokeWidth={2} />} label="Copy" keys={['Click']} disabled onClick={() => {}} />
-                  <MenuItem icon={<ClipboardPaste strokeWidth={2} />} label="Paste where you were" keys={['↵']} hint="Also a double-click" disabled onClick={() => {}} />
-                  <MenuItem icon={<Copy strokeWidth={2} />} label="Copy and close" keys={['⇧', '↵']} disabled onClick={() => {}} />
-                  <MenuItem icon={<Star strokeWidth={2} />} label="Paste a favorite" keys={[favLabel, '1–3']} disabled onClick={() => {}} />
-                  <MenuItem icon={<Pencil strokeWidth={2} />} label="Rename" keys={['F2']} disabled onClick={() => {}} />
-                  <MenuItem icon={<Layers strokeWidth={2} />} label="Next filter" keys={['Tab']} disabled onClick={() => {}} />
-                  <div className="menu-sep" />
-                  <MenuItem
-                    icon={<Scaling strokeWidth={2} />}
-                    label="Reset size"
-                    hint={customSize ? 'Back to the default size, now and on the next open' : 'Already the default size — drag an edge or the corner to resize'}
-                    disabled={!customSize}
-                    onClick={runMenu(() => { window.picker.resetSize(); setCustomSize(false) })}
-                  />
-                </MenuPop>
-              )}
+            <div className="picker-menubar-tools">
+              <button
+                className="menu-btn menu-btn--icon"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { void window.picker.exportClips() }}
+                title="Export to JSON… — every clip in the clear, to a file you choose"
+                aria-label="Export to JSON"
+                data-testid={tid('menu-btn', 'export')}
+              >
+                <Download strokeWidth={2} />
+              </button>
+              <button
+                className={`menu-btn menu-btn--icon ${settings ? 'menu-btn--open' : ''}`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => (settings ? closeSettings() : openSettings('keybinds'))}
+                title={settings ? 'Back to the clips (Esc)' : 'Settings — keybinds, groups, window'}
+                aria-label="Settings"
+                aria-pressed={!!settings}
+                data-testid={tid('menu-btn', 'settings')}
+              >
+                <Settings strokeWidth={2} />
+              </button>
             </div>
           </nav>
         </header>
         <div className="picker-top">
-          {/* The search: a circle before the chips that opens on click, or as soon as you type. */}
-          <div className={`picker-search ${searchOpen || query ? 'is-open' : ''}`} data-testid="picker-search-wrap">
-            <button
-              className="picker-search-btn"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { setSearchOpen((v) => (v && !query ? false : true)); inputRef.current?.focus() }}
-              title="Search"
-              aria-label="Search"
-              aria-expanded={searchOpen || !!query}
-              data-testid="picker-search-toggle"
-            >
-              <Search strokeWidth={2} />
-            </button>
-            <input
-              ref={inputRef}
-              className="picker-input"
-              value={query}
-              aria-label="Search clips"
-              spellCheck={false}
-              autoComplete="off"
-              onChange={(e) => { setQuery(e.target.value); if (e.target.value) setSearchOpen(true) }}
-              data-testid="picker-search"
-            />
-          </div>
-          <FilterChips
-            chips={chips.map((c) => ({ ...c, active: filter === c.id }))}
-            onPick={(chip) => { setFilter(chip.id); inputRef.current?.focus() }}
-            testPrefix="picker-chip"
-          />
+          {settings ? (
+            <>
+              {/* The settings view: a back circle where the search sits, then the pages as chips. */}
+              <div className="picker-search" data-testid="picker-back-wrap">
+                <button
+                  className="picker-search-btn"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={closeSettings}
+                  title="Back to the clips (Esc)"
+                  aria-label="Back to the clips"
+                  data-testid="picker-back"
+                >
+                  <ArrowLeft strokeWidth={2} />
+                </button>
+              </div>
+              <FilterChips
+                chips={sectionChips}
+                onPick={(chip) => openSettings(chip.id as SettingsSection)}
+                testPrefix="picker-section"
+              />
+            </>
+          ) : (
+            <>
+              {/* The search: a circle before the chips that opens on click, or as soon as you type. */}
+              <div className={`picker-search ${searchOpen || query ? 'is-open' : ''}`} data-testid="picker-search-wrap">
+                <button
+                  className="picker-search-btn"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { setSearchOpen((v) => (v && !query ? false : true)); inputRef.current?.focus() }}
+                  title="Search"
+                  aria-label="Search"
+                  aria-expanded={searchOpen || !!query}
+                  data-testid="picker-search-toggle"
+                >
+                  <Search strokeWidth={2} />
+                </button>
+                <input
+                  ref={inputRef}
+                  className="picker-input"
+                  value={query}
+                  aria-label="Search clips"
+                  spellCheck={false}
+                  autoComplete="off"
+                  onChange={(e) => { setQuery(e.target.value); if (e.target.value) setSearchOpen(true) }}
+                  data-testid="picker-search"
+                />
+              </div>
+              <FilterChips
+                chips={chips.map((c) => ({ ...c, active: filter === c.id }))}
+                onPick={(chip) => { setFilter(chip.id); inputRef.current?.focus() }}
+                testPrefix="picker-chip"
+              />
+            </>
+          )}
         </div>
+        {settings ? settingsPanel : (
         <div
           className="picker-list"
           ref={listRef}
@@ -623,6 +793,7 @@ export function Picker() {
             <div className="picker-empty">{clips.length === 0 ? 'Nothing copied yet.' : `No clips match “${query.trim()}”`}</div>
           )}
         </div>
+        )}
         <ResizeGrip edge="right" onEnd={() => setCustomSize(true)} />
         <ResizeGrip edge="bottom" onEnd={() => setCustomSize(true)} />
         <ResizeGrip edge="corner" onEnd={() => setCustomSize(true)} />

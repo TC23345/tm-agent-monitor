@@ -83,9 +83,27 @@ export interface ClipCaptureSettings {
   maxAgeDays: number
 }
 
+/** What a group carries besides its name (`meta.groupInfo`, keyed by name): a description shown when its chip or row is hovered. */
+export interface ClipGroupInfo {
+  description?: string
+}
+
+/**
+ * One change to a group (`clips:group`, the picker's and the pane's group
+ * manager): main validates the shape, the store answers `true` or a plain
+ * sentence (a bad or taken name, a group that is gone).
+ */
+export type ClipGroupOp =
+  | { op: 'add'; name: string; description?: string }
+  | { op: 'rename'; name: string; to: string }
+  | { op: 'describe'; name: string; description: string }
+  | { op: 'remove'; name: string }
+
 export interface ClipsListing {
   clips: import('./clips.mjs').ClipSummary[]
   groups: string[]
+  /** Per-group details for the names in `groups` (a group with nothing to say has no entry). */
+  groupInfo: Record<string, ClipGroupInfo>
   favoritesOrder: string[]
   paused: boolean
   /** 0 = capturing; -1 = paused until resumed; else when the pause ends. */
@@ -383,6 +401,12 @@ export interface ShortcutRow {
   note?: string
   /** A clip's keybind (read-only here; edited in the clip's Edit… card). */
   clipId?: string
+}
+
+/** The picker's Settings → Keybinds page (`picker:keybinds`): the same rows Settings shows, plus the favorite keys' modifier. */
+export interface PickerKeybinds {
+  rows: ShortcutRow[]
+  favoriteModifier: PickerFavoriteModifier
 }
 
 export interface AppSettingsPatch {

@@ -1,10 +1,11 @@
 // The quick picker's bridge: the smallest surface that lists, picks and
 // closes, edits a row (star, groups, delete, and the Edit… card's title, text,
 // note, expansion code and keybind — whose Record may suspend the global
-// chords) and opens its keys in Settings. Nothing else from the workspace
-// preload — no merge, no clear, no group management, no settings.
+// chords), manages the groups (its Settings → Groups page) and reads the
+// chords for its Settings → Keybinds page. Nothing else from the workspace
+// preload — no merge, no clear, no capture settings.
 import { contextBridge, ipcRenderer } from 'electron'
-import type { ClipsListing } from '../shared/types.js'
+import type { ClipGroupOp, ClipsListing, PickerKeybinds } from '../shared/types.js'
 
 const api = {
   /** The same listing the Clipboard pane reads (summaries, groups, favorites order). */
@@ -38,17 +39,33 @@ const api = {
   deleteClips: (ids: string[]): Promise<number> => ipcRenderer.invoke('clips:delete', ids),
   /** One text clip's full body, for Edit text — the listing carries only a 200-character preview. */
   clipText: (id: string): Promise<{ text: string } | null> => ipcRenderer.invoke('clips:get', id),
-  /** Keys → Keyboard shortcuts…: close, and open the workspace at Settings → Keyboard shortcuts. */
+  /**
+   * Settings → Groups: add (with an optional description), rename, describe
+   * or remove one group. Only the op's own fields leave the page; main
+   * validates the shape and answers `true`, `false`, or a plain sentence
+   * (a bad or taken name, a group that is gone) for the form to show.
+   */
+  manageGroup: (op: ClipGroupOp): Promise<boolean | string> => {
+    const o = op as Record<string, unknown>
+    const clean: Record<string, unknown> = { op: o?.op }
+    if (typeof o?.name === 'string') clean.name = o.name
+    if (o?.op === 'rename' && typeof o.to === 'string') clean.to = o.to
+    if ((o?.op === 'add' || o?.op === 'describe') && typeof o.description === 'string') clean.description = o.description
+    return ipcRenderer.invoke('clips:group', clean)
+  },
+  /** Settings → Keybinds: the global chords as Settings shows them, and the favorite keys' modifier. */
+  keybinds: (): Promise<PickerKeybinds | null> => ipcRenderer.invoke('picker:keybinds'),
+  /** Settings → Keybinds → Change in Settings…: close, and open the workspace at Settings → Keyboard shortcuts. */
   openKeySettings: () => ipcRenderer.send('picker:settings'),
   /** A resize grip's pointer travel since pointer-down (main clamps it and moves the window). */
   resize: (dw: number, dh: number) => ipcRenderer.send('picker:resize', dw, dh),
   /** Pointer-up on a grip: main remembers the size for the next open. */
   resizeEnd: () => ipcRenderer.send('picker:resize-end'),
-  /** Keys → Reset size: back to the default card, now and on the next open. */
+  /** Settings → Window → Reset to default: back to the default card, now and on the next open. */
   resetSize: () => ipcRenderer.send('picker:reset-size'),
-  /** Clips → Open Clipboard pane: close, and open the workspace on the Clipboard pane. */
+  /** Settings → Window → Open Clipboard pane: close, and open the workspace on the Clipboard pane. */
   openClipboardPane: () => ipcRenderer.send('picker:clipboard'),
-  /** Clips → Export to JSON…: the same explicit export as the pane (a save dialog; main answers null when cancelled). */
+  /** The menu bar's export button: the same explicit export as the pane (a save dialog; main answers null when cancelled). */
   exportClips: (): Promise<{ path: string; count: number } | null> => ipcRenderer.invoke('clips:export'),
   /** Open/close cue from main, with the pop-in's origin corner, the favorite keys' modifier and whether the size is a remembered one, on `enter`. */
   onPhase: (cb: (phase: 'enter' | 'exit', origin?: string, favoriteModifier?: string, customSize?: boolean) => void) => {

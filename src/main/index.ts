@@ -34,7 +34,7 @@ import { startClipboardWatch, type ClipboardWatch } from './clipboardWatch.js'
 import { installWebPaneGuards } from './webPanes.js'
 import { clipboardHasImage, makeThumbnail, protectText, protectionAvailable, readClipboardSnapshot, readClipboardText, unprotectText, writeClipboardImage, writeClipboardText } from './clipboardIo.js'
 import { ClipStore, type ClipSettingsPatch } from './clipStoreCore.mjs'
-import { cleanNote, clipTitle, describeSource, domainBlocked, filterClips, hotkeyProblem, orderFavorites, parseSnippetNote, shortcutProblem, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, MAX_NOTE, MAX_TITLE, type ClipSource } from '../shared/clips.mjs'
+import { cleanNote, clipTitle, describeSource, domainBlocked, filterClips, hotkeyProblem, orderFavorites, parseSnippetNote, shortcutProblem, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_GROUP_DESCRIPTION, MAX_IMAGE_BYTES, MAX_NOTE, MAX_TITLE, type ClipSource } from '../shared/clips.mjs'
 import { applyPickerSize, createPicker, destroyPicker, endPickerResize, hidePicker, pickClip, pickerWindow, resizePickerBy, showPicker, togglePicker } from './picker.js'
 import { sanitizePickerSize, PICKER_CARD } from '../shared/pickerPlace.mjs'
 import { noteNameFor as snippetFileName } from '../shared/notes.mjs'
@@ -49,7 +49,7 @@ import { estimateCostUsd } from '../shared/pricing.mjs'
 // export 'autoUpdater' not found"), so import the default export and destructure.
 import electronUpdater from 'electron-updater'
 import { validateMutableSettingsPatch } from './store.js'
-import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type WindowMaterial, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights, type ClipsListing, type ExtensionStatus, type PickerFavoriteModifier, type AppShortcutId, type ShortcutId, type ShortcutRow } from '../shared/types.js'
+import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type WindowMaterial, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights, type ClipsListing, type ClipGroupOp, type PickerKeybinds, type ExtensionStatus, type PickerFavoriteModifier, type AppShortcutId, type ShortcutId, type ShortcutRow } from '../shared/types.js'
 import { isPickerFavoriteModifier, normalizeAccelerator, normalizeFavoriteHotkeys, sameChord, SHORTCUT_DEFAULTS } from '../shared/hotkeys.mjs'
 
 const { autoUpdater } = electronUpdater
@@ -2465,13 +2465,26 @@ function registerIpc(): void {
   }
   const groupNames = (v: unknown): string[] | null =>
     Array.isArray(v) && v.length <= 60 && v.every((g) => typeof g === 'string' && g.length <= 40) ? (v as string[]) : null
+  // One group change: the op, a name (≤ 40, the store applies groupNameOk), a new name or a description (≤ 2 × the stored limit; the store cleans it).
+  const groupOp = (v: unknown): ClipGroupOp | null => {
+    if (typeof v !== 'object' || v === null || Array.isArray(v)) return null
+    const o = v as Record<string, unknown>
+    const name = (x: unknown): x is string => typeof x === 'string' && x.length > 0 && x.length <= 40
+    const desc = (x: unknown): x is string => typeof x === 'string' && x.length <= 2 * MAX_GROUP_DESCRIPTION
+    if (o.op === 'add' && name(o.name) && (o.description === undefined || desc(o.description))) return { op: 'add', name: o.name, ...(o.description !== undefined ? { description: o.description } : {}) }
+    if (o.op === 'rename' && name(o.name) && name(o.to)) return { op: 'rename', name: o.name, to: o.to }
+    if (o.op === 'describe' && name(o.name) && desc(o.description)) return { op: 'describe', name: o.name, description: o.description }
+    if (o.op === 'remove' && name(o.name)) return { op: 'remove', name: o.name }
+    return null
+  }
   ipcMain.handle('clips:list', async (): Promise<ClipsListing> => {
     const store = clipStore
-    if (!store) return { clips: [], groups: [], favoritesOrder: [], paused: false, pausedUntil: 0, settings: { blockedExes: [], blockedDomains: [], redactSecrets: true, captureImages: true, maxItems: 0, maxAgeDays: 0 }, mode: 'off', unprotected: false, loaded: false }
+    if (!store) return { clips: [], groups: [], groupInfo: {}, favoritesOrder: [], paused: false, pausedUntil: 0, settings: { blockedExes: [], blockedDomains: [], redactSecrets: true, captureImages: true, maxItems: 0, maxAgeDays: 0 }, mode: 'off', unprotected: false, loaded: false }
     const meta = store.settings()
     return {
       clips: store.list().slice(0, 2000).map((c) => summarize(c)),
       groups: meta.groups,
+      groupInfo: meta.groupInfo,
       favoritesOrder: meta.favoritesOrder,
       paused: store.isPaused(),
       pausedUntil: meta.pausedUntil,
@@ -2567,6 +2580,12 @@ function registerIpc(): void {
   ipcMain.handle('clips:groups', async (_e, names: unknown): Promise<string[] | null> => {
     const list = groupNames(names)
     return list && clipStore ? clipStore.setGroups(list) : null
+  })
+  // One group's add / rename / describe / remove (both windows' group manager): `true`, or a plain sentence saying why not.
+  ipcMain.handle('clips:group', async (_e, op: unknown): Promise<boolean | string> => {
+    const clean = groupOp(op)
+    if (!clean || !clipStore) return false
+    return clipStore.manageGroup(clean) as boolean | string
   })
   ipcMain.handle('clips:favorites-order', async (_e, ids: unknown): Promise<boolean> => {
     const list = clipIds(ids)
@@ -2677,7 +2696,14 @@ function registerIpc(): void {
     void pickClip(id, mode)
   })
   ipcMain.on('picker:close', () => hidePicker())
-  // The search row's "keys" link: close the picker, open the workspace on the Settings →
+  // The picker's Settings → Keybinds page: the chords as Settings shows them
+  // (preferred, registered, why not) plus the favorite keys' modifier. Read
+  // on each open of that page, only from the picker's own page.
+  ipcMain.handle('picker:keybinds', async (event, ...args: unknown[]): Promise<PickerKeybinds | null> => {
+    if (args.length || event.sender !== pickerWindow()?.webContents) return null
+    return { rows: shortcutRows(), favoriteModifier: pickerFavoriteModifier }
+  })
+  // Settings → Keybinds → Change in Settings…: close the picker, open the workspace on the Settings →
   // Keyboard shortcuts sub-page. No arguments, and only from the picker's own page.
   ipcMain.on('picker:settings', (event, ...args: unknown[]) => {
     if (args.length || event.sender !== pickerWindow()?.webContents) return

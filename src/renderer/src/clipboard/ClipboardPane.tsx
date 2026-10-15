@@ -4,7 +4,7 @@ import {
   ListChecks, Merge, MoreHorizontal, Pause, Pencil, Play, Plus, Search, SlidersHorizontal, Square, SquarePen, Star, Terminal, Trash2, Upload, X
 } from 'lucide-react'
 import type { ClipSummary, ClipsListing } from '@shared/types'
-import { appDisplayName, chordLabel, fromSource, groupNameOk, inGroup, looksLikeCode, orderFavorites, sizeLabel, sourceLabel } from '@shared/clips.mjs'
+import { appDisplayName, chordLabel, fromSource, groupProblem, inGroup, looksLikeCode, orderFavorites, sizeLabel, sourceLabel } from '@shared/clips.mjs'
 import { fuzzyScore } from '@shared/palette.mjs'
 import { ContextMenu, tidyEntries, type ContextEntry } from '../ContextMenu'
 import { Collapse } from '../Collapse'
@@ -14,6 +14,7 @@ import { CaptureSettings } from './CaptureSettings'
 import { FilterChips, nextChip, type FilterChip } from './FilterChips'
 import { SourceCell } from './SourceCell'
 import { ClipEditCard } from './ClipEditCard'
+import { GroupManager, type GroupRequest } from './GroupManager'
 import { gripAt, useClipColumns } from './ClipColumns'
 
 /** Expanded sidebar sections. */
@@ -122,8 +123,10 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
   const [openSections, setOpenSections] = useState<string[]>(readOpen)
   const [now, setNow] = useState(Date.now())
   const [adding, setAdding] = useState<string | null>(null)
-  /** The capture settings card, shown where the detail card sits. */
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  /** The capture settings card or the group manager, shown where the detail card sits. */
+  const [settingsOpen, setSettingsOpen] = useState<'capture' | 'groups' | null>(null)
+  /** Manage groups… arrived with a form to open (New group…, or a group's Edit description…). */
+  const [groupRequest, setGroupRequest] = useState<GroupRequest | null>(null)
   /** Select mode (the Diff Table's click-to-toggle): a plain click picks a row instead of opening it. */
   const [selecting, setSelecting] = useState(false)
 
@@ -189,6 +192,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
 
   const clips = listing?.clips ?? []
   const groups = listing?.groups ?? []
+  const groupInfo = listing?.groupInfo ?? {}
   const byId = useMemo(() => new Map(clips.map((c) => [c.id, c])), [clips])
 
   /** The rows on screen: view, source and query applied; favorites in their saved order. */
@@ -246,9 +250,10 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
     { id: 'all', label: 'All', count: counts.all, active: group === 'all' },
     ...(counts.favorites ? [{ id: 'favorites', label: 'Favorites', count: counts.favorites, star: true, active: group === 'favorites' }] : []),
     ...(counts.images ? [{ id: 'images', label: 'Images', count: counts.images, icon: <Image strokeWidth={2} />, active: group === 'images' }] : []),
-    ...groups.filter((g) => counts.group(g)).map((g) => ({ id: g, label: g, count: counts.group(g), dot: `hsl(${groupHue(g)} 60% 62%)`, active: group === g })),
+    // A group's description is its chip's hover text (Manage groups… sets it).
+    ...groups.filter((g) => counts.group(g)).map((g) => ({ id: g, label: g, count: counts.group(g), dot: `hsl(${groupHue(g)} 60% 62%)`, active: group === g, hint: groupInfo[g]?.description })),
     ...sources.map((s) => ({ id: `src:${s.id}`, label: s.label, count: s.count, icon: s.icon, active: source === s.id }))
-  ], [counts, groups, sources, group, source])
+  ], [counts, groups, groupInfo, sources, group, source])
   /** A chip click does what the matching sidebar entry does: a view replaces the view, a source toggles on top of it. */
   const pickChip = (chip: FilterChip) => {
     if (chip.id.startsWith('src:')) setSource(source === chip.id.slice(4) ? '' : chip.id.slice(4))
@@ -353,8 +358,16 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
   const openEdit = (id: string) => {
     setSelected(id)
     setEditing(id)
-    setSettingsOpen(false)
+    setSettingsOpen(null)
     setTitleEdit(null)
+  }
+  /** More → Manage groups…, or a group's Edit description…: the group manager where the detail sits, with a form open when asked. */
+  const openGroups = (open?: GroupRequest['kind'], name?: string) => {
+    setSettingsOpen('groups')
+    setSelected(null)
+    setEditing(null)
+    setRenaming(null)
+    if (open) setGroupRequest((r) => ({ kind: open, name, n: (r?.n ?? 0) + 1 }))
   }
   /** Saved or cancelled: back to the detail, its body read again (an edit may have changed it). */
   const closeEdit = (id: string) => {
@@ -373,22 +386,22 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
     const r = renaming
     if (!r) return
     const name = r.value.trim()
-    if (!groupNameOk(name)) { setRenaming({ ...r, error: 'A short name that is not All, Favorites or Images' }); return }
-    if (groups.includes(name) && name !== r.name) { setRenaming({ ...r, error: 'That group exists' }); return }
+    const problem = groupProblem(name, groups, r.name)
+    if (problem) { setRenaming({ ...r, error: problem }); return }
     setRenaming(null)
     if (r.name === null) {
-      await window.watch.setClipGroups([...groups, name])
-      setGroup(name)
+      const res = await window.watch.manageClipGroup({ op: 'add', name })
+      if (res === true) setGroup(name)
+      else say(typeof res === 'string' ? res : 'That group could not be made')
     } else if (name !== r.name) {
-      // Rename = add the new name, move every member, drop the old one.
-      const members = clips.filter((c) => c.groups.includes(r.name!))
-      await window.watch.setClipGroups([...groups.map((g) => (g === r.name ? name : g))])
-      for (const c of members) await window.watch.updateClip(c.id, { groups: c.groups.map((g) => (g === r.name ? name : g)) })
-      if (group === r.name) setGroup(name)
+      // One write: every member follows the new name and the description comes along.
+      const res = await window.watch.manageClipGroup({ op: 'rename', name: r.name, to: name })
+      if (res !== true) say(typeof res === 'string' ? res : 'That group could not be renamed')
+      else if (group === r.name) setGroup(name)
     }
   }
   const deleteGroup = async (name: string) => {
-    await window.watch.setClipGroups(groups.filter((g) => g !== name))
+    await window.watch.manageClipGroup({ op: 'remove', name })
     if (group === name) setGroup('all')
   }
   const clear = async (all: boolean) => {
@@ -497,7 +510,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
     const first = byId.get(ids[0])
     return [
       ...groups.map((g): ContextEntry => ({
-        kind: 'item', id: `group:${g}`, label: g,
+        kind: 'item', id: `group:${g}`, label: g, hint: groupInfo[g]?.description,
         icon: first?.groups.includes(g) && ids.length === 1 ? <Check /> : <span className="clip-dot" style={{ background: `hsl(${groupHue(g)} 60% 62%)` }} />,
         keepOpen: ids.length === 1,
         onSelect: () => { for (const id of ids) { const c = byId.get(id); if (c && !(ids.length === 1 && c.groups.includes(g))) toggleGroup(id, g); else if (ids.length === 1) toggleGroup(id, g) } }
@@ -527,6 +540,8 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
     if (m.kind === 'group') {
       return tidyEntries([
         { kind: 'item', id: 'rename', label: 'Rename', icon: <Pencil />, keys: ['F2'], onSelect: () => setRenaming({ name: m.name, value: m.name }) },
+        { kind: 'item', id: 'describe', label: groupInfo[m.name]?.description ? 'Edit description…' : 'Add a description…', icon: <SquarePen />, hint: 'Shown when the group is hovered', onSelect: () => openGroups('edit', m.name) },
+        { kind: 'sep' },
         { kind: 'item', id: 'delete', label: 'Delete group', icon: <Trash2 />, hint: `Its ${counts.group(m.name)} clip${counts.group(m.name) === 1 ? '' : 's'} stay in history`, onSelect: () => void deleteGroup(m.name) }
       ])
     }
@@ -549,11 +564,12 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
     return tidyEntries([
       { kind: 'item', id: 'add', label: 'Add text clip…', icon: <Plus />, onSelect: () => setAdding('') },
       { kind: 'item', id: 'new-group', label: 'New group…', icon: <FolderPlus />, onSelect: () => setRenaming({ name: null, value: '' }) },
+      { kind: 'item', id: 'groups', label: 'Manage groups…', icon: <Layers />, hint: 'Names, descriptions (shown on hover), delete', onSelect: () => openGroups() },
       { kind: 'sep' },
       { kind: 'item', id: 'import', label: 'Import backup…', icon: <Upload />, hint: 'A JSON export from this app or from Clipboard History Pro; duplicates are skipped', onSelect: () => void importFile() },
       { kind: 'item', id: 'export', label: 'Export to JSON…', icon: <Download />, hint: 'Writes every clip in the clear to a file you choose', onSelect: () => void exportAll() },
       { kind: 'sep' },
-      { kind: 'item', id: 'settings', label: 'Capture settings…', icon: <SlidersHorizontal />, hint: 'Blocked apps and sites, secrets, images, retention', onSelect: () => { setSettingsOpen(true); setSelected(null); setEditing(null) } },
+      { kind: 'item', id: 'settings', label: 'Capture settings…', icon: <SlidersHorizontal />, hint: 'Blocked apps and sites, secrets, images, retention', onSelect: () => { setSettingsOpen('capture'); setSelected(null); setEditing(null) } },
       { kind: 'sep' },
       { kind: 'item', id: 'clear', label: 'Clear history…', icon: <Trash2 />, hint: 'Favorites and grouped clips stay', onSelect: () => setConfirm('clear') },
       { kind: 'item', id: 'clear-all', label: 'Clear everything…', icon: <Trash2 />, onSelect: () => setConfirm('clear-all') }
@@ -561,7 +577,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
   }
 
   // ---- sidebar ----
-  const navRow = (id: string, label: string, icon: ReactNode, count: number, extra: { kind?: 'group'; testId?: string } = {}) => {
+  const navRow = (id: string, label: string, icon: ReactNode, count: number, extra: { kind?: 'group'; testId?: string; hint?: string } = {}) => {
     const active = extra.kind === 'group' ? group === id : id.startsWith('src:') ? source === id.slice(4) : group === id && !id.startsWith('src:')
     return (
       <div
@@ -571,6 +587,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
       >
         <button
           className="clip-nav"
+          title={extra.hint}
           onClick={() => {
             if (id.startsWith('src:')) setSource(source === id.slice(4) ? '' : id.slice(4))
             else setGroup(id)
@@ -595,7 +612,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
       </button>
     )
   }
-  const groupRow = (g: string) => renaming && renaming.name === g ? renameInput() : navRow(g, g, <span className="clip-dot" style={{ background: `hsl(${groupHue(g)} 60% 62%)` }} />, counts.group(g), { kind: 'group' })
+  const groupRow = (g: string) => renaming && renaming.name === g ? renameInput() : navRow(g, g, <span className="clip-dot" style={{ background: `hsl(${groupHue(g)} 60% 62%)` }} />, counts.group(g), { kind: 'group', hint: groupInfo[g]?.description })
   const renameInput = () => renaming && (
     <div className="notes-rename" key="rename">
       <Layers className="notes-rename-ic" strokeWidth={2} />
@@ -689,7 +706,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
           setPicked(new Set())
           setSelected(c.id)
           setEditing(null)
-          setSettingsOpen(false)
+          setSettingsOpen(null)
         }}
         onDoubleClick={() => { if (!selecting) void copy(c.id) }}
         onKeyDown={(e) => { if (e.key === 'F2') { e.preventDefault(); setTitleEdit({ id: c.id, value: c.custom ? c.title : '' }) } }}
@@ -904,9 +921,34 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
             <button className="clip-pickbar-x" onClick={leaveSelect} title={selecting ? 'Leave select mode (Esc)' : 'Clear selection'} data-testid="clip-pickbar:close"><X strokeWidth={2} /></button>
           </div>
         )}
-        {settingsOpen
-          ? <CaptureSettings settings={listing.settings} onClose={() => setSettingsOpen(false)} />
-          : editing && byId.get(editing)
+        {settingsOpen === 'capture'
+          ? <CaptureSettings settings={listing.settings} onClose={() => setSettingsOpen(null)} />
+          : settingsOpen === 'groups'
+            ? (
+              <div className="clip-detail clip-settings" data-testid="clip-groups-card">
+                <div className="clip-detail-head">
+                  <Layers className="clip-ic" strokeWidth={2} />
+                  <span className="clip-detail-title">Groups</span>
+                  <span className="clip-detail-meta">a description shows when the group is hovered</span>
+                  <span className="clip-detail-actions">
+                    <button className="iconbtn iconbtn--sm" title="Close" onClick={() => { setSettingsOpen(null); setGroupRequest(null) }} data-testid="clip-groups-card:close"><X className="gear gear--sm" strokeWidth={2} /></button>
+                  </span>
+                </div>
+                <div className="clip-settings-body">
+                  <GroupManager
+                    groups={groups}
+                    groupInfo={groupInfo}
+                    count={counts.group}
+                    dot={(g) => `hsl(${groupHue(g)} 60% 62%)`}
+                    manage={window.watch.manageClipGroup}
+                    request={groupRequest}
+                    onPick={(g) => { setGroup(g); setSource(''); setPicked(new Set()) }}
+                    testPrefix="clip-groups"
+                  />
+                </div>
+              </div>
+            )
+            : editing && byId.get(editing)
             ? (
               <ClipEditCard
                 key={editing}

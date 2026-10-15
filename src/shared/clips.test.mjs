@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import {
   applyRetention, blockedExe, blocklistEntry, clipPreview, clipTitle, dedupeKey, describeSource, domainBlocked, filterClips, groupNameOk, inGroup,
   looksLikeCode, looksSecret, mergeText, orderFavorites, parseDropFiles, parseSnippetNote, sanitizeClip, sanitizeGroups, shouldCapture, sizeLabel,
-  appDisplayName, sanitizeSource, sourceLabel, summarize, upsertClip, searchText, cleanNote, shortcutProblem, shortcutShapeProblem, hotkeyProblem, chordLabel, MAX_NOTE, SHORTCUT_MAX, CF_HDROP, EXCLUSION_FORMATS, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, INTERNAL_COPY_WINDOW_MS, BURST_MS
+  appDisplayName, sanitizeSource, sourceLabel, summarize, upsertClip, searchText, cleanNote, shortcutProblem, shortcutShapeProblem, hotkeyProblem, chordLabel, MAX_NOTE, SHORTCUT_MAX, CF_HDROP, EXCLUSION_FORMATS, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, INTERNAL_COPY_WINDOW_MS, BURST_MS,
+  cleanGroupDescription, sanitizeGroupInfo, groupProblem, MAX_GROUP_DESCRIPTION
 } from './clips.mjs'
 
 /** Build a DROPFILES payload the way Explorer does: 20-byte header, then paths. */
@@ -174,6 +175,22 @@ test('groups: names are validated, built-ins are views, membership follows the v
   assert.ok(!inGroup(img, 'Other'))
   assert.ok(inGroup({ favorite: true, groups: [] }, 'favorites'))
   assert.deepEqual(sanitizeGroups(['Prompts', 'Prompts', 'All', 7, 'Work ']), ['Prompts'])
+})
+
+test('group descriptions: cleaned and bounded, kept only for groups that exist; groupProblem names the clash', () => {
+  assert.equal(cleanGroupDescription('  Prompts I  reuse\u0000 a lot \r\n\r\nsecond  line  '), 'Prompts I reuse a lot\n\nsecond line')
+  assert.equal(cleanGroupDescription(12), '')
+  assert.equal(cleanGroupDescription('x'.repeat(MAX_GROUP_DESCRIPTION + 50)).length, MAX_GROUP_DESCRIPTION)
+  assert.deepEqual(
+    sanitizeGroupInfo({ Prompts: { description: ' For Claude ' }, Gone: { description: 'no such group' }, Work: { description: '   ' }, Shots: 'not a record', All: { description: 'a view' } }, ['Prompts', 'Work', 'Shots']),
+    { Prompts: { description: 'For Claude' } }
+  )
+  assert.deepEqual(sanitizeGroupInfo(['nope'], ['Prompts']), {})
+  assert.equal(groupProblem('Prompts', ['Work']), null)
+  assert.equal(groupProblem('prompts', ['Prompts']), '“Prompts” is already a group')
+  assert.equal(groupProblem('Prompts', ['Prompts'], 'Prompts'), null, 'renaming to itself (or its own case) is no clash')
+  assert.equal(groupProblem('Favorites', []), 'A short name that is not All, Favorites or Images')
+  assert.equal(groupProblem(' lead', []), 'A short name that is not All, Favorites or Images')
 })
 
 test('filterClips honours group, source and a fuzzy query, newest first when unqueried', () => {

@@ -2215,8 +2215,60 @@ html[data-window="picker"], html[data-window="picker"] body, html[data-window="p
 /* The workspace bar's row is its command center tall (28 px plus its border); the picker has none, so the menu row holds that height. */
 .picker-menubar { min-height: 30px; }
 .menu-item .menu-item-keys { margin-left: auto; padding-left: 14px; }
-/* --card is translucent (it sits on the opaque workspace there); in the picker the dropdown overlaps the chips and rows, so it is the same colour laid over the card's own surface. */
-.picker-menubar .menu-pop { background: linear-gradient(var(--card), var(--card)), var(--surface-0); }
+/* The picker's bar holds two icon buttons at its right — export, and the in-card settings (lit while open) — instead of text menus. */
+.picker-menubar-tools { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.menu-btn--icon { display: grid; place-items: center; width: 30px; padding: 0; }
+.menu-btn--icon svg { width: 15px; height: 15px; }
+/* Settings inside the card: the chip row carries the sections (Keybinds · Groups · Window) behind a back circle, and the list's place is one scrolling panel. */
+.picker-settings { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 2px 14px 14px; outline: none; scrollbar-width: thin; scrollbar-color: var(--track) transparent; animation: clip-fade-up 200ms var(--ease-out) both; }
+.pset-section { display: flex; flex-direction: column; padding: 10px 0 12px; border-top: 1px solid var(--line); }
+.pset-section:first-child { border-top: 0; }
+.pset-h { margin: 0 0 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-5); }
+.pset-row { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 3px 0; font-size: 12.5px; color: var(--text); }
+.pset-row + .pset-row { border-top: 1px solid var(--hairline); }
+.pset-row-label { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pset-row-label > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pset-hint { font-size: 11px; color: var(--ink-4); line-height: 1.4; }
+.pset-note { flex: 0 1 auto; min-width: 0; font-size: 11px; color: var(--st-permission); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pset-keys { display: flex; gap: 3px; flex: 0 0 auto; }
+.pset-keys kbd { font: 500 10.5px/1 inherit; padding: 3px 5px; border-radius: 5px; background: var(--card); color: var(--muted); border: 1px solid var(--hairline); }
+.pset-row .picker-ic { flex: 0 0 auto; }
+.pset-row .clip-chord, .pset-row .clip-short { flex: 0 0 auto; }
+/* A clip's keybind or code row is a button: it opens that clip's Edit… card. */
+button.pset-row { width: 100%; margin: 0; border: 0; border-radius: var(--r-control); background: transparent; font: inherit; text-align: left; cursor: pointer; }
+button.pset-row:hover { background: var(--surface-2); }
+button.pset-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pset-actions { display: flex; align-items: center; gap: 10px; padding-top: 8px; }
+/* The group manager (the picker's Settings → Groups; the pane's More → Manage groups…): a row per group with its dot,
+   name, description and count, Edit / Delete on hover, and inline forms — never a dialog. */
+.cgroups { display: flex; flex-direction: column; gap: 6px; }
+.cgroups-head { display: flex; align-items: center; gap: 10px; min-height: 28px; }
+.cgroups-count { flex: 1 1 auto; font-size: 12px; color: var(--ink-4); }
+.cgroups-empty { padding: 8px 0; font-size: 12px; color: var(--ink-4); line-height: 1.45; }
+.cgroups-list { display: flex; flex-direction: column; }
+.cgroup-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; min-height: 38px; padding: 4px 8px; border-radius: var(--r-control); }
+.cgroup-row + .cgroup-row, .cgroup-row + .cgroup-form, .cgroup-form + .cgroup-row, .cgroup-row + .cgroup-confirm, .cgroup-confirm + .cgroup-row { border-top: 1px solid var(--hairline); }
+.cgroup-row:hover { background: var(--surface-2); }
+.cgroup-row > .clip-dot { width: 9px; height: 9px; flex-basis: 9px; }
+.cgroup-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.cgroup-name { margin: 0; padding: 0; border: 0; background: transparent; font: inherit; font-size: 12.5px; font-weight: 500; color: var(--text); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+button.cgroup-name { cursor: pointer; }
+button.cgroup-name:hover { color: var(--accent-bright); }
+.cgroup-desc { font-size: 11px; color: var(--ink-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cgroup-n { display: inline-grid; place-items: center; min-width: 18px; height: 16px; padding: 0 5px; border-radius: var(--r-pill); background: var(--tint); color: var(--ink-4); font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cgroup-tools { display: flex; gap: 10px; opacity: 0; transition: opacity 0.12s ease; }
+.cgroup-row:hover .cgroup-tools, .cgroup-row:focus-within .cgroup-tools { opacity: 1; }
+.cgroup-tools .iconbtn { color: var(--ink-4); }
+.cgroup-form { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: var(--r-control); background: var(--surface-2); box-shadow: var(--shadow-card); animation: clip-fade-up 160ms var(--ease-out) both; }
+.cgroup-form .clip-field-input { background: var(--surface-0); }
+.cgroup-form-foot { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.cgroup-form-foot .clip-editcard-error { flex: 1 1 auto; }
+.cgroup-confirm { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 38px; padding: 6px 8px; border-radius: var(--r-control); background: rgba(233, 162, 60, 0.08); font-size: 12px; color: var(--text); animation: fade-in 140ms ease; }
+.cgroup-confirm > span { flex: 1 1 auto; min-width: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .picker-settings, .cgroup-form, .cgroup-confirm { animation: none; }
+  .cgroup-tools { transition: none; }
+}
 /* The card's resize grips (right, bottom, corner): invisible strips straddling the edge, the right cursors. */
 .picker-grip { position: absolute; z-index: 8; touch-action: none; }
 .picker-grip--right { top: 0; bottom: 14px; right: -4px; width: 8px; cursor: ew-resize; }

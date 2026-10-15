@@ -36,6 +36,8 @@ export const MAX_FILES = 500
 export const RETENTION_DAYS = 30
 export const MAX_GROUPS = 50
 export const MAX_GROUP_NAME = 40
+/** A group's description (shown when a chip or row is hovered). */
+export const MAX_GROUP_DESCRIPTION = 200
 export const MAX_TITLE = 120
 /** A clip's free-text note (the Edit… card). */
 export const MAX_NOTE = 500
@@ -589,6 +591,42 @@ export function chordLabel(chord) {
 export function sanitizeGroups(raw) {
   if (!Array.isArray(raw)) return []
   return [...new Set(raw.filter((g) => groupNameOk(g)))].slice(0, MAX_GROUPS)
+}
+
+/** A group description as stored: one line per paragraph, no control characters, trimmed, ≤ MAX_GROUP_DESCRIPTION; '' when empty. */
+export function cleanGroupDescription(raw) {
+  if (typeof raw !== 'string') return ''
+  // eslint-disable-next-line no-control-regex
+  return raw.replace(/\r\n/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '').replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').trim().slice(0, MAX_GROUP_DESCRIPTION)
+}
+
+/**
+ * The per-group details as loaded (`meta.groupInfo`): `{ [name]: { description } }`
+ * for names in `groups` only, each description cleaned, entries with nothing
+ * to say dropped — so a rename or a delete can never leave a stray record.
+ */
+export function sanitizeGroupInfo(raw, groups) {
+  const names = new Set(sanitizeGroups(groups))
+  const out = {}
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return out
+  for (const [name, info] of Object.entries(raw)) {
+    if (!names.has(name) || typeof info !== 'object' || info === null) continue
+    const description = cleanGroupDescription(info.description)
+    if (description) out[name] = { description }
+  }
+  return out
+}
+
+/**
+ * Why `name` cannot be a group (or the new name of `current`), as a plain
+ * sentence, or null: the shape rule of `groupNameOk`, then a clash with an
+ * existing group — case-insensitive, because two groups that differ only in
+ * case read as one on a chip.
+ */
+export function groupProblem(name, groups, current = null) {
+  if (!groupNameOk(name)) return 'A short name that is not All, Favorites or Images'
+  const taken = (Array.isArray(groups) ? groups : []).find((g) => g !== current && typeof g === 'string' && g.toLowerCase() === name.toLowerCase())
+  return taken ? `“${taken}” is already a group` : null
 }
 
 /**

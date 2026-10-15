@@ -6,13 +6,16 @@ import { tid } from '../testid'
 export interface FilterChip {
   id: string
   label: string
-  count: number
+  /** The badge; a chip without one (the picker's settings sections) shows none. */
+  count?: number
   active: boolean
   /** A group's colour dot. */
   dot?: string
   /** The Favorites star. */
   star?: boolean
   icon?: ReactNode
+  /** Shown on hover — a group's description. */
+  hint?: string
 }
 
 /**
@@ -40,13 +43,14 @@ export function FilterChips({ chips, onPick, testPrefix, className = '', leading
           className={`picker-chip ${chip.active ? 'is-active' : ''}`}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => onPick(chip)}
+          title={chip.hint}
           data-testid={tid(testPrefix, chip.id)}
         >
           {chip.dot && <span className="clip-dot" style={{ background: chip.dot }} />}
           {chip.star && <Star className="picker-chip-star" strokeWidth={2} />}
           {chip.icon && <span className="picker-chip-ic">{chip.icon}</span>}
           <span className="picker-chip-label">{chip.label}</span>
-          <span className="picker-chip-n">{chip.count}</span>
+          {chip.count !== undefined && <span className="picker-chip-n">{chip.count}</span>}
         </button>
       ))}
     </div>

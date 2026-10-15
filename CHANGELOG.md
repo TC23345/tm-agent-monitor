@@ -18,6 +18,13 @@ Layout customization, on top of the 0.3.0 workspace.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
 
+## 0.4.54 — 2026-10-15
+
+- **The picker's menu bar is two icons.** The Clips and Keys text menus are gone; at the right of the bar sit an export icon (Export to JSON…, straight away) and a gear. The gear opens settings **inside the card**, in the list's place, with the pages as chips where the filters were — **Keybinds**, **Groups**, **Window** — and a back circle (or Escape, or the gear again) to return to the clips.
+- **Keybinds** shows the picker's chord and the three favorite chords as registered (with the reason when one is not), every clip with a keybind and every clip with an expansion code (a click opens that clip's Edit… card), and the picker's own keys. *Change in Settings…* still hands off to the workspace.
+- **Groups can be managed, with descriptions.** The Groups page lists every group with its dot, name, description and clip count; New group, Edit and Delete are inline (a form, or a one-line confirm), a clashing or invalid name is refused with a sentence as you type, and a rename moves every clip in one step. A group's **description shows on hover** — on its chip in the picker and the pane, on the pane's sidebar row, and in *Add to group ▸*. The pane has the same manager under More → *Manage groups…* and a group row's *Add/Edit description…*.
+- **Window** holds *Reset to default* for the card size and the hand-offs to the Clipboard pane and the workspace's Keyboard shortcuts.
+
 ## 0.4.53 — 2026-10-05
 
 - **The History calendar fills the pane.** Its week columns now share the full width instead of sitting in a small block at the left, the rows are taller, and every weekday — Sun through Sat — has its own label. A full year in a narrow pane still scrolls sideways rather than squeezing the columns to slivers.

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { NoteMeta, NoteOrder } from '../shared/notes.mjs'
-import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, ClipCaptureSettings, ClipsListing, DailyUsageDay, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SizeMode, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights, WorkspaceCommand } from '../shared/types.js'
+import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, ClipCaptureSettings, ClipGroupOp, ClipsListing, DailyUsageDay, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SizeMode, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights, WorkspaceCommand } from '../shared/types.js'
 
 const api = {
   getStatus: (): Promise<StatusSnapshot> => ipcRenderer.invoke('status:get'),
@@ -170,6 +170,15 @@ const api = {
   addClip: (input: { text: string; title?: string; groups?: string[] }): Promise<string | null> => ipcRenderer.invoke('clips:add', input),
   /** The full list of named groups; a dropped name leaves every clip that carried it. */
   setClipGroups: (names: string[]): Promise<string[] | null> => ipcRenderer.invoke('clips:groups', names),
+  /** One group's add / rename / describe / remove: `true`, `false`, or a plain sentence saying why not (a bad or taken name). */
+  manageClipGroup: (op: ClipGroupOp): Promise<boolean | string> => {
+    const o = op as Record<string, unknown>
+    const clean: Record<string, unknown> = { op: o?.op }
+    if (typeof o?.name === 'string') clean.name = o.name
+    if (o?.op === 'rename' && typeof o.to === 'string') clean.to = o.to
+    if ((o?.op === 'add' || o?.op === 'describe') && typeof o.description === 'string') clean.description = o.description
+    return ipcRenderer.invoke('clips:group', clean)
+  },
   setFavoritesOrder: (ids: string[]): Promise<boolean> => ipcRenderer.invoke('clips:favorites-order', ids),
   /** `minutes` > 0 pauses for that long, 0 pauses until resumed, null resumes. */
   pauseClips: (minutes: number | null): Promise<boolean> => ipcRenderer.invoke('clips:pause', minutes),

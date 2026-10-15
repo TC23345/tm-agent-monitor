@@ -7,6 +7,7 @@ export const MAX_FILES: number
 export const RETENTION_DAYS: number
 export const MAX_GROUPS: number
 export const MAX_GROUP_NAME: number
+export const MAX_GROUP_DESCRIPTION: number
 export const MAX_TITLE: number
 export const MAX_NOTE: number
 export const SHORTCUT_MIN: number
@@ -124,6 +125,12 @@ export function mergeText(clips: Array<Pick<Clip, 'kind' | 'text' | 'files'>>): 
 export function sanitizeSource(raw: unknown): ClipSource
 export function sanitizeClip(raw: unknown): Clip | null
 export function sanitizeGroups(raw: unknown): string[]
+/** A group description as stored: cleaned, trimmed, ≤ MAX_GROUP_DESCRIPTION; '' when empty. */
+export function cleanGroupDescription(raw: unknown): string
+/** `{ [name]: { description } }` for names in `groups` only, each description cleaned, empty entries dropped. */
+export function sanitizeGroupInfo(raw: unknown, groups: unknown): Record<string, { description: string }>
+/** Why `name` cannot be a group (or the new name of `current`), as a sentence, or null. */
+export function groupProblem(name: unknown, groups: ReadonlyArray<string>, current?: string | null): string | null
 export function orderFavorites<T extends { id: string; favorite: boolean; copiedAt?: number }>(clips: T[], order: unknown): T[]
 export function summarize(clip: Clip): ClipSummary
 export function cleanNote(raw: unknown): string

@@ -14,10 +14,10 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, promises as fsp } from 'node:fs'
 import { join } from 'node:path'
-import { applyRetention, dedupeKey, sanitizeClip, sanitizeGroups, sortClips, upsertClip, MAX_CLIPS, MAX_GROUPS, RETENTION_DAYS, groupNameOk, mergeText } from '../shared/clips.mjs'
+import { applyRetention, cleanGroupDescription, dedupeKey, groupProblem, sanitizeClip, sanitizeGroupInfo, sanitizeGroups, sortClips, upsertClip, MAX_CLIPS, MAX_GROUPS, RETENTION_DAYS, groupNameOk, mergeText } from '../shared/clips.mjs'
 
 const DEFAULT_META = Object.freeze({
-  groups: [], favoritesOrder: [], pausedUntil: 0, blockedExes: [], blockedDomains: [], redactSecrets: true, captureImages: true,
+  groups: [], groupInfo: {}, favoritesOrder: [], pausedUntil: 0, blockedExes: [], blockedDomains: [], redactSecrets: true, captureImages: true,
   maxItems: MAX_CLIPS, maxAgeDays: RETENTION_DAYS
 })
 
@@ -36,8 +36,11 @@ export function sanitizeMeta(raw) {
   const r = isRecord(raw) ? raw : {}
   const num = (v, lo, hi, d) => (typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi ? Math.floor(v) : d)
   const strs = (v, max) => (Array.isArray(v) ? [...new Set(v.filter((s) => typeof s === 'string' && s.length > 0 && s.length <= 128))].slice(0, max) : [])
+  const groups = sanitizeGroups(r.groups)
   return {
-    groups: sanitizeGroups(r.groups),
+    groups,
+    // A group's description (and nothing else yet), keyed by name; only for names in `groups`.
+    groupInfo: sanitizeGroupInfo(r.groupInfo, groups),
     favoritesOrder: strs(r.favoritesOrder, 500),
     pausedUntil: typeof r.pausedUntil === 'number' && (r.pausedUntil === -1 || r.pausedUntil >= 0) ? Math.floor(r.pausedUntil) : 0,
     blockedExes: strs(r.blockedExes, 100).map((e) => e.toLowerCase()),
@@ -157,7 +160,10 @@ export class ClipStore {
   }
 
   settings() {
-    return { ...this.meta, groups: [...this.meta.groups], favoritesOrder: [...this.meta.favoritesOrder], blockedExes: [...this.meta.blockedExes], blockedDomains: [...this.meta.blockedDomains] }
+    return {
+      ...this.meta, groups: [...this.meta.groups], groupInfo: Object.fromEntries(Object.entries(this.meta.groupInfo).map(([k, v]) => [k, { ...v }])),
+      favoritesOrder: [...this.meta.favoritesOrder], blockedExes: [...this.meta.blockedExes], blockedDomains: [...this.meta.blockedDomains]
+    }
   }
 
   /** Capturing is off right now (a timed pause that has elapsed counts as on). */
@@ -266,6 +272,7 @@ export class ClipStore {
       schemaVersion: 1,
       exportedAt: new Date().toISOString(),
       groups: [...this.meta.groups],
+      groupInfo: sanitizeGroupInfo(this.meta.groupInfo, this.meta.groups),
       favoritesOrder: [...this.meta.favoritesOrder],
       clips: this.clips.map((c) => ({ ...c }))
     }
@@ -355,10 +362,12 @@ export class ClipStore {
     return this.add({ id: randomUUID(), kind: 'text', text, source, bytes: Buffer.byteLength(text, 'utf8'), merged: true })
   }
 
+  /** The whole list (order and membership): a name that leaves it leaves every clip and loses its description. */
   setGroups(names) {
     const groups = sanitizeGroups(names)
     const gone = new Set(this.meta.groups.filter((g) => !groups.includes(g)))
     this.meta.groups = groups
+    this.meta.groupInfo = sanitizeGroupInfo(this.meta.groupInfo, groups)
     if (gone.size) {
       this.clips = this.clips.map((c) => (c.groups.some((g) => gone.has(g)) ? { ...c, groups: c.groups.filter((g) => !gone.has(g)) } : c))
       this.dirty = true
@@ -367,6 +376,49 @@ export class ClipStore {
     this.schedule()
     this.emit()
     return groups
+  }
+
+  /**
+   * One group's life, each step one write: `add` (with an optional
+   * description), `rename` (every member clip follows, the description comes
+   * along), `describe` (an empty description clears it) and `remove` (the
+   * clips stay, ungrouped). Answers true, or a plain sentence saying why not
+   * (`groupProblem` — a bad or taken name — or a group that is not there).
+   */
+  manageGroup(op) {
+    const o = isRecord(op) ? op : {}
+    const groups = this.meta.groups
+    if (o.op === 'add') {
+      const problem = groupProblem(o.name, groups)
+      if (problem) return problem
+      if (groups.length >= MAX_GROUPS) return `At most ${MAX_GROUPS} groups`
+      this.meta.groups = [...groups, o.name]
+      const description = cleanGroupDescription(o.description)
+      if (description) this.meta.groupInfo = { ...this.meta.groupInfo, [o.name]: { description } }
+    } else if (o.op === 'rename') {
+      if (!groups.includes(o.name)) return 'That group is gone'
+      if (o.to === o.name) return true
+      const problem = groupProblem(o.to, groups, o.name)
+      if (problem) return problem
+      this.meta.groups = groups.map((g) => (g === o.name ? o.to : g))
+      const { [o.name]: info, ...rest } = this.meta.groupInfo
+      this.meta.groupInfo = info ? { ...rest, [o.to]: info } : rest
+      this.clips = this.clips.map((c) => (c.groups.includes(o.name) ? { ...c, groups: c.groups.map((g) => (g === o.name ? o.to : g)) } : c))
+      this.dirty = true
+    } else if (o.op === 'describe') {
+      if (!groups.includes(o.name)) return 'That group is gone'
+      const description = cleanGroupDescription(o.description)
+      const { [o.name]: _was, ...rest } = this.meta.groupInfo
+      this.meta.groupInfo = description ? { ...rest, [o.name]: { description } } : rest
+    } else if (o.op === 'remove') {
+      if (!groups.includes(o.name)) return 'That group is gone'
+      this.setGroups(groups.filter((g) => g !== o.name))
+      return true
+    } else return 'Not a group change'
+    this.metaDirty = true
+    this.schedule()
+    this.emit()
+    return true
   }
 
   setFavoritesOrder(ids) {

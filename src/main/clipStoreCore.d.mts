@@ -9,6 +9,8 @@ export interface ClipStoreCrypto {
 /** Capture and retention preferences, stored beside the clips (not in settings.json). */
 export interface ClipMeta {
   groups: string[]
+  /** Per-group details (a description), keyed by name, only for names in `groups`. */
+  groupInfo: Record<string, { description: string }>
   favoritesOrder: string[]
   /** 0 = capturing; -1 = paused until resumed; else a timestamp the pause ends at. */
   pausedUntil: number
@@ -49,8 +51,11 @@ export class ClipStore {
   merge(ids: string[], source: ClipSource): Promise<Clip | null>
   /** A backup's text clips; the same content already in history is skipped. */
   importClips(items: Array<{ text: string; title?: string; favorite?: boolean; groups?: string[]; createdAt?: number; copiedAt?: number; sourceUrl?: string; order?: number; merged?: boolean; edited?: boolean }>): Promise<{ added: number; skipped: number }>
-  exportData(): { app: string; schemaVersion: 1; exportedAt: string; groups: string[]; favoritesOrder: string[]; clips: Clip[] }
+  exportData(): { app: string; schemaVersion: 1; exportedAt: string; groups: string[]; groupInfo: Record<string, { description: string }>; favoritesOrder: string[]; clips: Clip[] }
+  /** The whole list; a name that leaves it leaves every clip and loses its description. */
   setGroups(names: string[]): string[]
+  /** One group's add / rename / describe / remove: `true`, or a plain sentence saying why not. */
+  manageGroup(op: { op: 'add'; name: string; description?: string } | { op: 'rename'; name: string; to: string } | { op: 'describe'; name: string; description: string } | { op: 'remove'; name: string }): true | string
   setFavoritesOrder(ids: string[]): void
   imageDataUrl(id: string, thumb: boolean): Promise<string | null>
   imageBytes(id: string): Promise<Buffer | null>

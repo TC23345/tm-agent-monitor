@@ -188,10 +188,60 @@ test('importClips adds new text, skips content already in history without touchi
 })
 
 test('sanitizeMeta bounds everything and defaults the rest', () => {
-  assert.deepEqual(sanitizeMeta(null), { groups: [], favoritesOrder: [], pausedUntil: 0, blockedExes: [], blockedDomains: [], redactSecrets: true, captureImages: true, maxItems: 2000, maxAgeDays: 30 })
-  const m = sanitizeMeta({ groups: ['A', 'A', 'favorites'], favoritesOrder: ['x', 3], pausedUntil: -1, blockedExes: ['ONE.exe'], blockedDomains: ['..Example.COM', 7, 'example.com'], captureImages: false, maxItems: 99999, maxAgeDays: 7 })
-  assert.deepEqual(m, { groups: ['A'], favoritesOrder: ['x'], pausedUntil: -1, blockedExes: ['one.exe'], blockedDomains: ['example.com'], redactSecrets: true, captureImages: false, maxItems: 2000, maxAgeDays: 7 })
+  assert.deepEqual(sanitizeMeta(null), { groups: [], groupInfo: {}, favoritesOrder: [], pausedUntil: 0, blockedExes: [], blockedDomains: [], redactSecrets: true, captureImages: true, maxItems: 2000, maxAgeDays: 30 })
+  const m = sanitizeMeta({ groups: ['A', 'A', 'favorites'], groupInfo: { A: { description: ' alpha ' }, B: { description: 'gone' } }, favoritesOrder: ['x', 3], pausedUntil: -1, blockedExes: ['ONE.exe'], blockedDomains: ['..Example.COM', 7, 'example.com'], captureImages: false, maxItems: 99999, maxAgeDays: 7 })
+  assert.deepEqual(m, { groups: ['A'], groupInfo: { A: { description: 'alpha' } }, favoritesOrder: ['x'], pausedUntil: -1, blockedExes: ['one.exe'], blockedDomains: ['example.com'], redactSecrets: true, captureImages: false, maxItems: 2000, maxAgeDays: 7 })
   assert.equal(sanitizeMeta({ blockedDomains: Array.from({ length: 150 }, (_, i) => `h${i}.test`) }).blockedDomains.length, 100, 'bounded')
+})
+
+test('manageGroup: add with a description, rename moves members and the description, describe clears, remove ungroups; problems are sentences', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tm-clips-'))
+  try {
+    const clock = { t: 1 }
+    const { store } = makeStore(dir, clock)
+    await store.load()
+    for (const [id, body] of [['a', 'one'], ['b', 'two']]) { clock.t += 2_000; await store.add(text(id, body)) }
+    assert.equal(store.manageGroup({ op: 'add', name: 'Prompts', description: '  For Claude  ' }), true)
+    assert.equal(store.manageGroup({ op: 'add', name: 'prompts' }), '“Prompts” is already a group')
+    assert.equal(store.manageGroup({ op: 'add', name: 'All' }), 'A short name that is not All, Favorites or Images')
+    assert.equal(store.manageGroup({ op: 'add', name: 'Work' }), true, 'no description is fine')
+    assert.deepEqual(store.settings().groups, ['Prompts', 'Work'])
+    assert.deepEqual(store.settings().groupInfo, { Prompts: { description: 'For Claude' } })
+    store.update('a', { groups: ['Prompts'] })
+    store.update('b', { groups: ['Prompts', 'Work'] })
+
+    assert.equal(store.manageGroup({ op: 'rename', name: 'Prompts', to: 'Work' }), '“Work” is already a group')
+    assert.equal(store.manageGroup({ op: 'rename', name: 'Nope', to: 'X' }), 'That group is gone')
+    assert.equal(store.manageGroup({ op: 'rename', name: 'Prompts', to: 'Claude' }), true)
+    assert.deepEqual(store.settings().groups, ['Claude', 'Work'], 'renamed in place')
+    assert.deepEqual(store.settings().groupInfo, { Claude: { description: 'For Claude' } }, 'the description followed the name')
+    assert.deepEqual(store.get('a').groups, ['Claude'])
+    assert.deepEqual(store.get('b').groups, ['Claude', 'Work'], 'every member followed, in place')
+    assert.equal(store.manageGroup({ op: 'rename', name: 'Claude', to: 'claude' }), true, 'a case change of its own name is allowed')
+    assert.deepEqual(store.get('a').groups, ['claude'])
+
+    assert.equal(store.manageGroup({ op: 'describe', name: 'Work', description: 'Day job' }), true)
+    assert.equal(store.manageGroup({ op: 'describe', name: 'claude', description: '' }), true)
+    assert.deepEqual(store.settings().groupInfo, { Work: { description: 'Day job' } }, 'an empty description clears the record')
+
+    assert.equal(store.manageGroup({ op: 'remove', name: 'Work' }), true)
+    assert.deepEqual(store.settings().groups, ['claude'])
+    assert.deepEqual(store.settings().groupInfo, {}, 'its description went with it')
+    assert.deepEqual(store.get('b').groups, ['claude'], 'the clip stays, ungrouped from it')
+    assert.equal(store.manageGroup({ op: 'remove', name: 'Work' }), 'That group is gone')
+    assert.equal(store.manageGroup({ op: 'explode' }), 'Not a group change')
+    assert.equal(store.manageGroup(null), 'Not a group change')
+
+    await store.flush()
+    const reload = makeStore(dir, clock)
+    await reload.store.load()
+    assert.deepEqual(reload.store.settings().groups, ['claude'])
+    assert.deepEqual(reload.store.exportData().groupInfo, {}, 'export carries the info map')
+    assert.equal(reload.store.manageGroup({ op: 'describe', name: 'claude', description: 'back' }), true)
+    assert.deepEqual(reload.store.exportData().groupInfo, { claude: { description: 'back' } })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('update sets and clears a note, an expansion code and a keybind; the note is sealed with the body', async () => {
