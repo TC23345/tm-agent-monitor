@@ -232,6 +232,18 @@ test('manageGroup: add with a description, rename moves members and the descript
     assert.equal(store.manageGroup({ op: 'explode' }), 'Not a group change')
     assert.equal(store.manageGroup(null), 'Not a group change')
 
+    assert.equal(store.manageGroup({ op: 'add', name: 'Zed' }), true)
+    assert.equal(store.manageGroup({ op: 'add', name: 'Alpha' }), true)
+    assert.deepEqual(store.settings().groups, ['claude', 'Zed', 'Alpha'])
+    assert.equal(store.manageGroup({ op: 'reorder', names: ['Alpha', 'claude', 'Zed'] }), true)
+    assert.deepEqual(store.settings().groups, ['Alpha', 'claude', 'Zed'], 'a reorder is the new chip order')
+    assert.equal(store.manageGroup({ op: 'reorder', names: ['Alpha', 'claude'] }), 'Those are not the groups', 'a name missing')
+    assert.equal(store.manageGroup({ op: 'reorder', names: ['Alpha', 'claude', 'claude'] }), 'Those are not the groups', 'a name twice')
+    assert.equal(store.manageGroup({ op: 'reorder', names: ['Alpha', 'claude', 'Nope'] }), 'Those are not the groups', 'a name that is not a group')
+    assert.deepEqual(store.settings().groups, ['Alpha', 'claude', 'Zed'], 'a refused reorder changes nothing')
+    assert.equal(store.manageGroup({ op: 'remove', name: 'Zed' }), true)
+    assert.equal(store.manageGroup({ op: 'remove', name: 'Alpha' }), true)
+
     await store.flush()
     const reload = makeStore(dir, clock)
     await reload.store.load()

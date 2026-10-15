@@ -2250,35 +2250,40 @@ button.pset-row { width: 100%; margin: 0; border: 0; border-radius: var(--r-cont
 button.pset-row:hover { background: var(--surface-2); }
 button.pset-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .pset-actions { display: flex; align-items: center; gap: 10px; padding-top: 8px; }
-/* The group manager (the picker's Settings → Groups; the pane's More → Manage groups…): a row per group with its dot,
-   name, description and count, Edit / Delete on hover, and inline forms — never a dialog. */
-.cgroups { display: flex; flex-direction: column; gap: 6px; }
+/* The group manager (the picker's Settings → Groups; the pane's More → Manage groups…): the filter row's own chips
+   (dot · name · count) in a wrapping cloud — drag one to reorder (an accent bar marks the slot), click one for its
+   card (description, Edit, Show clips, Delete) — and inline forms; never a dialog. */
+.cgroups { display: flex; flex-direction: column; gap: 8px; }
 .cgroups-head { display: flex; align-items: center; gap: 10px; min-height: 28px; }
 .cgroups-count { flex: 1 1 auto; font-size: 12px; color: var(--ink-4); }
+.cgroups-head .picker-btn svg, .cgroup-card-actions .picker-btn svg { width: 12px; height: 12px; margin-right: 5px; vertical-align: -2px; }
 .cgroups-empty { padding: 8px 0; font-size: 12px; color: var(--ink-4); line-height: 1.45; }
-.cgroups-list { display: flex; flex-direction: column; }
-.cgroup-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; min-height: 38px; padding: 4px 8px; border-radius: var(--r-control); }
-.cgroup-row + .cgroup-row, .cgroup-row + .cgroup-form, .cgroup-form + .cgroup-row, .cgroup-row + .cgroup-confirm, .cgroup-confirm + .cgroup-row { border-top: 1px solid var(--hairline); }
-.cgroup-row:hover { background: var(--surface-2); }
-.cgroup-row > .clip-dot { width: 9px; height: 9px; flex-basis: 9px; }
-.cgroup-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
-.cgroup-name { margin: 0; padding: 0; border: 0; background: transparent; font: inherit; font-size: 12.5px; font-weight: 500; color: var(--text); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-button.cgroup-name { cursor: pointer; }
-button.cgroup-name:hover { color: var(--accent-bright); }
-.cgroup-desc { font-size: 11px; color: var(--ink-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cgroups-cloud { position: relative; display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0; }
+.cgroup-chip { cursor: grab; touch-action: none; user-select: none; }
+.cgroups-cloud.is-reordering, .cgroups-cloud.is-reordering .cgroup-chip { cursor: grabbing; }
+.cgroup-chip.is-dragging { opacity: 0.45; }
+.cgroups-drop { position: absolute; width: 2px; border-radius: 1px; background: var(--accent); pointer-events: none; }
+.cgroup-name { font-size: 12.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cgroup-n { display: inline-grid; place-items: center; min-width: 18px; height: 16px; padding: 0 5px; border-radius: var(--r-pill); background: var(--tint); color: var(--ink-4); font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.cgroup-tools { display: flex; gap: 10px; opacity: 0; transition: opacity 0.12s ease; }
-.cgroup-row:hover .cgroup-tools, .cgroup-row:focus-within .cgroup-tools { opacity: 1; }
-.cgroup-tools .iconbtn { color: var(--ink-4); }
+.cgroup-card { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: var(--r-control); background: var(--surface-2); box-shadow: var(--shadow-card); animation: clip-fade-up 160ms var(--ease-out) both; }
+.cgroup-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cgroup-card-head > .clip-dot { width: 9px; height: 9px; flex-basis: 9px; }
+.cgroup-card-desc { font-size: 12px; line-height: 1.45; color: var(--ink-3); white-space: pre-wrap; word-break: break-word; }
+.cgroup-card-desc.is-empty { color: var(--ink-5); }
+.cgroup-card-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cgroup-card-delete:hover { border-color: var(--st-permission); color: var(--st-permission); }
 .cgroup-form { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: var(--r-control); background: var(--surface-2); box-shadow: var(--shadow-card); animation: clip-fade-up 160ms var(--ease-out) both; }
 .cgroup-form .clip-field-input { background: var(--surface-0); }
 .cgroup-form-foot { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .cgroup-form-foot .clip-editcard-error { flex: 1 1 auto; }
 .cgroup-confirm { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 38px; padding: 6px 8px; border-radius: var(--r-control); background: rgba(233, 162, 60, 0.08); font-size: 12px; color: var(--text); animation: fade-in 140ms ease; }
 .cgroup-confirm > span { flex: 1 1 auto; min-width: 0; }
+/* The picker's Favorites view: rows drag up and down (the order the 1–3 keys and the pane follow); an accent line marks the slot. */
+.picker-list.is-reordering, .picker-list.is-reordering .picker-row { cursor: grabbing; }
+.picker-row.is-dragging { opacity: 0.45; }
+.picker-drop { position: absolute; left: 10px; right: 10px; height: 2px; margin-top: -1px; border-radius: 1px; background: var(--accent); pointer-events: none; z-index: 3; }
 @media (prefers-reduced-motion: reduce) {
-  .picker-settings, .cgroup-form, .cgroup-confirm { animation: none; }
-  .cgroup-tools { transition: none; }
+  .picker-settings, .cgroup-form, .cgroup-card, .cgroup-confirm { animation: none; }
 }
 /* The card's resize grips (right, bottom, corner): invisible strips straddling the edge, the right cursors. */
 .picker-grip { position: absolute; z-index: 8; touch-action: none; }

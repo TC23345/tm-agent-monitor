@@ -98,6 +98,8 @@ export type ClipGroupOp =
   | { op: 'rename'; name: string; to: string }
   | { op: 'describe'; name: string; description: string }
   | { op: 'remove'; name: string }
+  /** The whole list in a new order — the same names, every one of them once (a chip drag). */
+  | { op: 'reorder'; names: string[] }
 
 export interface ClipsListing {
   clips: import('./clips.mjs').ClipSummary[]

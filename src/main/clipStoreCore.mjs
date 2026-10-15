@@ -381,9 +381,11 @@ export class ClipStore {
   /**
    * One group's life, each step one write: `add` (with an optional
    * description), `rename` (every member clip follows, the description comes
-   * along), `describe` (an empty description clears it) and `remove` (the
-   * clips stay, ungrouped). Answers true, or a plain sentence saying why not
-   * (`groupProblem` — a bad or taken name — or a group that is not there).
+   * along), `describe` (an empty description clears it), `remove` (the
+   * clips stay, ungrouped) and `reorder` (the same names in a new order —
+   * the chips' order in both windows). Answers true, or a plain sentence
+   * saying why not (`groupProblem` — a bad or taken name — or a group that
+   * is not there).
    */
   manageGroup(op) {
     const o = isRecord(op) ? op : {}
@@ -414,6 +416,11 @@ export class ClipStore {
       if (!groups.includes(o.name)) return 'That group is gone'
       this.setGroups(groups.filter((g) => g !== o.name))
       return true
+    } else if (o.op === 'reorder') {
+      // A permutation of the list as it is, nothing more: a stale drag (a group added or removed meanwhile) is refused, not merged.
+      const names = Array.isArray(o.names) ? o.names : []
+      if (names.length !== groups.length || new Set(names).size !== names.length || !names.every((n) => groups.includes(n))) return 'Those are not the groups'
+      this.meta.groups = [...names]
     } else return 'Not a group change'
     this.metaDirty = true
     this.schedule()

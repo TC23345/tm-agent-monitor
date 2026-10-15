@@ -4,6 +4,7 @@ import type { ClipSummary, ClipsListing, PickerKeybinds } from '@shared/types'
 import { chordLabel, fromSource, inGroup, orderFavorites, sizeLabel } from '@shared/clips.mjs'
 import { fuzzyScore } from '@shared/palette.mjs'
 import { isPickerFavoriteModifier, modifierLabel } from '@shared/hotkeys.mjs'
+import { moveTo, rowSlot } from '@shared/reorder.mjs'
 import { ContextMenu, tidyEntries, type ContextEntry } from '../ContextMenu'
 import { FilterChips, type FilterChip } from '../clipboard/FilterChips'
 import { SourceCell } from '../clipboard/SourceCell'
@@ -15,6 +16,8 @@ import mark from '../assets/icon.png'
 
 /** How many rows the enter animation staggers (Beautiful UI: 20 ms each, at most 8). */
 const STAGGER_ROWS = 8
+/** A press on a favorite that travels this far is a drag, not a click. */
+const DRAG_PX = 5
 
 function ago(at: number, now: number): string {
   const s = Math.max(0, Math.round((now - at) / 1000))
@@ -362,6 +365,52 @@ export function Picker() {
     setRenaming(null)
     setEditing(clip.id)
   }
+
+  // ---- Favorites: rows drag up and down (the order the 1–3 keys and the pane follow) ----
+  // A press that travels DRAG_PX is a drag; release drops the row into the slot under the pointer and
+  // writes `clips:favorites-order`. The frozen view order and the listing are updated at once, so the
+  // row lands before the re-list, and the click that follows the release is swallowed.
+  const canDragFavs = filter === 'favorites' && !query.trim()
+  const favPress = useRef<{ id: string; index: number; y: number; moved: boolean } | null>(null)
+  const favSuppressClick = useRef(false)
+  const [favDrag, setFavDrag] = useState<{ id: string; top: number } | null>(null)
+  const rowRects = () => [...(listRef.current?.querySelectorAll<HTMLElement>('.picker-row') ?? [])].map((el) => el.getBoundingClientRect())
+  const favDown = (e: React.PointerEvent<HTMLDivElement>, id: string, index: number) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('button, input')) return
+    favPress.current = { id, index, y: e.clientY, moved: false }
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* a synthetic pointer has no capture; the move still tracks */ }
+  }
+  const favMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const p = favPress.current
+    if (!p) return
+    if (!p.moved) {
+      if (Math.abs(e.clientY - p.y) < DRAG_PX) return
+      p.moved = true
+    }
+    const rects = rowRects()
+    const list = listRef.current
+    if (!list || !rects.length) return
+    const slot = rowSlot(rects, e.clientY)
+    const edge = slot < rects.length ? rects[slot].top : rects[rects.length - 1].bottom
+    setFavDrag({ id: p.id, top: edge - list.getBoundingClientRect().top + list.scrollTop })
+  }
+  const favEnd = () => { favPress.current = null; setFavDrag(null) }
+  const favUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const p = favPress.current
+    if (!p) return
+    if (p.moved) {
+      favSuppressClick.current = true
+      const ids = rows.map((c) => c.id)
+      const next = moveTo(ids, p.index, rowSlot(rowRects(), e.clientY))
+      if (next !== ids) {
+        frozen.current.set('favorites', next)
+        followId.current = p.id
+        setListing((l) => (l ? { ...l, favoritesOrder: next } : l))
+        void window.picker.setFavoritesOrder(next)
+      }
+    }
+    favEnd()
+  }
   const closeEdit = () => { setEditing(null); refocus() }
   /** The gear, or the row menu's Manage groups…: the settings view on one page, with a group form opened when asked. */
   const openSettings = (section: SettingsSection, open?: GroupRequest['kind']) => {
@@ -411,6 +460,8 @@ export function Picker() {
   }
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    // A favorite being dragged: Escape drops it back where it was.
+    if (favDrag && e.key === 'Escape') { favEnd(); e.preventDefault(); e.stopPropagation(); return }
     // A menu, the rename field or the text editor owns the keyboard while it
     // is open — Escape closes *it*, not the picker (App's rule, in this window).
     const owner = document.querySelector('[data-escape-close]')
@@ -694,10 +745,10 @@ export function Picker() {
         </div>
         {settings ? settingsPanel : (
         <div
-          className="picker-list"
+          className={`picker-list ${favDrag ? 'is-reordering' : ''}`}
           ref={listRef}
           role="listbox"
-          aria-label="Clips"
+          aria-label={canDragFavs ? 'Favorites — drag a row to reorder' : 'Clips'}
           // The header and every row read this one template; the header's grips change it.
           style={{ ['--picker-row-cols' as string]: cols.template }}
           data-testid="picker-list"
@@ -711,6 +762,7 @@ export function Picker() {
             <span className="picker-head-key">Key</span>
           </div>
           {glide && <div className="picker-glide" style={{ top: glide.top, height: glide.height }} />}
+          {favDrag && <div className="picker-drop" aria-hidden style={{ top: favDrag.top }} data-testid="picker-drop" />}
           {rows.map((c, index) => {
             const favAt = favorites.findIndex((f) => f.id === c.id)
             const thumb = c.kind === 'image' ? thumbs.get(c.id) : undefined
@@ -721,12 +773,20 @@ export function Picker() {
                 role="option"
                 aria-selected={index === active}
                 data-index={index}
-                className={`picker-row ${index === active ? 'is-active' : ''} ${menu?.id === c.id ? 'is-menu' : ''}`}
+                className={`picker-row ${index === active ? 'is-active' : ''} ${menu?.id === c.id ? 'is-menu' : ''} ${favDrag?.id === c.id ? 'is-dragging' : ''}`}
                 style={{ animationDelay: `${Math.min(index, STAGGER_ROWS) * 20}ms` }}
                 onMouseMove={() => { if (index !== active) { followId.current = null; setActive(index) } }}
+                // In Favorites a press that travels drags the row to a new slot (the click that follows is swallowed).
+                onPointerDown={canDragFavs && !isRenaming ? (e) => favDown(e, c.id, index) : undefined}
+                onPointerMove={canDragFavs ? favMove : undefined}
+                onPointerUp={canDragFavs ? favUp : undefined}
+                onPointerCancel={canDragFavs ? favEnd : undefined}
                 // A click selects the row and copies it (Copied flash, the picker stays open);
                 // Enter, a double-click or the menu paste it back where the picker opened.
-                onClick={() => { if (!isRenaming) clickCopy(c, index) }}
+                onClick={() => {
+                  if (favSuppressClick.current) { favSuppressClick.current = false; return }
+                  if (!isRenaming) clickCopy(c, index)
+                }}
                 onDoubleClick={(e) => {
                   if (isRenaming) return
                   const last = lastClick.current

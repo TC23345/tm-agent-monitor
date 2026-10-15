@@ -177,6 +177,7 @@ const api = {
     if (typeof o?.name === 'string') clean.name = o.name
     if (o?.op === 'rename' && typeof o.to === 'string') clean.to = o.to
     if ((o?.op === 'add' || o?.op === 'describe') && typeof o.description === 'string') clean.description = o.description
+    if (o?.op === 'reorder' && Array.isArray(o.names)) clean.names = o.names.filter((n) => typeof n === 'string')
     return ipcRenderer.invoke('clips:group', clean)
   },
   setFavoritesOrder: (ids: string[]): Promise<boolean> => ipcRenderer.invoke('clips:favorites-order', ids),

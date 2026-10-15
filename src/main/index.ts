@@ -2477,6 +2477,7 @@ function registerIpc(): void {
     if (o.op === 'rename' && name(o.name) && name(o.to)) return { op: 'rename', name: o.name, to: o.to }
     if (o.op === 'describe' && name(o.name) && desc(o.description)) return { op: 'describe', name: o.name, description: o.description }
     if (o.op === 'remove' && name(o.name)) return { op: 'remove', name: o.name }
+    if (o.op === 'reorder' && Array.isArray(o.names) && o.names.length <= 60 && o.names.every((n) => name(n))) return { op: 'reorder', names: o.names as string[] }
     return null
   }
   ipcMain.handle('clips:list', async (): Promise<ClipsListing> => {

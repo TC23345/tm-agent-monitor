@@ -55,7 +55,7 @@ export class ClipStore {
   /** The whole list; a name that leaves it leaves every clip and loses its description. */
   setGroups(names: string[]): string[]
   /** One group's add / rename / describe / remove: `true`, or a plain sentence saying why not. */
-  manageGroup(op: { op: 'add'; name: string; description?: string } | { op: 'rename'; name: string; to: string } | { op: 'describe'; name: string; description: string } | { op: 'remove'; name: string }): true | string
+  manageGroup(op: { op: 'add'; name: string; description?: string } | { op: 'rename'; name: string; to: string } | { op: 'describe'; name: string; description: string } | { op: 'remove'; name: string } | { op: 'reorder'; names: string[] }): true | string
   setFavoritesOrder(ids: string[]): void
   imageDataUrl(id: string, thumb: boolean): Promise<string | null>
   imageBytes(id: string): Promise<Buffer | null>

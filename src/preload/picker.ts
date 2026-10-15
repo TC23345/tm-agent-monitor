@@ -51,8 +51,11 @@ const api = {
     if (typeof o?.name === 'string') clean.name = o.name
     if (o?.op === 'rename' && typeof o.to === 'string') clean.to = o.to
     if ((o?.op === 'add' || o?.op === 'describe') && typeof o.description === 'string') clean.description = o.description
+    if (o?.op === 'reorder' && Array.isArray(o.names)) clean.names = o.names.filter((n) => typeof n === 'string')
     return ipcRenderer.invoke('clips:group', clean)
   },
+  /** The Favorites view's drag: the favorites' ids in their new order (the same `clips:favorites-order` the pane writes). */
+  setFavoritesOrder: (ids: string[]): Promise<boolean> => ipcRenderer.invoke('clips:favorites-order', Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : []),
   /** Settings → Keybinds: the global chords as Settings shows them, and the favorite keys' modifier. */
   keybinds: (): Promise<PickerKeybinds | null> => ipcRenderer.invoke('picker:keybinds'),
   /** Settings → Keybinds → Change in Settings…: close, and open the workspace at Settings → Keyboard shortcuts. */

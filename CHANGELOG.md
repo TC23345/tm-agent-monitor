@@ -18,6 +18,11 @@ Layout customization, on top of the 0.3.0 workspace.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
 
+## 0.4.56 — 2026-10-15
+
+- **Groups are chips you can drag.** The Groups page (picker Settings → Groups, pane More → Manage groups…) shows the groups as the same chips the filter row uses — dot, name, count — in the order both windows list them. Drag a chip to reorder (Alt+←/→ does it from the keyboard); click one for its card with the description, Edit, Show clips and Delete.
+- **Favorites drag up and down in the picker.** In the ★ Favorites view, drag a row to a new slot; the order is the one the Alt+Shift+1–3 keys and the Clipboard pane already follow, so the three at the top are the three keys.
+
 ## 0.4.55 — 2026-10-15
 
 - **Sidebar handles are quieter.** A section's drag handle shows its pill only while you hover the section (the hairline between sections stays), and a section gets a handle only when another section sits beneath it — so Agents, last in the stack, has none; sizing it would only leave empty space under it.
