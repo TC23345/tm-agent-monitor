@@ -52,10 +52,12 @@ interface Props {
   projects: StripProject[]
   /** The launch target's folder — the selected badge. */
   selected?: string
+  /** The project whose file tree the head is showing (a badge's left-click), if any. */
+  treeFor?: string
   openMenu: NavMenu | null
   onOpenMenu: (menu: NavMenu | null) => void
-  /** A badge click: that folder becomes the launch target. */
-  onSelect: (target: LaunchTarget) => void
+  /** A badge made that folder the launch target: by left-click (`click` — the head shows its files; the same badge again goes back to the stream) or by right-click (`menu`, which also opens its menu). */
+  onSelect: (target: LaunchTarget, via: 'click' | 'menu') => void
   onLaunch: (launch: TerminalLaunch, target: LaunchTarget, external: boolean) => void
   /** The folder's usual launch (tm.launch.v2) — checked in its menu. */
   launchKindFor: (cwd: string) => TerminalLaunch
@@ -81,12 +83,13 @@ interface Props {
  * (the path comes from `webUtils.getPathForFile` in the preload — `File.path`
  * was removed in Electron 32).
  */
-export function ProjectStrip({ projects, selected, openMenu, onOpenMenu, onSelect, onLaunch, launchKindFor, onNewProject, onOpenWeb, onDropFolder }: Props) {
+export function ProjectStrip({ projects, selected, treeFor, openMenu, onOpenMenu, onSelect, onLaunch, launchKindFor, onNewProject, onOpenWeb, onDropFolder }: Props) {
   const now = useNow()
   const [dropHot, setDropHot] = useState(false)
   const [hover, setHover] = useState(false)
   const menuOpen = openMenu === 'project'
   const selectedKey = launchKey(selected)
+  const treeKey = treeFor ? launchKey(treeFor) : null
 
   // ---- order: newest first, frozen under the pointer ----
   const shownOrder = useRef<string[]>([])
@@ -201,19 +204,27 @@ export function ProjectStrip({ projects, selected, openMenu, onOpenMenu, onSelec
       p.running ? `${p.running} working` : null
     ].filter(Boolean).join(' · ')
     const when = p.at > 0 ? `active ${shortDuration(p.at, now)} ago` : 'not active in the last 4 hours'
+    const showsTree = treeKey === key
     return (
       <button
         key={key}
         ref={(el) => { if (el) chips.current.set(key, el); else chips.current.delete(key) }}
-        className={`projchip ${isSelected ? 'is-selected' : ''}`}
+        className={`projchip ${isSelected ? 'is-selected' : ''} ${showsTree ? 'is-tree' : ''}`}
         aria-pressed={isSelected}
         aria-haspopup="menu"
         aria-expanded={isSelected && menuOpen}
-        title={`${p.cwd}\n${status} · ${when}\nClick to start Claude Code, Codex, or a terminal here`}
+        title={`${p.cwd}\n${status} · ${when}\n${showsTree ? 'Click to go back to the activity stream' : 'Click for its files'} · right-click to start Claude Code, Codex, or a terminal here`}
         data-testid={tid('project', p.label)}
+        // Left-click: the launch target, and the head shows this project's files (the same badge again: the stream).
         onClick={() => {
+          if (menuOpen) onOpenMenu(null)
+          onSelect({ cwd: p.cwd, label: p.label }, 'click')
+        }}
+        // Right-click: the launch target, and its menu — Claude Code, Codex, a terminal here.
+        onContextMenu={(event) => {
+          event.preventDefault()
           if (isSelected && menuOpen) { onOpenMenu(null); return }
-          onSelect({ cwd: p.cwd, label: p.label })
+          onSelect({ cwd: p.cwd, label: p.label }, 'menu')
           onOpenMenu('project')
         }}
       >

@@ -18,6 +18,11 @@ Layout customization, on top of the 0.3.0 workspace.
 - Dependencies: Electron 42.10 (Chromium patches), koffi 3.1.6, lucide-react 1.34, mongodb 7.6 — within-major; the packaged build was re-verified (asar deps, native modules, boot).
 - **One row to start a session.** *New Claude Code*, *New Codex*, and *New terminal* were three rows spending themselves on the same verb; they are now one split row — the button starts what you started last, the chevron picks something else and makes that the new default. Shift still opens an external window, Ctrl+Shift+` still opens a plain terminal, and the palette and Terminal menu keep all three as distinct commands.
 
+## 0.4.57 — 2026-10-16
+
+- **Project badges: right-click for the menu, left-click for the files.** A badge's right-click opens its menu (New Claude Code, New Codex, New terminal); a left-click makes it the launch target and swaps the activity stream for that project's **file tree** — folders open lazily, `.git` and `node_modules` stay hidden — at the stream's height, under the same splitter. The same badge again, the back circle, or User → Activity brings the stream back.
+- **Files open in a pane.** A click on a file in the tree opens it in a **File pane**: the rightmost file pane without unsaved typing shows it, else a new file pane is added at the right of the grid (a full grid opens the file in its own app). Text edits in the notes editor and saves on Ctrl+S or the header's Save, never on its own; Markdown renders by default with an Edit toggle; images show inline; anything binary shows its size and an Open in its app button.
+
 ## 0.4.56 — 2026-10-15
 
 - **Groups are chips you can drag.** The Groups page (picker Settings → Groups, pane More → Manage groups…) shows the groups as the same chips the filter row uses — dot, name, count — in the order both windows list them. Drag a chip to reorder (Alt+←/→ does it from the keyboard); click one for its card with the description, Edit, Show clips and Delete.

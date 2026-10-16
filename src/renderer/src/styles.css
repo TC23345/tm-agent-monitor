@@ -629,6 +629,32 @@ kbd {
 .projmenu-path { font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; unicode-bidi: plaintext; text-align: left; }
 .projmenu-anchor .menu-sep { margin: 6px 2px; }
 
+/* A badge whose project's files the head is showing (its left-click). */
+.projchip.is-tree { box-shadow: inset 0 -2px 0 var(--accent); }
+/* The project tree: the head's other face, the stream's place and height. Rows are the notes tree's shape. */
+.ptree { flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; margin: 10px -4px 0; padding: 0 4px; }
+.ptree-head { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 0 2px 6px; min-width: 0; }
+.ptree-root { flex: 1 1 auto; min-width: 0; font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ptree-rows { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+.ptree-rows::-webkit-scrollbar { width: 6px; }
+.ptree-rows::-webkit-scrollbar-thumb { background: var(--track); border-radius: 999px; }
+.ptree-row { display: flex; align-items: center; gap: 6px; width: 100%; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.ptree-row:hover { background: var(--elev); }
+.ptree-row.is-active { background: var(--elev); box-shadow: inset 2px 0 0 var(--muted); }
+.ptree-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ptree-row .notes-chev { flex: 0 0 auto; }
+.ptree-row.is-folder.is-open .notes-chev { transform: rotate(90deg); }
+.ptree-spacer { flex: 0 0 12px; width: 12px; }
+.ptree-ic { width: 14px; height: 14px; flex: 0 0 auto; color: var(--muted); }
+.ptree-row:not(.is-folder) .ptree-ic { color: var(--faint); }
+.ptree-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ptree-empty { padding: 4px 8px; font-size: 11.5px; color: var(--faint); }
+/* The file pane: the notes editor's textarea and status line, an image centred, a binary file as a note. */
+.filepane { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.filepane-center { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; padding: 16px; overflow: auto; }
+.filepane-img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--r-control); }
+.filepane-note { display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 360px; font-size: 12.5px; line-height: 1.5; color: var(--ink-4); text-align: center; }
+
 /* The stream: one compact line per event, newest first. */
 .stream {
   flex: 0 0 auto;

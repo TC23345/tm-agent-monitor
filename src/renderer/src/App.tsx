@@ -53,6 +53,9 @@ import {
 } from '@shared/layout.mjs'
 import { launchFor, launchKey, withLaunch, type LaunchPrefs } from '@shared/panes.mjs'
 import { ProjectStrip, WEB_LINKS, type LaunchTarget, type NavMenu, type StripProject } from './ProjectStrip'
+import { FileTree } from './FileTree'
+import { FilePane, type FilePaneHandle } from './FilePane'
+import { baseName as fileBaseName, fileKind, parentDir, type FilePaneConfig } from '@shared/fileTree.mjs'
 import {
   STREAM_DEFAULT, clampStreamHeight, projectRoot, readStreamHeight, recentList, sanitizeRecent, touchRecent,
   type ProjectRoots, type ProjectTouch, type RecentMap
@@ -169,6 +172,11 @@ export function App() {
   // Web panes: their handles (back, reload, focus) and what the header shows —
   // the page's live URL and whether Back has anywhere to go.
   const webRefs = useRef(new Map<string, WebPaneHandle>())
+  const fileRefs = useRef(new Map<string, FilePaneHandle>())
+  /** Which file panes hold unsaved typing (the header's Save, and the tree's "take a clean pane" rule). */
+  const [fileDirty, setFileDirty] = useState<Record<string, boolean>>({})
+  /** A file pane's Preview toggle; unset means rendered for Markdown, the editor for anything else. */
+  const [filePreview, setFilePreview] = useState<Record<string, boolean>>({})
   const [webState, setWebState] = useState<Record<string, { url?: string; back?: boolean; loading?: boolean }>>({})
   const patchWeb = (paneId: string, patch: { url?: string; back?: boolean; loading?: boolean }) =>
     setWebState((current) => {
@@ -222,6 +230,8 @@ export function App() {
   // active; a target pins a folder (picked in the switcher, or dropped from
   // Explorer onto the nav).
   const [launchChoice, setLaunchChoice] = useState<LaunchTarget | null>(null)
+  /** The project whose file tree the sidebar head shows instead of the stream (a badge's left-click), or null. */
+  const [tree, setTree] = useState<LaunchTarget | null>(null)
   // The Projects folder and home, from settings once: a folder under Projects
   // is activity in its project, not a badge of its own (`projectRoot`).
   const [projectRoots, setProjectRoots] = useState<ProjectRoots>({})
@@ -532,6 +542,7 @@ export function App() {
   /** User → Activity, the palette, `tm activity`: the sidebar and the stream, open. */
   const showStream = () => {
     if (sidebarHidden) toggleSidebar()
+    setTree(null)
     if (streamH === 0) setStreamH(STREAM_DEFAULT)
     document.querySelector<HTMLElement>('[data-testid="activity-stream"]')?.scrollTo({ top: 0 })
   }
@@ -650,10 +661,10 @@ export function App() {
   )
 
   /** Add a pane of `kind` if the layout allows it. Terminals repeat; others don't. */
-  const addPane = (kind: PaneKind, term?: TerminalPaneConfig, web?: WebPaneConfig) => {
+  const addPane = (kind: PaneKind, term?: TerminalPaneConfig, web?: WebPaneConfig, file?: FilePaneConfig) => {
     if (panes.length >= MAX_PANES) return
     if (isUniqueKind(kind) && panes.some((p) => p.kind === kind)) return
-    const pane = newPane(kind, term, web)
+    const pane = newPane(kind, term, web, file)
     setPanes([...panes, pane])
     setFocusedPane(pane.id)
     // A terminal opened in a folder is activity there.
@@ -668,6 +679,39 @@ export function App() {
     const handle = termRefs.current.get(paneId) ?? webRefs.current.get(paneId)
     if (handle) handle.focus()
     else document.querySelector<HTMLElement>(`[data-pane="${paneId}"]`)?.focus()
+  }
+
+  /**
+   * A file from a project's tree. Already open: that pane comes forward.
+   * Else the rightmost file pane without unsaved typing takes it (a file
+   * pane's kind is fixed, so a terminal there is never replaced); else a new
+   * file pane, which lands at the right of the grid; a full grid opens the
+   * file in its own app instead.
+   */
+  const openFile = (path: string) => {
+    const already = panes.find((p) => p.kind === 'file' && p.file?.path === path)
+    if (already) {
+      if (zoom && zoom !== already.id) setZoom(already.id)
+      focusPane(already.id)
+      return
+    }
+    const target = [...panes].reverse().find((p) => p.kind === 'file' && !fileDirty[p.id])
+    if (target) {
+      setPanes((current) => current.map((p) => (p.id === target.id ? { ...p, file: { path } } : p)))
+      setFilePreview((current) => { if (!(target.id in current)) return current; const next = { ...current }; delete next[target.id]; return next })
+      if (zoom && zoom !== target.id) setZoom(target.id)
+      focusPane(target.id)
+      return
+    }
+    if (panes.length >= MAX_PANES) { window.watch.openPath(path); return }
+    addPane('file', undefined, undefined, { path })
+  }
+  /** A badge: the launch target; by left-click also the head's file tree for that project (the same badge again: the stream). */
+  const selectProject = (target: LaunchTarget, via: 'click' | 'menu') => {
+    setLaunchChoice(target)
+    if (via !== 'click' || !target.cwd) return
+    setTree((current) => (current?.cwd && launchKey(current.cwd) === launchKey(target.cwd!) ? null : target))
+    if (streamH === 0) setStreamH(STREAM_DEFAULT)
   }
 
   /** A site: its web pane (brought forward when one already shows it), or the
@@ -897,6 +941,19 @@ export function App() {
       }
       case 'keys':
         return <KeysPane refresh={settingsOpen} />
+      case 'file':
+        return (
+          <FilePane
+            key={pane.file!.path}
+            ref={(handle) => {
+              if (handle) fileRefs.current.set(pane.id, handle)
+              else fileRefs.current.delete(pane.id)
+            }}
+            path={pane.file!.path}
+            preview={filePreview[pane.id] ?? fileKind(pane.file!.path) === 'markdown'}
+            onDirty={(dirty) => setFileDirty((current) => (current[pane.id] === dirty ? current : { ...current, [pane.id]: dirty }))}
+          />
+        )
       case 'web':
         return (
           <WebPane
@@ -941,7 +998,8 @@ export function App() {
   const paneTitle = (pane: PaneInstance) =>
     pane.kind === 'terminal' && pane.term ? (pane.term.launch === 'claude' ? 'Claude Code' : pane.term.launch === 'codex' ? 'Codex' : 'Terminal')
       : pane.kind === 'notes' ? "TC's NOTES"
-        : pane.kind === 'web' ? pane.web?.label : undefined
+        : pane.kind === 'web' ? pane.web?.label
+          : pane.kind === 'file' && pane.file ? `${fileBaseName(pane.file.path)}${fileDirty[pane.id] ? ' •' : ''}` : undefined
 
   const tool = (title: string, icon: ReactNode, onClick: () => void, disabled = false, active = false) => (
     <button className={`iconbtn iconbtn--sm ${active ? 'is-on' : ''}`} onClick={onClick} title={title} aria-label={title} aria-pressed={active || undefined} disabled={disabled} data-testid={tid('pane-tool', title)}>
@@ -952,6 +1010,18 @@ export function App() {
 
   /** The header tool strip, per kind — an editor title bar's actions. */
   const paneTools = (pane: PaneInstance) => {
+    if (pane.kind === 'file' && pane.file) {
+      const path = pane.file.path
+      const previewing = filePreview[pane.id] ?? fileKind(path) === 'markdown'
+      return (
+        <>
+          {fileKind(path) === 'markdown' && tool(previewing ? 'Edit' : 'Preview', ic(previewing ? PenLine : Eye), () => setFilePreview((current) => ({ ...current, [pane.id]: !previewing })), false, previewing)}
+          {tool(fileDirty[pane.id] ? 'Save (Ctrl+S)' : 'Saved', ic(Save), () => { void fileRefs.current.get(pane.id)?.save() }, !fileDirty[pane.id])}
+          {tool('Reload from disk', ic(RotateCw), () => fileRefs.current.get(pane.id)?.reload())}
+          {tool('Open in its app', ic(ExternalLink), () => window.watch.openPath(path))}
+        </>
+      )
+    }
     if (pane.kind === 'notes') {
       return (
         <>
@@ -1238,7 +1308,8 @@ export function App() {
       const kindLabel = pane.kind === 'terminal'
         ? `Terminal${pane.term?.label ? ` · ${pane.term.label}` : ''}`
         : pane.kind === 'web' && pane.web ? pane.web.label
-          : PANE_KINDS.find((k) => k.id === pane.kind)!.label
+          : pane.kind === 'file' && pane.file ? fileBaseName(pane.file.path)
+            : PANE_KINDS.find((k) => k.id === pane.kind)!.label
       if (panes.length > 1) {
         cmd(`zoom:${pane.id}`, zoomed === pane.id ? `Restore grid` : `Zoom pane: ${kindLabel}`, () => setZoom(zoomed === pane.id ? null : pane.id), { icon: zoomed === pane.id ? <Minimize2 strokeWidth={2} /> : <Maximize2 strokeWidth={2} />, keywords: ['maximize', 'focus'] })
       }
@@ -1386,9 +1457,10 @@ export function App() {
           <ProjectStrip
             projects={stripProjects}
             selected={contextRoot}
+            treeFor={tree?.cwd}
             openMenu={openMenu === 'project' ? openMenu : null}
             onOpenMenu={setOpenMenu}
-            onSelect={setLaunchChoice}
+            onSelect={selectProject}
             onLaunch={(kind, target, external) => {
               // Starting something records it as that folder's usual launch (the menu's check).
               setLaunchPrefs((current) => withLaunch(current, target.cwd, kind))
@@ -1400,7 +1472,10 @@ export function App() {
             onOpenWeb={openWeb}
             onDropFolder={dropLaunchFolder}
           />
-          {streamH > 0 && <ActivityStream events={activity} height={streamH} onFocusAgent={focusAgentAnywhere} />}
+          {/* The head's body: the activity stream, or — after a badge's left-click — that project's file tree, at the same height. */}
+          {streamH > 0 && (tree?.cwd
+            ? <FileTree root={tree.cwd} label={tree.label ?? fileBaseName(tree.cwd)} height={streamH} onOpen={openFile} onClose={() => setTree(null)} />
+            : <ActivityStream events={activity} height={streamH} onFocusAgent={focusAgentAnywhere} />)}
           {/* Drag to size the stream; up past the snap folds it away, down brings it back. */}
           <Splitter
             axis="y"
@@ -1494,14 +1569,15 @@ export function App() {
                 kind={pane.kind}
                 onClose={() => closePane(pane.id)}
                 title={paneTitle(pane)}
-                plainTitle={pane.kind === 'notes'}
+                plainTitle={pane.kind === 'notes' || pane.kind === 'file'}
                 context={paneContext(pane)}
-                path={pane.kind === 'terminal' ? pane.term?.cwd : pane.kind === 'notes' ? notesDir : pane.kind === 'web' ? (webState[pane.id]?.url ?? pane.web?.url) : undefined}
+                path={pane.kind === 'terminal' ? pane.term?.cwd : pane.kind === 'notes' ? notesDir : pane.kind === 'web' ? (webState[pane.id]?.url ?? pane.web?.url) : pane.kind === 'file' && pane.file ? parentDir(pane.file.path) : undefined}
                 onCopyPath={
                   pane.kind === 'terminal' && pane.term?.cwd ? () => window.watch.copyText(pane.term!.cwd!)
                     : pane.kind === 'notes' && notesDir ? () => window.watch.copyText(notesDir)
                       : pane.kind === 'web' ? () => window.watch.copyText(webState[pane.id]?.url ?? pane.web?.url ?? '')
-                        : undefined
+                        : pane.kind === 'file' && pane.file ? () => window.watch.copyText(pane.file!.path)
+                          : undefined
                 }
                 tools={paneTools(pane)}
                 attention={paneAttention.get(pane.id)}

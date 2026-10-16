@@ -1,6 +1,7 @@
 import type { AllSizes, PaneCols, PaneInstance, SidebarView } from './panes'
 import { newPane } from './panes'
 import { sanitizeWebConfig } from '@shared/webPane.mjs'
+import { sanitizeFileConfig } from '@shared/fileTree.mjs'
 
 /**
  * Named workspace layouts: a snapshot of the pane set, the dragged sizes, the
@@ -68,8 +69,8 @@ export function panesFromLayout(layout: SavedLayout): PaneInstance[] {
   // Saved layouts are read back unsanitized; a web pane's URL is checked here
   // (and again by main before the page attaches). One it cannot load drops.
   return layout.panes
-    .filter((p) => p.kind !== 'web' || sanitizeWebConfig(p.web))
-    .map((p) => newPane(p.kind, p.term ? { ...p.term, sessionId: undefined } : undefined, sanitizeWebConfig(p.web) ?? undefined))
+    .filter((p) => (p.kind !== 'web' || sanitizeWebConfig(p.web)) && (p.kind !== 'file' || sanitizeFileConfig(p.file)))
+    .map((p) => newPane(p.kind, p.term ? { ...p.term, sessionId: undefined } : undefined, sanitizeWebConfig(p.web) ?? undefined, sanitizeFileConfig(p.file) ?? undefined))
 }
 
 export const LAYOUT_NAME_MAX = 40

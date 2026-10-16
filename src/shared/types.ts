@@ -119,6 +119,19 @@ export interface ClipsListing {
   loaded: boolean
 }
 
+/** The project tree (`files:list`) and the file pane (`files:read`, `files:write`). */
+export type { DirEntry, FilePaneConfig } from './fileTree.mjs'
+export interface DirListing {
+  entries: import('./fileTree.mjs').DirEntry[]
+  /** More than MAX_DIR_ENTRIES: the tree says so. */
+  truncated: boolean
+}
+export type FileContent =
+  | { kind: 'text'; text: string; bytes: number }
+  | { kind: 'image'; dataUrl: string; bytes: number }
+  /** Too big, or NUL bytes in its head: shown as a size with a way to open it elsewhere. */
+  | { kind: 'binary'; bytes: number }
+
 /** Per-folder facts served on demand (`project:commands`, `git:status`). */
 export type { ProjectCommand } from './projectCommands.mjs'
 export type { GitStatus } from './gitStatus.mjs'

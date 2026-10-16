@@ -35,6 +35,7 @@ import { installWebPaneGuards } from './webPanes.js'
 import { clipboardHasImage, makeThumbnail, protectText, protectionAvailable, readClipboardSnapshot, readClipboardText, unprotectText, writeClipboardImage, writeClipboardText } from './clipboardIo.js'
 import { ClipStore, type ClipSettingsPatch } from './clipStoreCore.mjs'
 import { cleanNote, clipTitle, describeSource, domainBlocked, filterClips, hotkeyProblem, orderFavorites, parseSnippetNote, shortcutProblem, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_GROUP_DESCRIPTION, MAX_IMAGE_BYTES, MAX_NOTE, MAX_TITLE, type ClipSource } from '../shared/clips.mjs'
+import { fileKind, hasNul, imageMime, isAbsolutePath, sortEntries, MAX_DIR_ENTRIES, MAX_TEXT_BYTES, MAX_IMAGE_BYTES as MAX_FILE_IMAGE_BYTES } from '../shared/fileTree.mjs'
 import { applyPickerSize, createPicker, destroyPicker, endPickerResize, hidePicker, pickClip, pickerWindow, resizePickerBy, showPicker, togglePicker } from './picker.js'
 import { sanitizePickerSize, PICKER_CARD } from '../shared/pickerPlace.mjs'
 import { noteNameFor as snippetFileName } from '../shared/notes.mjs'
@@ -49,7 +50,7 @@ import { estimateCostUsd } from '../shared/pricing.mjs'
 // export 'autoUpdater' not found"), so import the default export and destructure.
 import electronUpdater from 'electron-updater'
 import { validateMutableSettingsPatch } from './store.js'
-import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type WindowMaterial, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights, type ClipsListing, type ClipGroupOp, type PickerKeybinds, type ExtensionStatus, type PickerFavoriteModifier, type AppShortcutId, type ShortcutId, type ShortcutRow } from '../shared/types.js'
+import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type WindowMaterial, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights, type ClipsListing, type ClipGroupOp, type PickerKeybinds, type DirListing, type FileContent, type ExtensionStatus, type PickerFavoriteModifier, type AppShortcutId, type ShortcutId, type ShortcutRow } from '../shared/types.js'
 import { isPickerFavoriteModifier, normalizeAccelerator, normalizeFavoriteHotkeys, sameChord, SHORTCUT_DEFAULTS } from '../shared/hotkeys.mjs'
 
 const { autoUpdater } = electronUpdater
@@ -2149,6 +2150,55 @@ function registerIpc(): void {
       return { dir, label: basename(dir) || dir }
     } catch {
       return null
+    }
+  })
+  // The project tree and the file pane (0.4.57): one folder's entries, one
+  // file's content, one write — and a write only to a file this session
+  // served as text, so the renderer can never write somewhere it never read.
+  const servedText = new Set<string>()
+  const filePath = (v: unknown): string | null => (isAbsolutePath(v) && !/[\0\r\n]/.test(v) ? v : null)
+  ipcMain.handle('files:list', async (_e, dir: unknown): Promise<DirListing | null> => {
+    if (!isDir(dir)) return null
+    try {
+      const raw = await fsp.readdir(dir as string, { withFileTypes: true })
+      const entries = sortEntries(raw.map((d) => ({ name: d.name, kind: d.isDirectory() ? 'dir' : d.isFile() ? 'file' : 'other' })))
+      return { entries: entries.slice(0, MAX_DIR_ENTRIES), truncated: entries.length > MAX_DIR_ENTRIES }
+    } catch {
+      return null
+    }
+  })
+  ipcMain.handle('files:read', async (_e, p: unknown): Promise<FileContent | null> => {
+    const path = filePath(p)
+    if (!path) return null
+    try {
+      const st = await fsp.stat(path)
+      if (!st.isFile()) return null
+      if (fileKind(path) === 'image') {
+        if (st.size > MAX_FILE_IMAGE_BYTES) return { kind: 'binary', bytes: st.size }
+        const buf = await fsp.readFile(path)
+        return { kind: 'image', dataUrl: `data:${imageMime(path)};base64,${buf.toString('base64')}`, bytes: st.size }
+      }
+      if (st.size > MAX_TEXT_BYTES) return { kind: 'binary', bytes: st.size }
+      const buf = await fsp.readFile(path)
+      if (hasNul(buf.subarray(0, 8192))) return { kind: 'binary', bytes: st.size }
+      servedText.add(path)
+      return { kind: 'text', text: buf.toString('utf8'), bytes: st.size }
+    } catch {
+      return null
+    }
+  })
+  ipcMain.handle('files:write', async (_e, p: unknown, text: unknown): Promise<boolean> => {
+    const path = filePath(p)
+    if (!path || !servedText.has(path) || typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > MAX_TEXT_BYTES) return false
+    const tmp = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`)
+    try {
+      await fsp.writeFile(tmp, text, 'utf8')
+      await fsp.rename(tmp, path)
+      return true
+    } catch (error) {
+      console.warn(`[files] write failed: ${error instanceof Error ? error.message : String(error)}`)
+      await fsp.unlink(tmp).catch(() => {})
+      return false
     }
   })
   ipcMain.handle('project:commands', (_e, cwd: unknown) => {

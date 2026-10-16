@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { NoteMeta, NoteOrder } from '../shared/notes.mjs'
-import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, ClipCaptureSettings, ClipGroupOp, ClipsListing, DailyUsageDay, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SizeMode, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights, WorkspaceCommand } from '../shared/types.js'
+import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, ClipCaptureSettings, ClipGroupOp, ClipsListing, DailyUsageDay, DirListing, FileContent, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SizeMode, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights, WorkspaceCommand } from '../shared/types.js'
 
 const api = {
   getStatus: (): Promise<StatusSnapshot> => ipcRenderer.invoke('status:get'),
@@ -114,6 +114,12 @@ const api = {
   },
   /** A dropped path as a folder: the directory itself, or a file's parent. */
   describePath: (path: string): Promise<{ dir: string; label: string } | null> => ipcRenderer.invoke('path:describe', path),
+  /** The project tree (a badge's left-click): one folder's entries, folders first, `.git` and `node_modules` left out, capped. */
+  listDir: (dir: string): Promise<DirListing | null> => ipcRenderer.invoke('files:list', dir),
+  /** A file pane's content: text (≤ 2 MiB, no NUL bytes), an image as a data URL, or just its size when binary. */
+  readFile: (path: string): Promise<FileContent | null> => ipcRenderer.invoke('files:read', path),
+  /** Ctrl+S / Save in a file pane: only a file `readFile` served as text this session; written atomically. */
+  writeFile: (path: string, text: string): Promise<boolean> => ipcRenderer.invoke('files:write', path, text),
   /** The activity feed: attention-worthy moments across sessions, newest first. */
   getEvents: (): Promise<ActivityEvent[]> => ipcRenderer.invoke('agent:events'),
   /** The shared notepad (Notes pane): Markdown files in the notes folder. */

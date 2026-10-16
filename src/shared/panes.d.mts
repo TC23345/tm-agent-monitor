@@ -15,6 +15,8 @@ export interface SanitizedPane<K extends string = string> {
   term?: SanitizedTerm
   /** `web` panes only: the site and its name (`sanitizeWebConfig`). */
   web?: { url: string; label: string }
+  /** `file` panes only: the file shown (`sanitizeFileConfig`). */
+  file?: { path: string }
 }
 export type Fractions = Record<string, number[]>
 export interface Sizes {

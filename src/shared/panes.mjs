@@ -7,6 +7,7 @@
  */
 
 import { sanitizeWebConfig } from './webPane.mjs'
+import { sanitizeFileConfig } from './fileTree.mjs'
 
 function isRecord(v) {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -48,6 +49,11 @@ export function sanitizePanes(raw, { kinds, isUnique, maxPanes, launches = ['she
       const web = sanitizeWebConfig(item.web)
       if (!web) continue
       out.push({ id, kind, web })
+    } else if (kind === 'file') {
+      // A file pane without a usable path drops too; a missing file is the pane's own empty state.
+      const file = sanitizeFileConfig(item.file)
+      if (!file) continue
+      out.push({ id, kind, file })
     } else {
       out.push({ id, kind })
     }
