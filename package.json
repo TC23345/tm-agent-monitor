@@ -1,6 +1,6 @@
 {
   "name": "taylormade-agent-monitor",
-  "version": "0.4.57",
+  "version": "0.4.58",
   "description": "Hotkey-summoned Claude Code, Codex, and Cursor agent monitor for Windows.",
   "author": "Taylor",
   "license": "MIT",
@@ -16,6 +16,7 @@
     "focus:diag": "node scripts/focus-diag.mjs",
     "icons": "node scripts/build-icon.mjs",
     "hooks:install": "node hooks/install.mjs",
+    "chat:sync": "node scripts/sync-chat-panes.mjs",
     "hooks:codex": "node hooks/install.mjs --provider codex",
     "hooks:cursor": "node hooks/install.mjs --provider cursor",
     "hooks:all": "node hooks/install.mjs --all --repair",
@@ -26,16 +27,19 @@
     "tm": "node scripts/tm.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.302",
     "@vgpu/core": "^0.5.0",
     "electron-updater": "^6.8.9",
     "koffi": "^3.1.6",
     "mongodb": "^7.6.0",
-    "node-pty": "^1.2.0-beta.15"
+    "node-pty": "^1.2.0-beta.15",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.18.2",
     "@vgpu/adapter-mock": "^0.5.0",
     "@vgpu/adapter-node": "^0.5.0",
     "@vgpu/wgsl": "^0.5.0",

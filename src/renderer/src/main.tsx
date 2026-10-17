@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { Picker } from './picker/Picker'
 import './styles.css'
+import '../../chat/ui/chat.css'
 
 // One renderer bundle, two windows: main opens the quick picker as
 // `index.html?window=picker`, which mounts <Picker/> instead of the workspace

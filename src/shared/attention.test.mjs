@@ -19,6 +19,16 @@ test('a session maps to the pane launched as its CLI in its folder, else a shell
   assert.equal(paneForAgent(undefined, a), null)
 })
 
+test('a session maps to its chat pane by the hooks’ pane id, else by provider and folder', () => {
+  const chat = (id, provider, cwd, chatId) => ({ id, kind: 'chat', chat: { provider, cwd, chatId } })
+  const panes = [pane('cl', 'claude', 'C:\\Projects\\api'), chat('ch', 'claude', 'C:\\Projects\\api', 'h1'), chat('cx', 'codex', 'C:\\Projects\\api', 'h2')]
+  assert.equal(paneForAgent(panes, agent('a', { cwd: 'C:\\Projects\\api', terminalId: 'h1' })).id, 'ch', 'the exact handle wins over the terminal pane')
+  assert.equal(paneForAgent(panes, agent('b', { cwd: 'C:\\Projects\\api', terminalId: 'h2' })).id, 'cx')
+  assert.equal(paneForAgent(panes, agent('c', { cwd: 'C:\\Projects\\api' })).id, 'cl', 'without a handle the terminal pane listed first wins')
+  assert.equal(paneForAgent([chat('only', 'codex', 'c:/projects/api')], agent('d', { provider: 'codex', cwd: 'C:\\Projects\\api' })).id, 'only')
+  assert.equal(paneForAgent(panes, agent('e', { terminalId: 'nope' })), null, 'a stale handle and no folder matches nothing')
+})
+
 test('waiting sessions are served oldest first and children are ignored', () => {
   const agents = [
     agent('late', { state: 'waiting', since: 300 }),

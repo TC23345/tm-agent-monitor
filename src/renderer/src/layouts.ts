@@ -59,7 +59,7 @@ export function saveLayouts(map: LayoutMap): void {
 export function snapshotLayout(state: Omit<SavedLayout, 'savedAt'>): SavedLayout {
   return {
     ...state,
-    panes: state.panes.map((p) => (p.term ? { ...p, term: { ...p.term, sessionId: undefined } } : { ...p })),
+    panes: state.panes.map((p) => (p.term ? { ...p, term: { ...p.term, sessionId: undefined } } : p.chat ? { ...p, chat: { ...p.chat, chatId: undefined } } : { ...p })),
     savedAt: Date.now()
   }
 }
@@ -70,7 +70,7 @@ export function panesFromLayout(layout: SavedLayout): PaneInstance[] {
   // (and again by main before the page attaches). One it cannot load drops.
   return layout.panes
     .filter((p) => (p.kind !== 'web' || sanitizeWebConfig(p.web)) && (p.kind !== 'file' || sanitizeFileConfig(p.file)))
-    .map((p) => newPane(p.kind, p.term ? { ...p.term, sessionId: undefined } : undefined, sanitizeWebConfig(p.web) ?? undefined, sanitizeFileConfig(p.file) ?? undefined))
+    .map((p) => newPane(p.kind, p.term ? { ...p.term, sessionId: undefined } : undefined, sanitizeWebConfig(p.web) ?? undefined, sanitizeFileConfig(p.file) ?? undefined, p.chat ? { ...p.chat, chatId: undefined } : undefined))
 }
 
 export const LAYOUT_NAME_MAX = 40

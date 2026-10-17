@@ -46,6 +46,8 @@ interface Props {
   /** The folder launches and project commands use right now (the selected project badge). */
   context: { cwd?: string; label?: string }
   onNewTerminal: (launch: TerminalLaunch) => void
+  /** A chat pane: the extension's conversation with the CLI, in the grid. */
+  onNewChat: (provider: 'claude' | 'codex') => void
   onNewProject: () => void
   /** This folder's `.tm.json` commands and npm scripts — Terminal → Run. */
   commands: ProjectCommand[]
@@ -84,7 +86,7 @@ interface Props {
  */
 export function TopBar(props: Props) {
   const {
-    waiting, waitingOnly, onWaitingOnly, onRouteWaiting, health, panes, context, onNewTerminal, onNewProject, commands, onRunCommand,
+    waiting, waitingOnly, onWaitingOnly, onRouteWaiting, health, panes, context, onNewTerminal, onNewChat, onNewProject, commands, onRunCommand,
     canResetOrder, onResetOrder, onSettings, onKeys, openMenu, onOpenMenu, onPalette, onMinimize, onHide, onOpenPane, onActivity, hot, onFocusAgent,
     rebuild, onRebuild
   } = props
@@ -149,6 +151,10 @@ export function TopBar(props: Props) {
               <MenuItem icon={<ProviderBadge provider="claude" />} label="New Claude Code" hint={`Start Claude Code in a terminal pane in ${where}`} onClick={run(() => onNewTerminal('claude'))} />
               <MenuItem icon={<ProviderBadge provider="codex" />} label="New Codex" hint={`Start Codex in a terminal pane in ${where}`} onClick={run(() => onNewTerminal('codex'))} />
               <MenuItem icon={<Terminal strokeWidth={2} />} label="New terminal" hint={paneFull ? 'All six panes are open — opens a window instead' : `Open a PowerShell terminal in a pane in ${where} (Ctrl+Shift+\`)`} onClick={run(() => onNewTerminal('shell'))} />
+              <div className="menu-sep" />
+              {/* Chat panes: the VS Code extensions' conversation UI over the same CLIs, with their own history. */}
+              <MenuItem icon={<ProviderBadge provider="claude" />} label="New Claude Code chat" hint={paneFull ? 'All six panes are open' : `A Claude Code chat pane in ${where} — pick up any earlier session from its history`} onClick={run(() => onNewChat('claude'))} disabled={paneFull} />
+              <MenuItem icon={<ProviderBadge provider="codex" />} label="New Codex chat" hint={paneFull ? 'All six panes are open' : `A Codex chat pane in ${where} — pick up any earlier thread from its history`} onClick={run(() => onNewChat('codex'))} disabled={paneFull} />
               <div className="menu-sep" />
               <MenuItem icon={<SquareTerminal strokeWidth={2} />} label="Open external terminal" hint={`Open Windows Terminal in ${where}, outside the app`} onClick={run(() => window.watch.openTerminal(context.cwd, 'shell'))} />
               {commands.length > 0 && (

@@ -11,6 +11,9 @@ files:
 asarUnpack:
   - "**/node_modules/koffi/**"
   - "**/node_modules/node-pty/**"
+  # The Agent SDK's bundled claude.exe — the chat pane's fallback when no
+  # claude install is found (src/chat/shared/findCli.mjs); an exe cannot run from inside the asar.
+  - "**/node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/**"
 # Both native deps ship prebuilt binaries (koffi its own dispatcher, node-pty
 # NAPI prebuilds under prebuilds/win32-*), so nothing needs node-gyp. Left on,
 # the rebuild step compiles node-pty from source and fails on machines without

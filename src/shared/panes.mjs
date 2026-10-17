@@ -13,6 +13,24 @@ function isRecord(v) {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
+/**
+ * A chat pane's persisted config (`src/chat`): the provider and folder are
+ * required; `chatId` is main's live handle (a UUID; stale after a restart,
+ * which the pane detects); `resumeId` is the provider's own session id and is
+ * interpolated into a `claude --resume` line on the Claude side, hence the
+ * same pattern as a terminal pane's. Returns null when unusable.
+ */
+export function sanitizeChatConfig(raw) {
+  if (!isRecord(raw)) return null
+  if (raw.provider !== 'claude' && raw.provider !== 'codex') return null
+  if (typeof raw.cwd !== 'string' || raw.cwd.length > 32_767) return null
+  const out = { provider: raw.provider, cwd: raw.cwd }
+  if (typeof raw.chatId === 'string' && /^[0-9a-f-]{36}$/.test(raw.chatId)) out.chatId = raw.chatId
+  if (typeof raw.resumeId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(raw.resumeId)) out.resumeId = raw.resumeId
+  if (typeof raw.model === 'string' && raw.model.length > 0 && raw.model.length <= 100) out.model = raw.model
+  return out
+}
+
 /** `raw` is the parsed `tm.panes.v2` value; `kinds` the catalog ids.
  * `aliases` maps a retired kind to its successor (`usage` → `spend`), so a
  * layout saved before a split still opens something rather than nothing. */
@@ -54,6 +72,11 @@ export function sanitizePanes(raw, { kinds, isUnique, maxPanes, launches = ['she
       const file = sanitizeFileConfig(item.file)
       if (!file) continue
       out.push({ id, kind, file })
+    } else if (kind === 'chat') {
+      // A chat pane without a provider drops; the live handle is kept (a renderer reload reattaches) and the resume id is what a restart resumes.
+      const chat = sanitizeChatConfig(item.chat)
+      if (!chat) continue
+      out.push({ id, kind, chat })
     } else {
       out.push({ id, kind })
     }

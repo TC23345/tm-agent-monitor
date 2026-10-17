@@ -1,8 +1,35 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { NoteMeta, NoteOrder } from '../shared/notes.mjs'
 import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, ClipCaptureSettings, ClipGroupOp, ClipsListing, DailyUsageDay, DirListing, FileContent, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SizeMode, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights, WorkspaceCommand } from '../shared/types.js'
+import type { ChatBridge } from '../chat/ui/bridge'
+import type { Transcript } from '../chat/shared/chatModel.mjs'
+
+/** Chat panes (src/chat): main owns the CLI processes the way it owns PTYs; this is the pane's `ChatBridge` over `chat:*`. */
+const chat: ChatBridge = {
+  create: async (req) => {
+    const r = (await ipcRenderer.invoke('chat:create', req)) as { id: string; transcript: Transcript } | null
+    if (!r) throw new Error('Could not start the chat — is the CLI installed and the folder real?')
+    return r
+  },
+  get: (id) => ipcRenderer.invoke('chat:get', id),
+  send: (id, text, attachments) => ipcRenderer.invoke('chat:send', id, text, attachments ?? []),
+  interrupt: (id) => ipcRenderer.invoke('chat:interrupt', id),
+  answer: (id, approvalId, choice) => ipcRenderer.invoke('chat:answer', id, approvalId, choice),
+  answerQuestion: (id, questionId, answers) => ipcRenderer.invoke('chat:answer-question', id, questionId, answers),
+  close: (id) => ipcRenderer.invoke('chat:close', id),
+  onChange: (cb) => {
+    const listener = (_e: unknown, id: string, transcript: Transcript) => cb(id, transcript)
+    ipcRenderer.on('chat:changed', listener)
+    return () => {
+      ipcRenderer.removeListener('chat:changed', listener)
+    }
+  },
+  listSessions: (provider, cwd) => ipcRenderer.invoke('chat:sessions', provider, cwd),
+  loadTranscript: (provider, sessionId, cwd) => ipcRenderer.invoke('chat:transcript', provider, sessionId, cwd)
+}
 
 const api = {
+  chat,
   getStatus: (): Promise<StatusSnapshot> => ipcRenderer.invoke('status:get'),
   onStatus: (cb: (snap: StatusSnapshot) => void) => {
     const listener = (_e: unknown, snap: StatusSnapshot) => cb(snap)

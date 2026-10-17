@@ -42,6 +42,8 @@ import { noteNameFor as snippetFileName } from '../shared/notes.mjs'
 import { EXTENSION_ID, HOST_NAME, inspectHostManifest } from '../../hooks/clipHostCore.mjs'
 import { parseClipImport, snippetNote, MAX_IMPORT_BYTES } from '../shared/clipImport.mjs'
 import { agentForTerminal } from '../shared/attention.mjs'
+import { ChatManager } from '../chat/host/chatManager'
+import type { Attachment } from '../chat/shared/chatModel.mjs'
 import { buildWindowList } from '../shared/windows.mjs'
 import { parseProjectCommands } from '../shared/projectCommands.mjs'
 import { parseGitStatus, type GitStatus } from '../shared/gitStatus.mjs'
@@ -204,6 +206,21 @@ const terminals = new TerminalManager(
   // knows which terminal it is (its row in GET /v1/terminals).
   (id) => ({ TM_AGENT_MONITOR_ENDPOINT_FILE: config.endpointFile, TM_TERMINAL_ID: id })
 )
+// Chat panes (src/chat, vendored from tm-chat-panes): main owns every chat's
+// CLI process like a PTY. The same two variables reach the CLI, so its hooks
+// stamp the pane's handle as `terminalId` and `paneForAgent` finds the pane.
+const chats = new ChatManager({
+  envFor: (id) => ({ TM_AGENT_MONITOR_ENDPOINT_FILE: config.endpointFile, TM_TERMINAL_ID: id }),
+  scratchDir: app.getPath('temp'),
+  log: (line) => console.log(`[chat] ${line}`)
+})
+chats.on('change', (id: string, transcript: unknown) => {
+  if (win && !win.isDestroyed()) win.webContents.send('chat:changed', id, transcript)
+})
+chats.on('open-url', (_id: string, url: string) => {
+  if (typeof url === 'string' && url.length <= 2048 && /^https?:\/\//i.test(url)) void shell.openExternal(url)
+})
+app.on('before-quit', () => chats.closeAll())
 // ---- usage worker ---------------------------------------------------------
 // The Claude ledgers, the Codex rollout scan, and the insights scan run in a
 // utilityProcess (usageWorker.ts): they read and parse JSONL synchronously, and
@@ -2092,6 +2109,87 @@ function registerIpc(): void {
   ipcMain.on('term:dispose', (_e, id: string) => {
     if (!validTermId(id)) return
     terminals.dispose(id)
+  })
+  // Chat panes (src/chat). Same stance as the terminal routes: every field is
+  // validated and anything unexpected answers null or does nothing. Ids are
+  // main-issued UUIDs; a provider session id reaches a `claude --resume` line.
+  const validProvider = (p: unknown): p is 'claude' | 'codex' => p === 'claude' || p === 'codex'
+  const validSessionId = (s: unknown): s is string => typeof s === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(s)
+  const validRequestId = (s: unknown): s is string => typeof s === 'string' && /^[A-Za-z0-9:_-]{1,128}$/.test(s)
+  const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+  const validAttachments = (raw: unknown): Attachment[] | null => {
+    if (raw === undefined) return []
+    if (!Array.isArray(raw) || raw.length > 10) return null
+    const out: Attachment[] = []
+    for (const a of raw) {
+      if (typeof a !== 'object' || a === null) return null
+      const r = a as Record<string, unknown>
+      if (r.kind === 'image') {
+        if (typeof r.name !== 'string' || r.name.length > 200 || typeof r.mime !== 'string' || !IMAGE_MIMES.has(r.mime)) return null
+        if (typeof r.data !== 'string' || r.data.length > 28_000_000 || !/^[A-Za-z0-9+/=]*$/.test(r.data)) return null
+        out.push({ kind: 'image', name: r.name, mime: r.mime, data: r.data })
+      } else if (r.kind === 'file') {
+        if (typeof r.path !== 'string' || r.path.length === 0 || r.path.length > 32_767) return null
+        out.push({ kind: 'file', path: r.path, name: typeof r.name === 'string' && r.name.length <= 200 ? r.name : undefined })
+      } else return null
+    }
+    return out
+  }
+  ipcMain.handle('chat:create', async (_e, req: unknown) => {
+    if (typeof req !== 'object' || req === null) return null
+    const r = req as { provider?: unknown; cwd?: unknown; resume?: unknown; model?: unknown }
+    if (!validProvider(r.provider) || typeof r.cwd !== 'string' || r.cwd.length > 32_767) return null
+    if (r.resume !== undefined && r.resume !== null && !validSessionId(r.resume)) return null
+    if (r.model !== undefined && r.model !== null && (typeof r.model !== 'string' || r.model.length > 100)) return null
+    const cwd = r.cwd && existsSync(r.cwd) ? r.cwd : app.getPath('home')
+    try {
+      return await chats.create({ provider: r.provider, cwd, resume: (r.resume as string | null | undefined) ?? null, model: (r.model as string | null | undefined) ?? null })
+    } catch (error) {
+      console.error(`[chat] create failed: ${error instanceof Error ? error.message : error}`)
+      return null
+    }
+  })
+  ipcMain.handle('chat:get', (_e, id: unknown) => (validTermId(id) ? chats.get(id) : null))
+  ipcMain.handle('chat:send', async (_e, id: unknown, text: unknown, attachments: unknown) => {
+    if (!validTermId(id) || typeof text !== 'string' || text.length > 1_048_576) return
+    const list = validAttachments(attachments)
+    if (!list) return
+    try { await chats.send(id, text, list) } catch (error) { console.error(`[chat] send failed: ${error instanceof Error ? error.message : error}`) }
+  })
+  ipcMain.handle('chat:interrupt', async (_e, id: unknown) => {
+    if (!validTermId(id)) return
+    try { await chats.interrupt(id) } catch { /* the turn may have ended */ }
+  })
+  ipcMain.handle('chat:answer', async (_e, id: unknown, approvalId: unknown, choice: unknown) => {
+    if (!validTermId(id) || !validRequestId(approvalId)) return
+    if (choice !== 'allow' && choice !== 'allow-session' && choice !== 'deny' && choice !== 'cancel') return
+    try { await chats.answer(id, approvalId, choice) } catch { /* already answered */ }
+  })
+  ipcMain.handle('chat:answer-question', async (_e, id: unknown, questionId: unknown, answers: unknown) => {
+    if (!validTermId(id) || !validRequestId(questionId)) return
+    let clean: Record<string, string[]> | null = null
+    if (answers !== null) {
+      if (typeof answers !== 'object' || answers === null) return
+      clean = {}
+      for (const [k, v] of Object.entries(answers as Record<string, unknown>)) {
+        if (k.length > 500 || !Array.isArray(v) || v.length > 50 || !v.every((x) => typeof x === 'string' && x.length <= 4000)) return
+        clean[k] = v as string[]
+      }
+    }
+    try { await chats.answerQuestion(id, questionId, clean) } catch { /* already answered */ }
+  })
+  ipcMain.handle('chat:close', async (_e, id: unknown) => {
+    if (!validTermId(id)) return
+    await chats.close(id)
+  })
+  ipcMain.handle('chat:sessions', async (_e, provider: unknown, cwd: unknown) => {
+    if (!validProvider(provider)) return []
+    if (cwd !== undefined && (typeof cwd !== 'string' || cwd.length > 32_767)) return []
+    try { return await chats.listSessions(provider, cwd || undefined) } catch (error) { console.error(`[chat] sessions failed: ${error instanceof Error ? error.message : error}`); return [] }
+  })
+  ipcMain.handle('chat:transcript', async (_e, provider: unknown, sessionId: unknown, cwd: unknown) => {
+    if (!validProvider(provider) || !validSessionId(sessionId) || typeof cwd !== 'string' || cwd.length > 32_767) return null
+    try { return await chats.loadTranscript(provider, sessionId, cwd) } catch { return null }
   })
   ipcMain.on('cursor:open', (_e, cwd?: string) => {
     if (cwd !== undefined && (typeof cwd !== 'string' || cwd.length > 32_767 || !existsSync(cwd))) return

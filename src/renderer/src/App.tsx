@@ -15,6 +15,8 @@ import { setFieldActive } from './fieldActive'
 import { StatusBar, type StatusMenu } from './StatusBar'
 import { Pane } from './Pane'
 import type { TerminalPaneHandle } from './TerminalPane'
+import { ChatPane, type ChatPaneConfig, type ChatPaneHandle } from '../../chat/ui/ChatPane'
+import { MarkdownView } from './MarkdownView'
 // xterm and its addon are ~40% of the renderer bundle; a workspace with no
 // terminal pane never parses them. The ref still reaches the real component.
 const TerminalPane = lazy(() => import('./TerminalPane').then((m) => ({ default: m.TerminalPane })))
@@ -64,7 +66,7 @@ import {
   AppWindow, ArrowLeft, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Clipboard, Code2, Code2 as CursorIcon, Columns3, Copy,
   ExternalLink, Eye, EyeOff, Filter, Folder, FolderPlus, Globe, Keyboard, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
   NotebookPen, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, RotateCw, Rss, Ruler, Save, Shrink, Sparkles, SquareSlash,
-  SquareTerminal, Terminal, Trash2, X
+  History as HistoryIcon, MessageSquare, Plus, SquareTerminal, Terminal, Trash2, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
 
@@ -173,6 +175,8 @@ export function App() {
   // the page's live URL and whether Back has anywhere to go.
   const webRefs = useRef(new Map<string, WebPaneHandle>())
   const fileRefs = useRef(new Map<string, FilePaneHandle>())
+  /** Chat panes (src/chat): their handles for the header tools and the palette. */
+  const chatRefs = useRef(new Map<string, ChatPaneHandle>())
   /** Which file panes hold unsaved typing (the header's Save, and the tree's "take a clean pane" rule). */
   const [fileDirty, setFileDirty] = useState<Record<string, boolean>>({})
   /** A file pane's Preview toggle; unset means rendered for Markdown, the editor for anything else. */
@@ -661,14 +665,15 @@ export function App() {
   )
 
   /** Add a pane of `kind` if the layout allows it. Terminals repeat; others don't. */
-  const addPane = (kind: PaneKind, term?: TerminalPaneConfig, web?: WebPaneConfig, file?: FilePaneConfig) => {
+  const addPane = (kind: PaneKind, term?: TerminalPaneConfig, web?: WebPaneConfig, file?: FilePaneConfig, chat?: ChatPaneConfig) => {
     if (panes.length >= MAX_PANES) return
     if (isUniqueKind(kind) && panes.some((p) => p.kind === kind)) return
-    const pane = newPane(kind, term, web, file)
+    const pane = newPane(kind, term, web, file, chat)
     setPanes([...panes, pane])
     setFocusedPane(pane.id)
-    // A terminal opened in a folder is activity there.
+    // A terminal (or a chat) opened in a folder is activity there.
     if (term?.cwd) touchProjects([{ cwd: term.cwd, label: term.label, at: Date.now() }])
+    if (chat?.cwd) touchProjects([{ cwd: chat.cwd, at: Date.now() }])
     // One agent list: the pane replaces the sidebar section.
     if (kind === 'agents') setSidebarViews((current) => current.filter((v) => v !== 'agents'))
   }
@@ -676,7 +681,7 @@ export function App() {
   /** Give a pane the keyboard: a terminal or a web page takes real focus, anything else the slot. */
   const focusPane = (paneId: string) => {
     setFocusedPane(paneId)
-    const handle = termRefs.current.get(paneId) ?? webRefs.current.get(paneId)
+    const handle = termRefs.current.get(paneId) ?? webRefs.current.get(paneId) ?? chatRefs.current.get(paneId)
     if (handle) handle.focus()
     else document.querySelector<HTMLElement>(`[data-pane="${paneId}"]`)?.focus()
   }
@@ -829,6 +834,7 @@ export function App() {
     const layout = layouts[name]
     if (!layout) return
     for (const p of panes) if (p.term?.sessionId) window.watch.disposeTerminal(p.term.sessionId)
+    for (const p of panes) if (p.chat?.chatId) void window.watch.chat.close(p.chat.chatId)
     const next = panesFromLayout(layout)
     setPanes(next.length ? next : defaultPanes())
     setAllSizes(layout.sizes)
@@ -875,6 +881,22 @@ export function App() {
     addPane('terminal', { launch, cwd: context.cwd, label: context.label })
   }
 
+  /** A chat pane in the current context — the extension's conversation UI over the same CLI (src/chat). A full grid has nowhere to put it. */
+  const newChat = (provider: 'claude' | 'codex') => {
+    if (panes.length >= MAX_PANES) return
+    addPane('chat', undefined, undefined, undefined, { provider, cwd: context.cwd ?? '' })
+  }
+
+  const updateChat = (paneId: string, patch: Partial<ChatPaneConfig>) => {
+    setPanes((current) => current.map((p) => {
+      if (p.id !== paneId || !p.chat) return p
+      const next = { ...p.chat, ...patch }
+      // `undefined` in a patch clears the field (a new session drops the old handle and resume id).
+      for (const key of Object.keys(patch) as (keyof ChatPaneConfig)[]) if (patch[key] === undefined) delete next[key]
+      return { ...p, chat: next }
+    }))
+  }
+
   const updateTerm = (paneId: string, patch: Partial<TerminalPaneConfig>) => {
     // A shell that `cd`s somewhere has opened that folder.
     if (patch.cwd) touchProjects([{ cwd: patch.cwd, at: Date.now() }])
@@ -904,6 +926,7 @@ export function App() {
   const closePane = (paneId: string) => {
     const closing = panes.find((p) => p.id === paneId)
     if (closing?.term?.sessionId) window.watch.disposeTerminal(closing.term.sessionId)
+    if (closing?.chat?.chatId) void window.watch.chat.close(closing.chat.chatId)
     const next = panes.filter((p) => p.id !== paneId)
     setPanes(next.length ? next : defaultPanes())
     if (focusedPane === paneId) setFocusedPane(null)
@@ -967,6 +990,20 @@ export function App() {
             onFocus={() => { if (focusedPane !== pane.id) setFocusedPane(pane.id) }}
           />
         )
+      case 'chat':
+        return (
+          <ChatPane
+            ref={(handle) => {
+              if (handle) chatRefs.current.set(pane.id, handle)
+              else chatRefs.current.delete(pane.id)
+            }}
+            bridge={window.watch.chat}
+            config={pane.chat!}
+            onConfig={(patch) => updateChat(pane.id, patch)}
+            renderText={(text) => <MarkdownView source={text} />}
+            onFocus={() => { if (focusedPane !== pane.id) setFocusedPane(pane.id) }}
+          />
+        )
       case 'terminal':
         return (
           <Suspense fallback={<div className="empty">Starting terminal…</div>}>
@@ -997,6 +1034,7 @@ export function App() {
   /** What a terminal pane runs, as its header title. */
   const paneTitle = (pane: PaneInstance) =>
     pane.kind === 'terminal' && pane.term ? (pane.term.launch === 'claude' ? 'Claude Code' : pane.term.launch === 'codex' ? 'Codex' : 'Terminal')
+      : pane.kind === 'chat' && pane.chat ? (pane.chat.provider === 'claude' ? 'Claude Code chat' : 'Codex chat')
       : pane.kind === 'notes' ? "TC's NOTES"
         : pane.kind === 'web' ? pane.web?.label
           : pane.kind === 'file' && pane.file ? `${fileBaseName(pane.file.path)}${fileDirty[pane.id] ? ' •' : ''}` : undefined
@@ -1058,6 +1096,16 @@ export function App() {
           {tool('Back', ic(ArrowLeft), () => handle()?.back(), !state.back)}
           {tool(state.loading ? 'Loading…' : 'Reload', ic(RotateCw), () => handle()?.reload(), false, !!state.loading)}
           {tool('Open in your browser', ic(ExternalLink), () => { void window.watch.openExternal(state.url ?? web.url) })}
+        </>
+      )
+    }
+    if (pane.kind === 'chat' && pane.chat) {
+      const handle = () => chatRefs.current.get(pane.id)
+      // Sessions (the provider's own history) and a fresh one; everything else is inside the pane.
+      return (
+        <>
+          {tool('Sessions', ic(HistoryIcon), () => handle()?.pickSession())}
+          {tool('New session', ic(Plus), () => handle()?.newSession())}
         </>
       )
     }
@@ -1244,6 +1292,15 @@ export function App() {
     cmd('new-codex', 'New Codex', () => newTerminal('codex'), { icon: <ProviderBadge provider="codex" />, keywords: ['agent'], pinned: true, detail: context.label })
     cmd('new-terminal', 'New terminal', () => newTerminal('shell'), { icon: <Terminal strokeWidth={2} />, keywords: ['shell', 'powershell'], keys: ['Ctrl', 'Shift', '`'], pinned: true, detail: full ? 'opens a window — all six panes are open' : context.label })
     cmd('ext-terminal', 'Open external terminal', () => window.watch.openTerminal(context.cwd, 'shell'), { icon: <SquareTerminal strokeWidth={2} />, detail: context.label ?? 'home folder' })
+    // Chat panes: the extensions' conversation UI over the same CLIs, with their own history.
+    cmd('new-claude-chat', 'New Claude Code chat', () => newChat('claude'), { icon: <ProviderBadge provider="claude" />, keywords: ['agent', 'chat', 'conversation'], detail: full ? 'all six panes are open' : context.label })
+    cmd('new-codex-chat', 'New Codex chat', () => newChat('codex'), { icon: <ProviderBadge provider="codex" />, keywords: ['agent', 'chat', 'conversation', 'thread'], detail: full ? 'all six panes are open' : context.label })
+    const focusedChat = panes.find((p) => p.id === focusedPane && p.kind === 'chat')
+    if (focusedChat) {
+      cmd('chat-sessions', 'Chat: pick a session', () => chatRefs.current.get(focusedChat.id)?.pickSession(), { icon: <MessageSquare strokeWidth={2} />, keywords: ['history', 'resume', 'thread'] })
+      cmd('chat-new-session', 'Chat: new session', () => chatRefs.current.get(focusedChat.id)?.newSession(), { icon: <MessageSquare strokeWidth={2} />, keywords: ['fresh', 'conversation'] })
+      cmd('chat-stop', 'Chat: stop the turn', () => chatRefs.current.get(focusedChat.id)?.interrupt(), { icon: <MessageSquare strokeWidth={2} />, keywords: ['interrupt', 'cancel'] })
+    }
     // Snippets act on the focused terminal pane (they used to be a header
     // menu; 4.3-plan.md item 5). No focused terminal, no snippets.
     const focusedTerm = panes.find((p) => p.id === focusedPane && p.kind === 'terminal' && p.term?.sessionId)
@@ -1429,6 +1486,7 @@ export function App() {
         panes={panes}
         context={context}
         onNewTerminal={newTerminal}
+        onNewChat={newChat}
         onNewProject={() => setNewProjectOpen(true)}
         commands={projectCommands}
         onRunCommand={runProjectCommand}

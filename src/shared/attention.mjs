@@ -21,13 +21,25 @@ function launchFor(provider) {
  * session has no folder, the provider has no CLI launch, or nothing matches.
  */
 export function paneForAgent(panes, agent) {
-  if (!agent || !agent.cwd || !Array.isArray(panes)) return null
+  if (!agent || !Array.isArray(panes)) return null
+  // Exact: the session's hooks carried the pane's id (TM_TERMINAL_ID) — a
+  // terminal pane's PTY id, or a chat pane's live handle.
+  if (agent.terminalId) {
+    for (const pane of panes) {
+      if (!pane) continue
+      if (pane.kind === 'terminal' && pane.term?.sessionId === agent.terminalId) return pane
+      if (pane.kind === 'chat' && pane.chat?.chatId === agent.terminalId) return pane
+    }
+  }
+  if (!agent.cwd) return null
   const launch = launchFor(agent.provider)
   if (!launch) return null
   const cwd = canonical(agent.cwd)
   let shell = null
   for (const pane of panes) {
-    if (!pane || pane.kind !== 'terminal' || !pane.term || canonical(pane.term.cwd) !== cwd) continue
+    if (!pane) continue
+    if (pane.kind === 'chat' && pane.chat && pane.chat.provider === launch && canonical(pane.chat.cwd) === cwd) return pane
+    if (pane.kind !== 'terminal' || !pane.term || canonical(pane.term.cwd) !== cwd) continue
     if (pane.term.launch === launch) return pane
     if (pane.term.launch === 'shell' && !shell) shell = pane
   }

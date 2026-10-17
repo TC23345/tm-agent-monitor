@@ -17,7 +17,17 @@ export interface SanitizedPane<K extends string = string> {
   web?: { url: string; label: string }
   /** `file` panes only: the file shown (`sanitizeFileConfig`). */
   file?: { path: string }
+  /** `chat` panes only (`sanitizeChatConfig`). */
+  chat?: SanitizedChat
 }
+export interface SanitizedChat {
+  provider: 'claude' | 'codex'
+  cwd: string
+  chatId?: string
+  resumeId?: string
+  model?: string
+}
+export function sanitizeChatConfig(raw: unknown): SanitizedChat | null
 export type Fractions = Record<string, number[]>
 export interface Sizes {
   sidebar: number | null

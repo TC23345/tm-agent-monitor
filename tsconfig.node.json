@@ -14,5 +14,5 @@
     "baseUrl": ".",
     "paths": { "@shared/*": ["src/shared/*"] }
   },
-  "include": ["src/main", "src/preload", "src/shared", "src/native", "electron.vite.config.ts"]
+  "include": ["src/main", "src/preload", "src/shared", "src/native", "src/chat/shared", "src/chat/claude", "src/chat/codex", "src/chat/host", "src/chat/ui/bridge.ts", "electron.vite.config.ts"]
 }
