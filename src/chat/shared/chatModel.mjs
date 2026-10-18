@@ -19,10 +19,11 @@
  * What a user turn may carry besides text. An image is inline base64 (a
  * paste, a picked file); a file is a reference the CLI resolves itself
  * (Claude's `@path`, Codex's `mention`).
- * @typedef {{ kind: 'image', name: string, mime: string, data: string, path?: string } | { kind: 'file', path: string, name?: string }} Attachment
+ * `width`/`height` are the image's pixel size when the pane could read it.
+ * @typedef {{ kind: 'image', name: string, mime: string, data: string, path?: string, width?: number, height?: number } | { kind: 'file', path: string, name?: string }} Attachment
  */
 /** What a transcript row keeps of an attachment (never the bytes). */
-/** @typedef {{ kind: 'image' | 'file', name: string }} AttachmentSummary */
+/** @typedef {{ kind: 'image' | 'file', name: string, width?: number, height?: number, path?: string }} AttachmentSummary */
 
 /**
  * @typedef {Object} ChatItemUser
@@ -44,9 +45,10 @@
  * @typedef {Object} ChatItemThinking
  * @property {'thinking'} kind
  * @property {string} id
- * @property {string} text
+ * @property {string} text empty when the provider omits the thinking text (the row still says how long it took)
  * @property {boolean} streaming
  * @property {number} at
+ * @property {number} [durationMs] from the block's start to its end, once it ended ("Thought for 2s")
  */
 /**
  * @typedef {Object} ChatItemTool
@@ -58,6 +60,23 @@
  * @property {string} [output] what came back, bounded by MAX_TOOL_OUTPUT
  * @property {'running' | 'done' | 'failed' | 'declined'} status
  * @property {number} at
+ * @property {string} [label] the row's bold name ("Bash", "Edit", "browser_batch (Claude in Chrome)")
+ * @property {string} [detail] the muted rest of the line: a command's description, a path, a pattern
+ * @property {boolean} [detailMono] the detail is a path or a pattern (monospace), not prose
+ * @property {ToolView} [view] which body the row gets
+ * @property {FileChange[]} [edits] for `edit` rows: what changed, file by file
+ * @property {string} [content] for `write` rows: the written text
+ */
+/**
+ * `command`: IN (the command) and OUT (its output), open. `edit`: a summary and
+ * the diff. `write`: a line count and the content. `read`: the line alone.
+ * `search`: a match count, OUT on click. `other`: IN/OUT on click.
+ * @typedef {'command' | 'edit' | 'write' | 'read' | 'search' | 'other'} ToolView
+ */
+/**
+ * One file's change: a before/after pair (Claude's Edit) or a unified diff /
+ * whole content (Codex's fileChange).
+ * @typedef {{ path: string, before?: string, after?: string, diff?: string, kind?: 'add' | 'delete' | 'update' }} FileChange
  */
 /**
  * @typedef {Object} ChatItemApproval
@@ -124,7 +143,20 @@
  * @property {ChatItem[]} items
  * @property {Usage} usage
  * @property {string | null} error the last fatal message, for the pane's banner
+ * @property {string | null} effort the reasoning effort the next request uses; null is the model's default
+ * @property {string | null} permissionMode Claude's PermissionMode, or the Codex preset id
+ * @property {number | null} turnStartedAt when the turn in flight started (epoch ms)
  */
+
+/**
+ * What the composer's menus offer, fetched on demand (`ChatBridge.options`).
+ * `id` is what `configure` takes (an alias such as `opus` on Claude); `model` the canonical id it resolves to.
+ * @typedef {{ id: string, label: string, description?: string, efforts: string[], defaultEffort?: string | null, model?: string }} ModelOption
+ * @typedef {{ id: string, label: string, description: string }} ModeOption
+ * @typedef {{ name: string, description: string, argumentHint?: string }} CommandOption
+ * @typedef {{ models: ModelOption[], modes: ModeOption[], commands: CommandOption[] }} ChatOptions
+ */
+/** @typedef {{ model?: string | null, effort?: string | null, permissionMode?: string | null }} ChatConfigPatch */
 
 export const MAX_ITEMS = 2000
 export const MAX_TOOL_OUTPUT = 64 * 1024
@@ -132,7 +164,7 @@ export const MAX_TEXT = 512 * 1024
 
 /**
  * @param {Provider} provider
- * @param {{ cwd: string, sessionId?: string | null, model?: string | null, title?: string | null }} init
+ * @param {{ cwd: string, sessionId?: string | null, model?: string | null, title?: string | null, effort?: string | null, permissionMode?: string | null }} init
  * @returns {Transcript}
  */
 export function emptyTranscript(provider, init) {
@@ -145,7 +177,10 @@ export function emptyTranscript(provider, init) {
     status: 'idle',
     items: [],
     usage: { inputTokens: 0, outputTokens: 0 },
-    error: null
+    error: null,
+    effort: init.effort ?? null,
+    permissionMode: init.permissionMode ?? null,
+    turnStartedAt: null
   }
 }
 
@@ -238,7 +273,14 @@ export function answerQuestion(t, id, answers) {
 /** The user-visible summary of an attachment list. @param {Attachment[]} [list] */
 export function summarizeAttachments(list) {
   if (!list?.length) return undefined
-  return list.map((a) => ({ kind: a.kind, name: a.kind === 'image' ? a.name : a.name ?? a.path }))
+  return list.map((a) => (a.kind === 'image'
+    ? { kind: 'image', name: a.name, ...(a.width && a.height ? { width: a.width, height: a.height } : {}) }
+    : { kind: 'file', name: a.name ?? a.path, path: a.path }))
+}
+
+/** A turn starts: the status goes to running and the clock starts. */
+export function beginTurn(t, at) {
+  return { ...setStatus(t, 'running'), turnStartedAt: at }
 }
 
 /**

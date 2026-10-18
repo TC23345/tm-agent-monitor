@@ -29,6 +29,17 @@ test('a session maps to its chat pane by the hooks’ pane id, else by provider 
   assert.equal(paneForAgent(panes, agent('e', { terminalId: 'nope' })), null, 'a stale handle and no folder matches nothing')
 })
 
+test('a Codex chat, which carries no pane id, maps by the session it holds', () => {
+  const chat = (id, cwd, resumeId) => ({ id, kind: 'chat', chat: { provider: 'codex', cwd, resumeId } })
+  const panes = [chat('one', 'C:\\Projects\\api', 't-1'), chat('two', 'C:\\Projects\\api', 't-2'), chat('new', 'c:/projects/api')]
+  const codex = (rawSessionId) => agent(`codex:${rawSessionId}`, { provider: 'codex', rawSessionId, cwd: 'C:\\Projects\\api' })
+  assert.equal(paneForAgent(panes, codex('t-2')).id, 'two', 'the second chat in a folder, not the first')
+  assert.equal(paneForAgent(panes, codex('t-3')).id, 'new', 'a chat holding another session is skipped')
+  assert.equal(paneForAgent(panes.slice(0, 2), codex('t-3')), null)
+  assert.equal(paneForAgent([chat('far', 'C:\\Elsewhere', 't-1')], codex('t-1')).id, 'far', 'the session id wins over the folder')
+  assert.equal(paneForAgent([{ id: 'cl', kind: 'chat', chat: { provider: 'claude', cwd: 'C:\\Projects\\api', resumeId: 't-1' } }], codex('t-1')), null, 'never across providers')
+})
+
 test('waiting sessions are served oldest first and children are ignored', () => {
   const agents = [
     agent('late', { state: 'waiting', since: 300 }),

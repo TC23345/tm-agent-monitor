@@ -31,6 +31,20 @@ Fix: remove the link (`cmd //c "rmdir node_modules"` — `rmdir` without `/S`
 deletes the junction, **not** the target), run a real `npm install` in that
 directory, rebuild, re-verify.
 
+## The other one: a dependency that was never installed
+
+electron-vite leaves every `dependencies` entry external, so main imports them
+from the asar at runtime, and electron-builder packs whatever `node_modules`
+holds without a word about what it lacks. 0.4.58 shipped that way: a merge
+added the Agent SDK and `ws`, nobody ran `npm install` in the checkout that
+built it, and the installed app died at launch with `ERR_MODULE_NOT_FOUND`.
+
+`scripts/check-deps.mjs` (tested) now runs first in `dist`, `dist:dir` and
+`publish`: it reads `package-lock.json` and refuses to package when any non-dev,
+non-optional package is missing from `node_modules`. The fix it asks for is
+`npm install`. Rebuild & relaunch runs `npm install` before `npm run dist` for
+the same reason.
+
 ## Local build, without publishing
 
 `electron-builder.yml` here declares a GitHub `publish` provider, so always pass
@@ -42,16 +56,17 @@ npm run dist -- --publish never
 
 Artifacts land in `dist/`: an NSIS installer
 (`tm-agent-monitor-<version>-x64.exe`) and a portable exe. Bump `version` in
-`package.json` first — the version is in the filename and is what Settings shows,
-so an unbumped build is indistinguishable from the one already installed.
+`package.json` first — the version is in the filename and is what the status
+bar's version chip shows, so an unbumped build is indistinguishable from the
+one already installed.
 
 ## Verify a packaged build
 
 A green build is not a working app. Three checks, in order:
 
 1. **Deps present** — `scripts/verify-asar-deps.mjs`.
-2. **Native modules unpacked** — `resources/app.asar.unpacked/node_modules/`
-   contains koffi.
+2. **Native code unpacked** — `resources/app.asar.unpacked/node_modules/`
+   contains `koffi`, `node-pty` and `@anthropic-ai/claude-agent-sdk-win32-x64`.
 3. **It boots** — actually run the packaged exe. Use an isolated
    `--user-data-dir`, or the single-instance lock will make it exit instantly
    against your installed copy (exit code 0, no window — looks like a crash):
@@ -127,9 +142,21 @@ argument list, which never needs the install directory:
 Start-Process .\dist\tm-agent-monitor-<version>-x64.exe -ArgumentList '--updated', '/S', '--force-run'
 ```
 
-This repo does exactly that in `app:reinstall` (Settings → Rebuild & relaunch)
-and `scripts/reinstall-local.ps1`. Quit the app first — the installer would
-wait for it, but quitting through the app runs the bounded history flush.
+This repo does exactly that in `app:reinstall` (the status bar's Update chip,
+File → Rebuild & relaunch, Settings → System) and `scripts/reinstall-local.ps1`:
+`npm install`, `npm run dist` in `CLAUDE_WATCH_REPO`, then a PowerShell waiter
+that waits for the app to exit and runs the installer with those three flags.
+Quit the app first when doing it by hand — the installer would wait for it, but
+quitting through the app runs the bounded history flush.
+
+The waiter must **not** be a child of the app. Electron's main process sits in
+a Windows job object and a `detached` spawn inherits it, so the helper is
+killed the instant the app exits and the installer never runs (probed
+2026-09-08). `app:reinstall` creates it through WMI
+(`Invoke-CimMethod -ClassName Win32_Process -MethodName Create`), outside the
+job, and quits only once it exists. Do not reintroduce a hard-coded install
+path or a `Start-Process` of the installed app's exe after the install —
+`--force-run` already relaunches it, as the user.
 
 `app.relaunch()` is the wrong tool here: it relaunches the *current* binary
 when this instance exits, which is what you want after a settings change, not

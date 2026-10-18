@@ -3,6 +3,7 @@
 // `codex app-server generate-ts` emitted for 0.162.1 (docs/rea/codex-app-server-ts/v2)
 // and the shapes the probes observed (docs/rea/codex-samples).
 import { addUsage, answerQuestion, appendDelta, appendItem, clip, decideApproval, emptyTranscript, MAX_TOOL_OUTPUT, setStatus, settleStreams, updateItem } from '../shared/chatModel.mjs'
+import { argDetail, mcpTitle } from '../shared/present.mjs'
 
 /** Codex server-request methods the pane answers as approvals. */
 export const APPROVAL_METHODS = new Set([
@@ -44,22 +45,27 @@ export function itemToChat(item, at) {
       return {
         kind: 'tool', id: item.id, name: 'commandExecution', title: commandTitle(item), input: item.command ?? '',
         output: item.aggregatedOutput ? clip(item.aggregatedOutput, MAX_TOOL_OUTPUT) : undefined,
-        status: toolStatus(item.status, item.exitCode), at
+        status: toolStatus(item.status, item.exitCode), at, ...commandView(item)
       }
     case 'fileChange': {
-      const files = (item.changes ?? []).map((c) => c.path).filter(Boolean)
-      return { kind: 'tool', id: item.id, name: 'fileChange', title: files.length ? `Edit ${files.map(baseName).join(', ')}` : 'Edit files', input: files.join('\n'), status: toolStatus(item.status), at }
+      const changes = item.changes ?? []
+      const files = changes.map((c) => c.path).filter(Boolean)
+      const edits = changes.map((c) => ({ path: c.path ?? '', kind: c.kind?.type, diff: clip(String(c.diff ?? ''), MAX_TOOL_OUTPUT) }))
+      return {
+        kind: 'tool', id: item.id, name: 'fileChange', title: files.length ? `Edit ${files.map(baseName).join(', ')}` : 'Edit files', input: files.join('\n'), status: toolStatus(item.status), at,
+        label: changes.length && changes.every((c) => c.kind?.type === 'add') ? 'Create' : 'Edit', detail: files.join(', ') || undefined, detailMono: true, view: 'edit', edits
+      }
     }
     case 'mcpToolCall':
       return {
         kind: 'tool', id: item.id, name: `${item.server}.${item.tool}`, title: `${item.server} · ${item.tool}`, input: safeJson(item.arguments),
         output: item.result ? clip(mcpResultText(item.result), MAX_TOOL_OUTPUT) : item.error ? clip(String(item.error.message ?? safeJson(item.error)), MAX_TOOL_OUTPUT) : undefined,
-        status: toolStatus(item.status), at
+        status: toolStatus(item.status), at, label: mcpTitle(item.server ?? '', item.tool ?? ''), detail: argDetail(item.arguments), view: 'other'
       }
     case 'dynamicToolCall':
-      return { kind: 'tool', id: item.id, name: item.tool, title: item.tool, input: safeJson(item.arguments), status: item.success === false ? 'failed' : toolStatus(item.status), at }
+      return { kind: 'tool', id: item.id, name: item.tool, title: item.tool, input: safeJson(item.arguments), status: item.success === false ? 'failed' : toolStatus(item.status), at, label: item.tool, view: 'other' }
     case 'webSearch':
-      return { kind: 'tool', id: item.id, name: 'webSearch', title: `Search · ${item.query ?? ''}`, status: 'done', at }
+      return { kind: 'tool', id: item.id, name: 'webSearch', title: `Search · ${item.query ?? ''}`, status: 'done', at, label: 'Search', detail: item.query || undefined, view: 'other' }
     case 'error':
       return { kind: 'system', id: item.id, text: item.message ?? 'error', level: 'error', at }
     case 'contextCompaction':
@@ -75,6 +81,20 @@ function toolStatus(status, exitCode) {
   if (status === 'failed') return 'failed'
   if (typeof exitCode === 'number' && exitCode !== 0) return 'failed'
   return 'done'
+}
+
+/**
+ * A command row's name and detail. Codex parses what a command does
+ * (`commandActions`); a single read, search or listing reads as that, any
+ * other command as "Shell" — the IN row shows it either way.
+ */
+function commandView(item) {
+  const actions = item.commandActions ?? []
+  const one = actions.length === 1 ? actions[0] : null
+  if (one?.type === 'read') return { label: 'Read', detail: one.name || baseName(one.path ?? ''), detailMono: true, view: 'command' }
+  if (one?.type === 'search') return { label: 'Search', detail: one.query ? `pattern: "${one.query}"` : undefined, detailMono: true, view: 'command' }
+  if (one?.type === 'listFiles') return { label: 'List', detail: one.path || undefined, detailMono: true, view: 'command' }
+  return { label: 'Shell', view: 'command' }
 }
 
 function commandTitle(item) {
@@ -146,7 +166,9 @@ export function foldNotification(t, n) {
     case 'thread/name/updated':
       return typeof p.name === 'string' ? { ...t, title: p.name } : t
     case 'turn/started':
-      return setStatus(t, 'running')
+      // The pane stamps the clock when it sends; a turn another client started gets it here.
+      if (t.status === 'running' && t.turnStartedAt) return t
+      return { ...setStatus(t, 'running'), turnStartedAt: at }
     case 'turn/completed': {
       const turn = p.turn ?? {}
       let next = settleStreams(t)
@@ -156,13 +178,21 @@ export function foldNotification(t, n) {
       return next
     }
     case 'item/started': {
-      const chat = itemToChat(p.item, p.startedAtMs ?? at)
+      const start = p.startedAtMs ?? at
+      // Reasoning gets its row at the start even before (or without) a summary, so it can be timed.
+      const chat = itemToChat(p.item, start) ?? (p.item?.type === 'reasoning' && p.item.id ? { kind: 'thinking', id: p.item.id, text: '', streaming: true, at: start } : null)
       if (!chat) return t
       if (chat.kind === 'assistant' || chat.kind === 'thinking') chat.streaming = true
       return placeItem(t, chat)
     }
     case 'item/completed': {
-      const chat = itemToChat(p.item, p.completedAtMs ?? at)
+      const end = p.completedAtMs ?? at
+      const chat = itemToChat(p.item, end)
+      const existing = p.item?.id ? t.items.find((x) => x.id === p.item.id) : undefined
+      if (existing?.kind === 'thinking') {
+        // Keep the start time; the row now says how long the reasoning took.
+        return updateItem(t, existing.id, { text: chat?.kind === 'thinking' ? chat.text : existing.text, streaming: false, durationMs: Math.max(0, end - existing.at) })
+      }
       if (!chat) return t
       return placeItem(t, chat)
     }
@@ -176,10 +206,11 @@ export function foldNotification(t, n) {
     case 'thread/tokenUsage/updated': {
       const u = p.tokenUsage ?? {}
       const last = u.last ?? u.lastTokenUsage ?? {}
-      const total = u.total ?? u.totalTokenUsage ?? {}
+      // The window holds the last call's tokens; `total` adds up the whole thread and outgrows any window.
+      const lastTotal = num(last.totalTokens) ?? (typeof last.inputTokens === 'number' ? last.inputTokens + num(last.outputTokens ?? 0) : undefined)
       return addUsage(t, {
         inputTokens: num(last.inputTokens), outputTokens: num(last.outputTokens),
-        contextTokens: num(total.totalTokens ?? u.contextTokens), contextWindow: num(u.modelContextWindow)
+        contextTokens: lastTotal ?? num(u.contextTokens), contextWindow: num(u.modelContextWindow)
       })
     }
     case 'error':
@@ -204,7 +235,8 @@ const num = (v) => (typeof v === 'number' ? v : undefined)
  * appended when it sent (`local:` id, same text) instead of doubling it.
  */
 function placeItem(t, chat) {
-  if (t.items.some((x) => x.id === chat.id)) return updateItem(t, chat.id, chat)
+  // An item seen before keeps the time it started; its completion only updates it.
+  if (t.items.some((x) => x.id === chat.id)) return updateItem(t, chat.id, (cur) => ({ ...cur, ...chat, at: cur.at }))
   if (chat.kind === 'user') {
     const local = [...t.items].reverse().find((x) => x.kind === 'user' && x.id.startsWith('local:') && x.text.trim() === chat.text.trim())
     if (local) return updateItem(t, local.id, { ...local, id: chat.id })

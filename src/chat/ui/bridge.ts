@@ -1,7 +1,7 @@
 // What the pane needs from its host. In claude-watch the host is the sandboxed
 // preload over `chat:*` IPC routes (main owns the processes, exactly as it
 // owns the PTYs); in a plain Node harness it is the clients themselves.
-import type { ApprovalChoice, Attachment, Provider, SessionSummary, Transcript } from '../shared/chatModel.mjs'
+import type { ApprovalChoice, Attachment, ChatConfigPatch, ChatOptions, Provider, SessionSummary, Transcript } from '../shared/chatModel.mjs'
 
 export interface ChatCreateRequest {
   provider: Provider
@@ -21,6 +21,10 @@ export interface ChatBridge {
   answer(id: string, approvalId: string, choice: ApprovalChoice): Promise<void>
   /** Answers by question id; `null` dismisses the question. */
   answerQuestion(id: string, questionId: string, answers: Record<string, string[]> | null): Promise<void>
+  /** Change the live session's model, effort or permission mode (the composer's chips); the transcript push reflects it. */
+  configure(id: string, patch: ChatConfigPatch): Promise<void>
+  /** What the composer's menus offer: models with their efforts, modes, slash commands. Fetched on demand. */
+  options(id: string): Promise<ChatOptions>
   close(id: string): Promise<void>
   /** Transcript pushes; returns the unsubscribe. */
   onChange(cb: (id: string, transcript: Transcript) => void): () => void

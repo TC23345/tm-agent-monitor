@@ -69,11 +69,37 @@ test('live turn: started, deltas, item completion, completion', () => {
   assert.equal(t.items[1].output, 'line 1\n')
   t = foldNotification(t, { method: 'thread/tokenUsage/updated', params: { threadId: 'th', turnId: 't1', tokenUsage: { last: { inputTokens: 10, outputTokens: 3 }, total: { totalTokens: 500 }, modelContextWindow: 200000 } } })
   assert.equal(t.usage.inputTokens, 10)
-  assert.equal(t.usage.contextTokens, 500)
+  assert.equal(t.usage.contextTokens, 13, 'the window holds the last call, not the thread total')
+  t = foldNotification(t, { method: 'thread/tokenUsage/updated', params: { threadId: 'th', turnId: 't1', tokenUsage: { last: { totalTokens: 64_000, inputTokens: 63_000, outputTokens: 1000 }, total: { totalTokens: 900_000 }, modelContextWindow: 272_000 } } })
+  assert.deepEqual([t.usage.contextTokens, t.usage.contextWindow], [64_000, 272_000])
   t = foldNotification(t, { method: 'turn/completed', params: { threadId: 'th', turn: { id: 't1', status: 'completed', items: [], error: null } } })
   assert.equal(t.status, 'idle')
   assert.equal(foldNotification(t, { method: 'turn/started', params: { threadId: 'other', turn: {} } }), t, 'another thread’s traffic is ignored')
   assert.equal(foldNotification(t, { method: 'thread/realtime/sdp', params: { threadId: 'th' } }), t, 'unknown methods are no-ops')
+})
+
+test('rows read like the extension: a shell row, a diff, an MCP call, timed reasoning', () => {
+  const cmd = itemToChat(CMD, 1)
+  assert.deepEqual([cmd.label, cmd.detail, cmd.view], ['Search', 'pattern: "parser"', 'command'])
+  assert.deepEqual([itemToChat({ ...CMD, commandActions: [{ type: 'unknown', command: 'npm test' }] }, 1).label], ['Shell'])
+  const mcp = itemToChat(MCP, 1)
+  assert.deepEqual([mcp.label, mcp.view], ['list_threads (Codex App)', 'other'])
+  const change = itemToChat({ type: 'fileChange', id: 'fc1', status: 'completed', changes: [{ path: 'C:\\p\\a.ts', kind: { type: 'update', move_path: null }, diff: '@@ -1 +1 @@\n-a\n+b\n' }] }, 1)
+  assert.deepEqual([change.label, change.view, change.edits], ['Edit', 'edit', [{ path: 'C:\\p\\a.ts', kind: 'update', diff: '@@ -1 +1 @@\n-a\n+b\n' }]])
+  assert.equal(itemToChat({ type: 'fileChange', id: 'fc2', status: 'completed', changes: [{ path: 'n.md', kind: { type: 'add' }, diff: 'new' }] }, 1).label, 'Create')
+
+  let t = emptyTranscript('codex', { cwd: 'C:\\p', sessionId: 'th' })
+  t = foldNotification(t, { method: 'item/started', params: { threadId: 'th', item: { type: 'reasoning', id: 'rs_9', summary: [], content: [] }, startedAtMs: 1000 } })
+  assert.deepEqual(t.items.map((x) => [x.kind, x.text, x.streaming]), [['thinking', '', true]], 'reasoning has a row from its start')
+  t = foldNotification(t, { method: 'item/completed', params: { threadId: 'th', item: { type: 'reasoning', id: 'rs_9', summary: ['Checked the tests'], content: [] }, completedAtMs: 3400 } })
+  assert.deepEqual([t.items[0].text, t.items[0].streaming, t.items[0].durationMs, t.items[0].at], ['Checked the tests', false, 2400, 1000])
+})
+
+test('turn/started stamps the clock unless the pane already did', () => {
+  let t = emptyTranscript('codex', { cwd: 'C:\\p', sessionId: 'th' })
+  t = foldNotification(t, { method: 'turn/started', params: { threadId: 'th', turn: { id: 't1' } }, emittedAtMs: 500 })
+  assert.deepEqual([t.status, t.turnStartedAt], ['running', 500])
+  assert.equal(foldNotification(t, { method: 'turn/started', params: { threadId: 'th', turn: { id: 't1' } }, emittedAtMs: 900 }), t)
 })
 
 test('a failed turn and an error notification surface in the banner', () => {

@@ -1,7 +1,18 @@
 # Claude Code Management + Literacy Tool — Feature Plan
 ## TaylorMade Agent Monitor Extension
 
-> Status: provider-neutral Claude + Codex monitoring, authenticated hook ingestion,
+> **Status as of 2026-10-18 (v0.4.59): parked, not started.** None of Features 1–6
+> exists. What is nearby, for context: the app installs, repairs and removes only its
+> own hooks (`hooks/install.mjs`, with a `.tm-agent-monitor.bak` backup); the Insights
+> pane counts usage of skills, subagents and MCP servers (read-only stats, not
+> management); and a Claude Code chat pane's slash menu lists the CLI's
+> `supportedCommands()`. The six features are listed as parked in
+> `docs/UPGRADE-PLAN.md` → **Open now**. Current architecture is `CLAUDE.md`;
+> release history is `CHANGELOG.md`. **Before any work starts, re-check the config
+> inventory below (paths, scopes, hook shapes, `claude mcp` flags) against current
+> Claude Code docs** — it was written in the 0.2.3 era.
+
+> Earlier status: provider-neutral Claude + Codex monitoring, authenticated hook ingestion,
 > atomic user-hook install/repair/remove, provider health, and Codex trust guidance are
 > implemented. This document covers the deferred configuration-management layer and
 > is no longer a description of the current live-monitor architecture.
@@ -16,7 +27,7 @@
 > shapes/flags as "confirm first."
 
 **Target user:** single owner — a personal "Claude Code administration & literacy" dashboard.
-**Current app:** Electron tray/sidebar monitor showing live Claude Code **and Codex** agents (via hooks) + token usage.
+**Current app:** a Windows Electron tray app presented as a hotkey-summoned, full-screen multi-pane workspace — live Claude Code, Codex and Cursor agents (via hooks), usage and limits, embedded terminals and chat panes, notes, clipboard history (see `CLAUDE.md`).
 
 ---
 
@@ -100,8 +111,10 @@ fixes (e.g. trailing comma at line N). On-demand "Check now" + optional startup 
 | Credentials | `~/.claude/.credentials.json` | User | No | – |
 
 ## Integration with the existing monitor
-Extend the daemon (`127.0.0.1:7459`) with config read endpoints (`GET /config/mcp|hooks|health`),
-polled every 5–10s (config isn't real-time). Keep agent-state and config-state separate. CLI calls via
+Extend the daemon (`127.0.0.1:7459` by default, `CLAUDE_WATCH_PORT`) with config read endpoints
+(`GET /v1/config/mcp|hooks|health`). Every daemon route is versioned under `/v1/` and requires the bearer
+token from the endpoint file, and each new route must be runtime validated like the rest of `daemon.ts`.
+Poll every 5–10s (config isn't real-time). Keep agent-state and config-state separate. CLI calls via
 `child_process.spawn`, surfacing stdout/stderr + exit code. `fs.watch` (debounced) to auto-refresh
 skills/agents/workflows.
 

@@ -148,8 +148,8 @@ export function TopBar(props: Props) {
           {openMenu === 'terminal' && (
             <MenuPop {...away}>
               {/* Agents first: starting one is the reason the workspace exists. */}
-              <MenuItem icon={<ProviderBadge provider="claude" />} label="New Claude Code" hint={`Start Claude Code in a terminal pane in ${where}`} onClick={run(() => onNewTerminal('claude'))} />
-              <MenuItem icon={<ProviderBadge provider="codex" />} label="New Codex" hint={`Start Codex in a terminal pane in ${where}`} onClick={run(() => onNewTerminal('codex'))} />
+              <MenuItem icon={<ProviderBadge provider="claude" />} label="New Claude Code terminal" hint={`Start Claude Code in a terminal pane in ${where}`} onClick={run(() => onNewTerminal('claude'))} />
+              <MenuItem icon={<ProviderBadge provider="codex" />} label="New Codex terminal" hint={`Start Codex in a terminal pane in ${where}`} onClick={run(() => onNewTerminal('codex'))} />
               <MenuItem icon={<Terminal strokeWidth={2} />} label="New terminal" hint={paneFull ? 'All six panes are open — opens a window instead' : `Open a PowerShell terminal in a pane in ${where} (Ctrl+Shift+\`)`} onClick={run(() => onNewTerminal('shell'))} />
               <div className="menu-sep" />
               {/* Chat panes: the VS Code extensions' conversation UI over the same CLIs, with their own history. */}

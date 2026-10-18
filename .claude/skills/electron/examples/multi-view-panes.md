@@ -1,7 +1,8 @@
-# Panes: WebContentsView, and why foreign windows cannot be embedded
+# Panes: DOM panes, `<webview>` for web content, and why foreign windows cannot be embedded
 
 Sources:
 - https://www.electronjs.org/docs/latest/api/web-contents-view
+- https://www.electronjs.org/docs/latest/api/webview-tag
 - https://www.electronjs.org/docs/latest/api/base-window
 - https://github.com/electron/electron/issues/10547
 
@@ -30,20 +31,47 @@ view2.setBounds({ x: 400, y: 0, width: 400, height: 400 })
 Two things to note: it is `BaseWindow` (not `BrowserWindow`) hosting a
 `contentView` tree, and **you position each view yourself in pixels** —
 `setBounds` on every view, re-applied on every window resize. There is no
-layout engine.
+layout engine, and the view is a native layer above the whole page.
 
-**In this project** the pane grid is *not* built this way. All six panes are
-our own React content, so they are DOM elements in a single renderer using CSS
-grid — one process, real layout, no manual bounds math:
+**In this project** the pane grid is *not* built this way. Panes are our own
+React content — DOM elements in a single renderer on a CSS grid. Columns and
+rows are fractions with a 10 px gutter track between each pair for the
+splitter, and slots are placed explicitly (`App.tsx`, maths in
+`src/shared/layout.mjs`):
 
 ```tsx
-<main className="grid" style={{ gridTemplateColumns: `repeat(${Math.min(panes.length, 3)}, minmax(0, 1fr))` }}>
+gridTemplateColumns: zoomed ? '1fr' : columnTemplate(colFracs, GRID_GUTTER),
+gridTemplateRows: zoomed ? '1fr' : columnTemplate(rowFracs, GRID_GUTTER),
 ```
 
-Reach for `WebContentsView` only when a pane must host **web content you do not
-control** (a live site, a docs viewer, an OAuth flow). That is the one case DOM
-panes cannot cover, because such content needs its own process and session.
-Cost: manual bounds, a second webContents to secure, and its own preload.
+## Web content you do not control: `<webview>`, not `WebContentsView`
+
+The `web` pane (`src/renderer/src/WebPane.tsx`) hosts a live site. It is a
+`<webview>` guest, chosen over `WebContentsView` because it is DOM: it sits in
+the grid, zooms and hides with the other panes, and the app's menus and
+palette draw over it — a `WebContentsView` would float above all of them and
+need manual bounds.
+
+The cost is that the guest is a second webContents to secure, and the renderer
+asks for it. Main trusts none of the element's attributes —
+`installWebPaneGuards` (`src/main/webPanes.ts`) runs before the workspace
+window exists:
+
+- only the workspace sets `webviewTag: true`;
+- `will-attach-webview` refuses any guest not on the `persist:web` partition
+  or not on an http(s) URL, deletes its preload, and forces `sandbox`,
+  `contextIsolation`, no Node, `webSecurity`;
+- navigation and redirects stay http(s); same-site popups open in the pane,
+  others in the default browser (`setWindowOpenHandler`);
+- the partition refuses every permission but clipboard writes and fullscreen,
+  and sends a plain Chrome user agent (Google sign-in refuses an "embedded
+  browser" UA);
+- keys typed into a guest never reach the renderer's keydown handler, so
+  `before-input-event` takes back the workspace keys that work inside a
+  terminal and sends them as `web:key`.
+
+A new kind of embedded web content gets the same treatment: one partition,
+attach-time lockdown in main, nothing trusted from the renderer.
 
 ## You cannot embed another application's window
 
@@ -61,7 +89,7 @@ The answer is no, and it is worth knowing precisely why.
   shared texture: display-only, no input, no event system.
 
 **So the pattern is launch-and-focus, not embed.** This project enumerates real
-windows over Win32, lists them, and raises the one you click:
+windows over Win32 and raises the one you pick (the palette's `#` prefix):
 
 ```ts
 ipcMain.handle('windows:list', (): DesktopWindow[] => {
@@ -73,57 +101,59 @@ ipcMain.handle('windows:list', (): DesktopWindow[] => {
 })
 ```
 
-Because the app is full-screen and always-on-top, anything that surfaces
-another window then calls `stepAside()` — otherwise the workspace covers what
-it just raised. That single call is what makes launch-and-focus *feel* like
-window management.
+The workspace is not always-on-top, so a raised window simply appears in front
+while the workspace waits behind; the hotkey raises it again. (The old
+always-on-top workspace had to `stepAside()` after every focus — removed, do
+not bring it back.)
 
 ## Pane state belongs to the renderer
 
 Pane layout (which kinds, what order) is renderer state persisted in
-`localStorage` — see `src/renderer/src/panes.ts`. It deliberately does **not**
-round-trip through main:
+`localStorage` (`tm.panes.v3`) — see `src/renderer/src/panes.ts`, parsing in
+`src/shared/panes.mjs`. It deliberately does **not** round-trip through main:
 
 - no IPC surface to validate,
 - no settings-schema migration,
 - and the layout is per-view preference, not app configuration.
 
-Keep data-view kinds unique (`MAX_PANES = 6`). That stops an expensive poller
-like `windows:list` running *twice*. Terminal panes are the deliberate
-exception: they repeat (one embedded PTY per pane), which is why panes are
-instances (`{id, kind}`) rather than a bare list of kinds. An embedded terminal
-does not contradict the no-foreign-windows rule below — it is this app's own
-xterm.js over a main-process ConPTY (`node-pty`), not a captured window.
+Panes are instances (`{id, kind}`, `MAX_PANES = 6`). Data views are unique
+(`isUniqueKind`) — that stops an expensive consumer like the Insights scan
+running twice. `terminal`, `web`, `file` and `chat` repeat, one PTY, site,
+file or conversation each, carrying their config on the instance (`term`,
+`web`, `file`, `chat`). An embedded terminal does not contradict the
+no-foreign-windows rule — it is this app's own xterm.js over a main-process
+ConPTY (`node-pty`); a chat pane is our UI over the user's CLI, run by
+`ChatManager` in main.
 
-**It does not stop it running at all.** The hook lives in the parent, so it
-keeps polling after the pane is closed — a full `EnumWindows` plus a
-process-table snapshot every 4 seconds for a pane nobody is looking at. Gate it
-on the consumer as well as on visibility:
-
-```tsx
-// App.tsx — only enumerate windows while a pane is showing them.
-const desktop = useDesktopWindows(panes.includes('windows'))
-```
+**Uniqueness does not stop a poller running at all.** A hook that lives in the
+parent keeps running after the pane showing it is closed. Gate it on its
+consumer as well as on visibility — or, when the data is only needed on
+demand, do not poll. The window list used to be a 4-second poll for a
+switcher; it is now fetched once each time the palette opens:
 
 ```tsx
-// the hook
+// App.tsx — only when the palette opens, never on a timer.
 useEffect(() => {
-  if (!enabled) { setWindows(null); return }
-  // …visibilitychange-gated interval…
-}, [enabled, refresh])
+  if (!palette) return
+  let live = true
+  window.watch.listWindows().then((list) => { if (live) setPaletteWindows(list) }).catch(() => {})
+  return () => { live = false }
+}, [palette])
 ```
 
 Same trap for any parent-owned subscription behind a togglable child.
 
 ## Two places, one state
 
-A pane layout lets one view appear twice — here the agent list is both the
-sidebar and an optional `agents` pane. Any state held *per instance* over a
-shared key then desyncs: collapsing a project group in the sidebar left the pane
-showing it expanded until remount, because `useCollapse` keeps React state per
-instance over one `localStorage` key.
+A pane layout invites one view into two places. The agent list could once be
+both the sidebar and an `agents` pane, and collapsing a project group in one
+left the other stale until remount, because `useCollapse` keeps React state
+per instance over one `localStorage` key. The list now lives in one place at a
+time (`addPane('agents')` turns the sidebar section off, and turning the
+section on closes the pane), which is the first fix to reach for.
 
-Broadcast on change and let the other instances read the stored value back:
+Where two instances are unavoidable, broadcast on change and let the others
+read the stored value back:
 
 ```ts
 const set = useCallback((next: boolean) => {
@@ -136,4 +166,6 @@ const set = useCallback((next: boolean) => {
 ```
 
 Before shipping a pane layout, ask of every view: can this be on screen twice?
-If yes, its state must be shared or synced.
+If yes, its state must be shared or synced. Across windows (the picker and the
+Clipboard pane), neither holds a copy: both re-read through IPC on the change
+push.

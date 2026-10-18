@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ClaudeSession, listClaudeSessions, loadClaudeTranscript } from '../claude/session'
 import { CodexAppServer, CodexThread, type CodexServerMode } from '../codex/appServer'
-import { emptyTranscript, type ApprovalChoice, type Attachment, type ChatItemApproval, type ChatItemQuestion, type Provider, type SessionSummary, type Transcript } from '../shared/chatModel.mjs'
+import { emptyTranscript, type ApprovalChoice, type Attachment, type ChatConfigPatch, type ChatItemApproval, type ChatItemQuestion, type ChatOptions, type Provider, type SessionSummary, type Transcript } from '../shared/chatModel.mjs'
 import type { ChatBridge, ChatCreateRequest } from '../ui/bridge'
 
 export interface ChatManagerOptions {
@@ -44,16 +44,16 @@ const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', '
 export class ChatManager extends EventEmitter implements ChatBridge {
   private live = new Map<string, Live>()
   private codex: CodexAppServer | null = null
-  private readonly options: ChatManagerOptions
+  private readonly config: ChatManagerOptions
 
   constructor(options: ChatManagerOptions = {}) {
     super()
-    this.options = options
+    this.config = options
   }
 
   private server(): CodexAppServer {
     if (this.codex?.alive) return this.codex
-    const server = new CodexAppServer({ codexPath: this.options.codexPath, mode: this.options.codexMode ?? 'own', log: this.options.log })
+    const server = new CodexAppServer({ codexPath: this.config.codexPath, mode: this.config.codexMode ?? 'own', log: this.config.log })
     server.on('exit', () => {
       if (this.codex === server) this.codex = null
     })
@@ -68,10 +68,10 @@ export class ChatManager extends EventEmitter implements ChatBridge {
 
   async create(req: ChatCreateRequest): Promise<{ id: string; transcript: Transcript }> {
     const id = randomUUID()
-    const env = this.options.envFor?.(id, req.provider) ?? {}
+    const env = this.config.envFor?.(id, req.provider) ?? {}
     if (req.provider === 'claude') {
       const transcript = req.resume ? await loadClaudeTranscript(req.resume, req.cwd).catch(() => undefined) : undefined
-      const session = new ClaudeSession({ cwd: req.cwd, resume: req.resume ?? null, model: req.model ?? null, env, claudePath: this.options.claudePath, log: this.options.log }, transcript)
+      const session = new ClaudeSession({ cwd: req.cwd, resume: req.resume ?? null, model: req.model ?? null, env, claudePath: this.config.claudePath, log: this.config.log }, transcript)
       session.on('change', (t: Transcript) => this.emit('change', id, t))
       session.on('approval', (a: ChatItemApproval) => this.emit('approval', id, a))
       session.on('question', (q: ChatItemQuestion) => this.emit('question', id, q))
@@ -107,7 +107,7 @@ export class ChatManager extends EventEmitter implements ChatBridge {
 
   /** Codex takes images by path: write pasted bytes to the scratch folder once. */
   private materialize(list: Attachment[]): Attachment[] {
-    const dir = join(this.options.scratchDir ?? tmpdir(), 'tm-chat-panes')
+    const dir = join(this.config.scratchDir ?? tmpdir(), 'tm-chat-panes')
     return list.map((a) => {
       if (a.kind !== 'image' || a.path) return a
       mkdirSync(dir, { recursive: true })
@@ -133,6 +133,17 @@ export class ChatManager extends EventEmitter implements ChatBridge {
     const l = this.must(id)
     if (l.claude) l.claude.answerQuestion(questionId, answers)
     else l.codex!.answerQuestion(questionId, answers)
+  }
+
+  async configure(id: string, patch: ChatConfigPatch): Promise<void> {
+    const l = this.must(id)
+    if (l.claude) await l.claude.configure(patch)
+    else await l.codex!.configure(patch)
+  }
+
+  async options(id: string): Promise<ChatOptions> {
+    const l = this.must(id)
+    return l.claude ? l.claude.options() : l.codex!.options()
   }
 
   async close(id: string): Promise<void> {

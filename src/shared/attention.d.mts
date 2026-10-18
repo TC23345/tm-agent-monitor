@@ -4,8 +4,9 @@ export interface PaneLike {
   id: string
   kind: string
   term?: { launch: TerminalLaunch; cwd?: string; sessionId?: string }
-  /** A chat pane (src/chat): matched by its live handle (the hooks' `terminalId`), else by provider and folder. */
-  chat?: { provider: 'claude' | 'codex'; cwd: string; chatId?: string }
+  /** A chat pane (src/chat): matched by its live handle (the hooks' `terminalId`), then by the provider
+   * session it holds (`resumeId`), else by provider and folder. */
+  chat?: { provider: 'claude' | 'codex'; cwd: string; chatId?: string; resumeId?: string }
 }
 
 export function paneForAgent<T extends PaneLike>(panes: T[], agent: Agent | undefined | null): T | null

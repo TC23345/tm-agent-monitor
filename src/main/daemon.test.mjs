@@ -323,6 +323,15 @@ test('the terminal list names the session running in each terminal', async () =>
   assert.equal(list.find((t) => t.id === claude.id).agentId, 'claude:in-proj')
   assert.equal(list.find((t) => t.id === shell.id).agentId, undefined)
   assert.equal(list.find((t) => t.id === elsewhere.id).agentId, undefined)
+
+  // A CLI typed into the shell: its hooks name the shell's PTY, so the shell lists it.
+  const typed = await post('/v1/events', {
+    schemaVersion: 1, provider: 'claude', eventId: 'ta-typed', sessionId: 'typed', actor: { kind: 'root' },
+    kind: 'session_started', timestamp: Date.now(), cwd: 'C:/proj', terminalId: shell.id
+  })
+  assert.equal(typed.status, 202)
+  const { terminals: again } = await (await get('/v1/terminals')).json()
+  assert.equal(again.find((t) => t.id === shell.id).agentId, 'claude:typed')
 })
 
 test('wait long-polls until a session reaches the state, and times out honestly', async () => {

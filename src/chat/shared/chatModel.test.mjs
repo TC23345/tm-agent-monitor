@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   MAX_ITEMS, addUsage, answerQuestion, appendDelta, appendItem, clip, decideApproval, emptyTranscript, firstLine, pendingApprovals,
-  pendingQuestions, pendingRequests, setStatus, settleStreams, sortSessions, summarizeAttachments, transcriptSummary, updateItem
+  beginTurn, pendingQuestions, pendingRequests, setStatus, settleStreams, sortSessions, summarizeAttachments, transcriptSummary, updateItem
 } from './chatModel.mjs'
 
 const t0 = emptyTranscript('claude', { cwd: 'C:\\p' })
@@ -75,8 +75,14 @@ test('questions: pending until answered or cancelled, and they hold the status w
   assert.equal(answerQuestion(t, 'r1', { q1: ['B'] }), t, 'an answered question is final')
   const c = answerQuestion(appendItem(t, { kind: 'question', id: 'r3', title: 'x', questions: [q], at: 3 }), 'r3', null)
   assert.equal(c.items.at(-1).cancelled, true)
-  assert.deepEqual(summarizeAttachments([{ kind: 'image', name: 'shot.png', mime: 'image/png', data: 'AA==' }, { kind: 'file', path: 'C:\\p\\a.ts' }]), [{ kind: 'image', name: 'shot.png' }, { kind: 'file', name: 'C:\\p\\a.ts' }])
+  assert.deepEqual(summarizeAttachments([{ kind: 'image', name: 'shot.png', mime: 'image/png', data: 'AA==' }, { kind: 'file', path: 'C:\\p\\a.ts' }]), [{ kind: 'image', name: 'shot.png' }, { kind: 'file', name: 'C:\\p\\a.ts', path: 'C:\\p\\a.ts' }])
+  assert.deepEqual(summarizeAttachments([{ kind: 'image', name: 's.png', mime: 'image/png', data: 'AA==', width: 702, height: 231 }]), [{ kind: 'image', name: 's.png', width: 702, height: 231 }], 'the size rides along, never the bytes')
   assert.equal(summarizeAttachments([]), undefined)
+})
+
+test('beginTurn starts the clock with the turn', () => {
+  const t = beginTurn(emptyTranscript('claude', { cwd: 'C:\\p', effort: 'high', permissionMode: 'plan' }), 1234)
+  assert.deepEqual([t.status, t.turnStartedAt, t.effort, t.permissionMode], ['running', 1234, 'high', 'plan'])
 })
 
 test('clip keeps head and tail with a marker', () => {

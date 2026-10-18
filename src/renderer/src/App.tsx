@@ -44,7 +44,7 @@ import { Settings as SettingsIcon } from './Icons'
 import {
   MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, defaultPanes, emptySizes, isUniqueKind, loadPaneCols,
   loadLaunchPrefs, loadPanes, loadSectionHeights, loadSidebarCollapsed, loadSidebarViews, loadSizes, newPane, saveLaunchPrefs, savePaneCols,
-  savePanes, saveSectionHeights, saveSidebarCollapsed, saveSidebarViews, saveSizes,
+  savePanes, saveSectionHeights, saveSidebarCollapsed, saveSidebarViews, saveSizes, terminalName,
   type AllSizes, type PaneCols, type PaneInstance, type PaneKind, type PaneSizes, type SectionHeights, type SidebarView,
   type TerminalPaneConfig
 } from './panes'
@@ -801,7 +801,7 @@ export function App() {
     .filter((p) => p.kind === 'terminal' && p.term?.sessionId)
     .map((p) => ({
       id: p.id,
-      label: `${p.term!.launch === 'claude' ? 'Claude Code' : p.term!.launch === 'codex' ? 'Codex' : 'Terminal'} · ${p.term!.label ?? p.term!.cwd?.split(/[\\/]/).filter(Boolean).pop() ?? 'home'}`,
+      label: `${terminalName(p.term!.launch)} · ${p.term!.label ?? p.term!.cwd?.split(/[\\/]/).filter(Boolean).pop() ?? 'home'}`,
       paste: (text: string) => termRefs.current.get(p.id)?.paste(text)
     }))
   /** The terminal a paste goes to: the focused pane when it is one, else the last terminal pane that had focus. */
@@ -1001,6 +1001,7 @@ export function App() {
             config={pane.chat!}
             onConfig={(patch) => updateChat(pane.id, patch)}
             renderText={(text) => <MarkdownView source={text} />}
+            copyText={(text) => window.watch.copyText(text, { cwd: pane.chat?.cwd })}
             onFocus={() => { if (focusedPane !== pane.id) setFocusedPane(pane.id) }}
           />
         )
@@ -1031,9 +1032,9 @@ export function App() {
     return null
   }
 
-  /** What a terminal pane runs, as its header title. */
+  /** What a terminal or chat pane runs, as its header title — the surface named on both, so they never read alike. */
   const paneTitle = (pane: PaneInstance) =>
-    pane.kind === 'terminal' && pane.term ? (pane.term.launch === 'claude' ? 'Claude Code' : pane.term.launch === 'codex' ? 'Codex' : 'Terminal')
+    pane.kind === 'terminal' && pane.term ? terminalName(pane.term.launch)
       : pane.kind === 'chat' && pane.chat ? (pane.chat.provider === 'claude' ? 'Claude Code chat' : 'Codex chat')
       : pane.kind === 'notes' ? "TC's NOTES"
         : pane.kind === 'web' ? pane.web?.label
@@ -1288,8 +1289,9 @@ export function App() {
     const full = panes.length >= MAX_PANES
     // Pinned items are the palette's resting list (before anything is typed):
     // the ways to start a session, and the jump to a waiting one.
-    cmd('new-claude', 'New Claude Code', () => newTerminal('claude'), { icon: <ProviderBadge provider="claude" />, keywords: ['agent'], pinned: true, detail: context.label })
-    cmd('new-codex', 'New Codex', () => newTerminal('codex'), { icon: <ProviderBadge provider="codex" />, keywords: ['agent'], pinned: true, detail: context.label })
+    // "terminal" / "chat" in every launch label: the two surfaces run the same CLI and must never share a name.
+    cmd('new-claude', 'New Claude Code terminal', () => newTerminal('claude'), { icon: <ProviderBadge provider="claude" />, keywords: ['agent', 'cli'], pinned: true, detail: context.label })
+    cmd('new-codex', 'New Codex terminal', () => newTerminal('codex'), { icon: <ProviderBadge provider="codex" />, keywords: ['agent', 'cli'], pinned: true, detail: context.label })
     cmd('new-terminal', 'New terminal', () => newTerminal('shell'), { icon: <Terminal strokeWidth={2} />, keywords: ['shell', 'powershell'], keys: ['Ctrl', 'Shift', '`'], pinned: true, detail: full ? 'opens a window — all six panes are open' : context.label })
     cmd('ext-terminal', 'Open external terminal', () => window.watch.openTerminal(context.cwd, 'shell'), { icon: <SquareTerminal strokeWidth={2} />, detail: context.label ?? 'home folder' })
     // Chat panes: the extensions' conversation UI over the same CLIs, with their own history.
@@ -1592,7 +1594,7 @@ export function App() {
             <div className="gridempty" data-testid="grid-empty">
               <SquareTerminal strokeWidth={1.5} style={{ width: 28, height: 28 }} />
               <div className="gridempty-hint">
-                Nothing open. Click a project at the top of the sidebar to start Claude Code or Codex there.
+                Nothing open. Right-click a project at the top of the sidebar to open a Claude Code or Codex terminal there; the Terminal menu has the chats.
                 <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>`</kbd> opens a plain terminal; <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd> finds everything else.
               </div>
             </div>
@@ -1629,7 +1631,7 @@ export function App() {
                 title={paneTitle(pane)}
                 plainTitle={pane.kind === 'notes' || pane.kind === 'file'}
                 context={paneContext(pane)}
-                path={pane.kind === 'terminal' ? pane.term?.cwd : pane.kind === 'notes' ? notesDir : pane.kind === 'web' ? (webState[pane.id]?.url ?? pane.web?.url) : pane.kind === 'file' && pane.file ? parentDir(pane.file.path) : undefined}
+                path={pane.kind === 'terminal' ? pane.term?.cwd : pane.kind === 'chat' ? pane.chat?.cwd : pane.kind === 'notes' ? notesDir : pane.kind === 'web' ? (webState[pane.id]?.url ?? pane.web?.url) : pane.kind === 'file' && pane.file ? parentDir(pane.file.path) : undefined}
                 onCopyPath={
                   pane.kind === 'terminal' && pane.term?.cwd ? () => window.watch.copyText(pane.term!.cwd!)
                     : pane.kind === 'notes' && notesDir ? () => window.watch.copyText(notesDir)

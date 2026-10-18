@@ -40,5 +40,5 @@ const walk = (dir) => {
   }
 }
 walk(dest)
-writeFileSync(join(dest, 'README.md'), `Vendored from ${source} by scripts/sync-chat-panes.mjs — edit the package, then re-run \`npm run chat:sync\`.\n`)
+writeFileSync(join(dest, 'README.md'), `Vendored from ${source} by scripts/sync-chat-panes.mjs — edit the package, then re-run \`npm run chat:sync\`. The pane's UI/UX spec is DESIGN.md at the package's root.\n`)
 console.log(`synced ${files} files into ${dest}`)

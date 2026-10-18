@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { NoteMeta, NoteOrder } from '../shared/notes.mjs'
 import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, ClipCaptureSettings, ClipGroupOp, ClipsListing, DailyUsageDay, DirListing, FileContent, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SizeMode, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights, WorkspaceCommand } from '../shared/types.js'
 import type { ChatBridge } from '../chat/ui/bridge'
-import type { Transcript } from '../chat/shared/chatModel.mjs'
+import type { ChatOptions, Transcript } from '../chat/shared/chatModel.mjs'
 
 /** Chat panes (src/chat): main owns the CLI processes the way it owns PTYs; this is the pane's `ChatBridge` over `chat:*`. */
 const chat: ChatBridge = {
@@ -16,6 +16,15 @@ const chat: ChatBridge = {
   interrupt: (id) => ipcRenderer.invoke('chat:interrupt', id),
   answer: (id, approvalId, choice) => ipcRenderer.invoke('chat:answer', id, approvalId, choice),
   answerQuestion: (id, questionId, answers) => ipcRenderer.invoke('chat:answer-question', id, questionId, answers),
+  configure: async (id, patch) => {
+    const problem = (await ipcRenderer.invoke('chat:configure', id, patch)) as string | null
+    if (problem) throw new Error(problem)
+  },
+  options: async (id) => {
+    const r = (await ipcRenderer.invoke('chat:options', id)) as ChatOptions | null
+    if (!r) throw new Error('The session did not say what it offers yet')
+    return r
+  },
   close: (id) => ipcRenderer.invoke('chat:close', id),
   onChange: (cb) => {
     const listener = (_e: unknown, id: string, transcript: Transcript) => cb(id, transcript)

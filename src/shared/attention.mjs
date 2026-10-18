@@ -31,14 +31,24 @@ export function paneForAgent(panes, agent) {
       if (pane.kind === 'chat' && pane.chat?.chatId === agent.terminalId) return pane
     }
   }
-  if (!agent.cwd) return null
   const launch = launchFor(agent.provider)
   if (!launch) return null
+  // Exact: a chat pane remembers its provider session as `resumeId`. Every
+  // Codex chat shares one app-server started without TM_TERMINAL_ID, so for
+  // a Codex chat this is the only exact match there is.
+  if (agent.rawSessionId) {
+    for (const pane of panes) {
+      if (pane?.kind === 'chat' && pane.chat?.provider === launch && pane.chat.resumeId === agent.rawSessionId) return pane
+    }
+  }
+  if (!agent.cwd) return null
   const cwd = canonical(agent.cwd)
   let shell = null
   for (const pane of panes) {
     if (!pane) continue
-    if (pane.kind === 'chat' && pane.chat && pane.chat.provider === launch && canonical(pane.chat.cwd) === cwd) return pane
+    // A chat pane already holding another session is not this one's.
+    if (pane.kind === 'chat' && pane.chat && pane.chat.provider === launch && canonical(pane.chat.cwd) === cwd
+      && !(pane.chat.resumeId && agent.rawSessionId && pane.chat.resumeId !== agent.rawSessionId)) return pane
     if (pane.kind !== 'terminal' || !pane.term || canonical(pane.term.cwd) !== cwd) continue
     if (pane.term.launch === launch) return pane
     if (pane.term.launch === 'shell' && !shell) shell = pane

@@ -43,8 +43,8 @@ export const WEB_LINKS: { label: string; url: string }[] = [
 ]
 
 const LAUNCHES: { kind: TerminalLaunch; label: string; icon: ReactNode; what: string; keys?: string }[] = [
-  { kind: 'claude', label: 'New Claude Code', icon: <ProviderBadge provider="claude" />, what: 'Claude Code' },
-  { kind: 'codex', label: 'New Codex', icon: <ProviderBadge provider="codex" />, what: 'Codex' },
+  { kind: 'claude', label: 'New Claude Code terminal', icon: <ProviderBadge provider="claude" />, what: 'Claude Code' },
+  { kind: 'codex', label: 'New Codex terminal', icon: <ProviderBadge provider="codex" />, what: 'Codex' },
   { kind: 'shell', label: 'New terminal', icon: <SquareTerminal strokeWidth={2} />, what: 'a PowerShell terminal', keys: 'Ctrl+Shift+`' }
 ]
 

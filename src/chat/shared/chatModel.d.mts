@@ -3,13 +3,15 @@ export type SessionStatus = 'idle' | 'running' | 'waiting' | 'error' | 'closed'
 export type ApprovalChoice = 'allow' | 'allow-session' | 'deny' | 'cancel'
 
 export type Attachment =
-  | { kind: 'image'; name: string; mime: string; data: string; path?: string }
+  | { kind: 'image'; name: string; mime: string; data: string; path?: string; width?: number; height?: number }
   | { kind: 'file'; path: string; name?: string }
-export interface AttachmentSummary { kind: 'image' | 'file'; name: string }
+export interface AttachmentSummary { kind: 'image' | 'file'; name: string; width?: number; height?: number; path?: string }
 
 export interface ChatItemUser { kind: 'user'; id: string; text: string; attachments?: AttachmentSummary[]; at: number }
 export interface ChatItemAssistant { kind: 'assistant'; id: string; text: string; streaming: boolean; at: number }
-export interface ChatItemThinking { kind: 'thinking'; id: string; text: string; streaming: boolean; at: number }
+export interface ChatItemThinking { kind: 'thinking'; id: string; text: string; streaming: boolean; at: number; durationMs?: number }
+export type ToolView = 'command' | 'edit' | 'write' | 'read' | 'search' | 'other'
+export interface FileChange { path: string; before?: string; after?: string; diff?: string; kind?: 'add' | 'delete' | 'update' }
 export interface ChatItemTool {
   kind: 'tool'
   id: string
@@ -20,6 +22,12 @@ export interface ChatItemTool {
   status: 'running' | 'done' | 'failed' | 'declined'
   at: number
   parent?: string
+  label?: string
+  detail?: string
+  detailMono?: boolean
+  view?: ToolView
+  edits?: FileChange[]
+  content?: string
 }
 export interface ChatItemApproval {
   kind: 'approval'
@@ -64,7 +72,16 @@ export interface Transcript {
   items: ChatItem[]
   usage: Usage
   error: string | null
+  effort: string | null
+  permissionMode: string | null
+  turnStartedAt: number | null
 }
+
+export interface ModelOption { id: string; label: string; description?: string; efforts: string[]; defaultEffort?: string | null; model?: string }
+export interface ModeOption { id: string; label: string; description: string }
+export interface CommandOption { name: string; description: string; argumentHint?: string }
+export interface ChatOptions { models: ModelOption[]; modes: ModeOption[]; commands: CommandOption[] }
+export interface ChatConfigPatch { model?: string | null; effort?: string | null; permissionMode?: string | null }
 
 export interface SessionSummary {
   provider: Provider
@@ -81,7 +98,8 @@ export const MAX_ITEMS: number
 export const MAX_TOOL_OUTPUT: number
 export const MAX_TEXT: number
 
-export function emptyTranscript(provider: Provider, init: { cwd: string; sessionId?: string | null; model?: string | null; title?: string | null }): Transcript
+export function emptyTranscript(provider: Provider, init: { cwd: string; sessionId?: string | null; model?: string | null; title?: string | null; effort?: string | null; permissionMode?: string | null }): Transcript
+export function beginTurn(t: Transcript, at: number): Transcript
 export function clip(text: unknown, max: number): string
 export function appendItem(t: Transcript, item: ChatItem): Transcript
 export function updateItem(t: Transcript, id: string, update: Partial<ChatItem> | ((item: ChatItem) => ChatItem)): Transcript

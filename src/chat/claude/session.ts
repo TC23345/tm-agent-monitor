@@ -8,12 +8,12 @@
 import { EventEmitter } from 'node:events'
 import {
   getSessionInfo, getSessionMessages, listSessions, query,
-  type CanUseTool, type PermissionMode, type PermissionResult, type PermissionUpdate, type Query, type SDKMessage, type SDKUserMessage
+  type CanUseTool, type EffortLevel, type ModelInfo, type PermissionMode, type PermissionResult, type PermissionUpdate, type Query, type SDKMessage, type SDKUserMessage
 } from '@anthropic-ai/claude-agent-sdk'
 import { foldSdkMessage, sessionMessagesToTranscript, sessionSummary, startFold, type ClaudeFold } from './fold.mjs'
 import {
-  answerQuestion as answerQuestionItem, appendItem, decideApproval, emptyTranscript, setStatus, summarizeAttachments,
-  type ApprovalChoice, type Attachment, type ChatItemApproval, type ChatItemQuestion, type Question, type SessionSummary, type Transcript
+  answerQuestion as answerQuestionItem, appendItem, beginTurn, decideApproval, emptyTranscript, setStatus, summarizeAttachments,
+  type ApprovalChoice, type Attachment, type ChatConfigPatch, type ChatItemApproval, type ChatItemQuestion, type ChatOptions, type ModeOption, type Question, type SessionSummary, type Transcript
 } from '../shared/chatModel.mjs'
 import { resolveClaude } from '../shared/findCli.mjs'
 
@@ -25,6 +25,7 @@ export interface ClaudeSessionOptions {
   fork?: boolean
   model?: string | null
   permissionMode?: PermissionMode
+  effort?: EffortLevel | null
   /** `null` lets the SDK use its bundled binary; default is the user's install. */
   claudePath?: string | null
   env?: Record<string, string>
@@ -100,6 +101,24 @@ export function askUserQuestionInput(input: Record<string, unknown>, answers: Re
   return { ...input, answers: out }
 }
 
+/**
+ * The permission modes the composer offers, in the Claude Code extension's
+ * own words (its mode table in webview/index.js, docs/rea-findings.md) —
+ * except *Edit automatically*, whose "your selected text" is an editor's idea.
+ * `bypassPermissions` is left out: switching to it mid-session needs the
+ * session started with `allowDangerouslySkipPermissions`, which this host
+ * never sets. `auto` is offered only on a model that supports it.
+ */
+export const CLAUDE_MODES: ModeOption[] = [
+  { id: 'default', label: 'Manual', description: 'Claude will ask for approval before making each edit' },
+  { id: 'acceptEdits', label: 'Edit automatically', description: 'Claude will make edits without asking first' },
+  { id: 'plan', label: 'Plan', description: 'Claude will explore the code and present a plan before editing' },
+  { id: 'auto', label: 'Auto', description: 'Claude will approve actions that pass a safety check and pause for anything risky' },
+  { id: 'dontAsk', label: "Don't ask", description: 'Claude will deny actions that need approval instead of asking' }
+]
+
+export const CLAUDE_EFFORTS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
+
 /** Build the user message content: plain text, or blocks when images ride along. File references become `@path` tokens the CLI expands. */
 export function userContent(text: string, attachments: Attachment[] = []): string | unknown[] {
   const refs = attachments.filter((a): a is Extract<Attachment, { kind: 'file' }> => a.kind === 'file').map((a) => `@${a.path}`)
@@ -118,19 +137,22 @@ export function userContent(text: string, attachments: Attachment[] = []): strin
 export class ClaudeSession extends EventEmitter {
   transcript: Transcript
   private fold: ClaudeFold
-  private readonly options: ClaudeSessionOptions
+  private readonly config: ClaudeSessionOptions
   private input = new InputQueue()
   private q: Query | null = null
   private abort = new AbortController()
   private pending = new Map<string, PendingPermission>()
   private seq = 0
+  /** Commands whose UX is the terminal's (`/exit`, `/statusline`): kept out of the pane's slash menu. */
+  private terminalCommands = new Set<string>()
+  private models: ModelInfo[] = []
   /** The consume loop; resolves when the process is gone (close, exit, or error). */
   done: Promise<void> | null = null
 
   constructor(options: ClaudeSessionOptions, transcript?: Transcript) {
     super()
-    this.options = options
-    this.transcript = transcript ?? emptyTranscript('claude', { cwd: options.cwd, sessionId: options.resume ?? null, model: options.model ?? null })
+    this.config = options
+    this.transcript = transcript ?? emptyTranscript('claude', { cwd: options.cwd, sessionId: options.resume ?? null, model: options.model ?? null, effort: options.effort ?? null, permissionMode: options.permissionMode ?? 'default' })
     this.fold = startFold(this.transcript)
   }
 
@@ -142,13 +164,13 @@ export class ClaudeSession extends EventEmitter {
   }
 
   private log(line: string) {
-    this.options.log?.(line)
+    this.config.log?.(line)
   }
 
   /** Spawn the process. Idempotent; `send` calls it. */
   start(): void {
     if (this.q) return
-    const o = this.options
+    const o = this.config
     const claude = o.claudePath === undefined ? resolveClaude() : o.claudePath ? { file: o.claudePath, args: [], how: 'option' } : null
     const canUseTool: CanUseTool = (toolName, input, ctx) => this.askPermission(toolName, input, ctx)
     this.q = query({
@@ -158,6 +180,7 @@ export class ClaudeSession extends EventEmitter {
         resume: o.resume ?? undefined,
         forkSession: o.fork ?? undefined,
         model: o.model ?? undefined,
+        effort: o.effort ?? undefined,
         permissionMode: o.permissionMode ?? 'default',
         pathToClaudeCodeExecutable: claude?.file,
         env: { ...process.env, ...o.env } as Record<string, string>,
@@ -189,6 +212,7 @@ export class ClaudeSession extends EventEmitter {
   }
 
   private handle(msg: SDKMessage): void {
+    if (msg.type === 'system' && msg.subtype === 'init') this.terminalCommands = new Set(msg.terminal_slash_commands ?? [])
     const next = foldSdkMessage(this.fold, msg)
     if (next !== this.fold) {
       this.fold = next
@@ -263,7 +287,7 @@ export class ClaudeSession extends EventEmitter {
   send(text: string, attachments: Attachment[] = []): void {
     this.start()
     const at = Date.now()
-    this.update(setStatus(appendItem(this.transcript, { kind: 'user', id: `local:${at}`, text, attachments: summarizeAttachments(attachments), at }), 'running'))
+    this.update(beginTurn(appendItem(this.transcript, { kind: 'user', id: `local:${at}`, text, attachments: summarizeAttachments(attachments), at }), at))
     this.input.push({
       type: 'user',
       message: { role: 'user', content: userContent(text, attachments) as any },
@@ -278,7 +302,57 @@ export class ClaudeSession extends EventEmitter {
   }
 
   async setPermissionMode(mode: PermissionMode): Promise<void> {
-    await this.q?.setPermissionMode(mode)
+    await this.configure({ permissionMode: mode })
+  }
+
+  private live(): Query {
+    if (this.transcript.status === 'closed') throw new Error('this Claude session has ended')
+    this.start()
+    return this.q!
+  }
+
+  /**
+   * Change the model, the effort or the permission mode of the live session —
+   * the three controls of the extension's composer, through the SDK's own
+   * `setModel`, `applyFlagSettings({ effortLevel })` and `setPermissionMode`.
+   * Effort `null` returns to the model's default.
+   */
+  async configure(patch: ChatConfigPatch): Promise<void> {
+    const q = this.live()
+    let t = this.transcript
+    if (patch.model !== undefined) {
+      await q.setModel(patch.model ?? undefined)
+      const info = this.models.find((m) => m.value === patch.model)
+      t = { ...t, model: info?.resolvedModel ?? patch.model ?? t.model }
+    }
+    if (patch.effort !== undefined) {
+      if (patch.effort !== null && !CLAUDE_EFFORTS.includes(patch.effort as EffortLevel)) throw new Error(`unknown effort ${patch.effort}`)
+      await q.applyFlagSettings({ effortLevel: (patch.effort ?? null) as EffortLevel | null })
+      t = { ...t, effort: patch.effort ?? null }
+    }
+    if (patch.permissionMode !== undefined && patch.permissionMode !== null) {
+      if (!CLAUDE_MODES.some((m) => m.id === patch.permissionMode)) throw new Error(`unknown permission mode ${patch.permissionMode}`)
+      await q.setPermissionMode(patch.permissionMode as PermissionMode)
+      t = { ...t, permissionMode: patch.permissionMode }
+    }
+    this.update(t)
+  }
+
+  /** What the composer's menus offer: the CLI's models (with their effort levels), the modes, and the slash commands. */
+  async options(): Promise<ChatOptions> {
+    const q = this.live()
+    const [models, commands] = await Promise.all([q.supportedModels().catch(() => [] as ModelInfo[]), q.supportedCommands().catch(() => [])])
+    this.models = models
+    const id = this.transcript.model ?? 'default'
+    const current = models.find((m) => m.value === id) ?? models.find((m) => m.resolvedModel === id)
+    return {
+      models: models.map((m) => ({
+        id: m.value, label: m.displayName, description: m.description || undefined, model: m.resolvedModel,
+        efforts: m.supportsEffort === false ? [] : [...(m.supportedEffortLevels ?? [])]
+      })),
+      modes: CLAUDE_MODES.filter((m) => m.id !== 'auto' || current?.supportsAutoMode === true || this.transcript.permissionMode === 'auto'),
+      commands: commands.filter((c) => !this.terminalCommands.has(c.name)).map((c) => ({ name: c.name, description: c.description, argumentHint: c.argumentHint || undefined }))
+    }
   }
 
   /** End the process; the session stays resumable from disk. */

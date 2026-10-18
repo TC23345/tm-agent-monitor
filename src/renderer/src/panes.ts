@@ -64,8 +64,8 @@ export const PANE_KINDS: { id: PaneKind; label: string; icon: typeof Activity; h
   { id: 'terminal', label: 'Terminal', icon: Terminal, hint: 'An embedded PowerShell terminal' },
   { id: 'spend', label: 'Spend', icon: Coins, hint: 'Today’s tokens, estimated value, and budget by provider and project' },
   { id: 'insights', label: 'Insights', icon: ChartColumn, hint: 'What is driving local usage: context size, subagents, skills, MCP servers' },
-  { id: 'history', label: 'History', icon: History, hint: 'The last 30 days of usage, by day and model' },
-  { id: 'notes', label: 'Notes', icon: NotebookPen, hint: 'A shared notepad — Markdown files you and your agents both read and write' },
+  { id: 'history', label: 'History', icon: History, hint: 'Usage over time, from today to all time, by provider, project and model' },
+  { id: 'notes', label: 'Notes', icon: NotebookPen, hint: 'A shared notepad — Markdown and text files you and your agents both read and write' },
   { id: 'clipboard', label: 'Clipboard', icon: Clipboard, hint: 'Everything you copy, in any app — searchable, starred, grouped, and pasteable into a pane' },
   { id: 'web', label: 'Web', icon: Globe, hint: 'A site in a pane — its own signed-in browser session, shared by every web pane' },
   { id: 'file', label: 'File', icon: FileText, hint: 'A project file — click one in a project’s tree (a badge’s left-click)' },
@@ -264,6 +264,15 @@ export function saveSizes(sizes: AllSizes): void {
  * opens a plain shell.
  */
 export const LAUNCH_KINDS: TerminalLaunch[] = ['claude', 'codex', 'shell']
+
+/**
+ * A terminal pane's name, as its header title and in every list of panes.
+ * The agents say "terminal" because a chat pane runs the same CLI and is
+ * called "Claude Code chat" / "Codex chat": the two surfaces never share a name.
+ */
+export function terminalName(launch: TerminalLaunch): string {
+  return launch === 'claude' ? 'Claude Code terminal' : launch === 'codex' ? 'Codex terminal' : 'Terminal'
+}
 
 const LAUNCH_KEY = 'tm.launch.v1'
 

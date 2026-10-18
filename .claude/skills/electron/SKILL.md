@@ -1,6 +1,6 @@
 ---
 name: electron
-description: Use when building, debugging, packaging, or shipping an Electron desktop app — main/renderer/preload structure, BrowserWindow and WebContentsView layout, IPC across a sandboxed renderer, tray and global-shortcut summoning, native modules, electron-builder packaging, and auto-update. Also use when a packaged app won't boot, a window won't show or won't animate smoothly, Electron starts as plain Node, a native module fails to load, or you need to embed or control another application's window. Covers this repo's Windows tray-app conventions even if Electron is never named.
+description: Use when building, debugging, packaging, or shipping an Electron desktop app — main/renderer/preload structure, BrowserWindow, `<webview>` and WebContentsView layout, utilityProcess workers, IPC across a sandboxed renderer, tray and global-shortcut summoning, native modules, electron-builder packaging, and auto-update. Also use when a packaged app won't boot, a window won't show or won't animate smoothly, Electron starts as plain Node, a native module fails to load, or you need to embed or control another application's window. Covers this repo's Windows tray-app conventions even if Electron is never named.
 ---
 
 # Electron
@@ -23,6 +23,14 @@ In this project `src/shared/` holds pure `.mjs` modules with `.d.mts` types,
 imported by both main and renderer. Put logic there whenever both sides need
 it — it is also the only part that is unit-testable under plain `node --test`.
 
+There are two windows and one helper process. The workspace
+(`createWindow()` in `src/main/index.ts`, preload `src/preload/index.ts` →
+`window.watch`) and the clipboard quick picker (`src/main/picker.ts`, preload
+`src/preload/picker.ts` → `window.picker`, the same renderer bundle as
+`index.html?window=picker`). The usage worker (`src/main/usageWorker.ts`) is a
+`utilityProcess` main forks for the synchronous JSONL parsing (gotcha 14).
+Main also owns every PTY (`TerminalManager`) and chat CLI (`ChatManager`).
+
 ## Gotchas
 
 These defy assumption. Each one cost real debugging time here.
@@ -43,6 +51,14 @@ These defy assumption. Each one cost real debugging time here.
    symlink to the main checkout's — fine for typecheck, tests and `build`, but
    `dist`, `debug:app` and anything that packages run from the main checkout
    after fast-forwarding `main` (the Update chip already does).
+   The same silent failure happens when a dependency is simply **not
+   installed**: electron-vite leaves every `dependencies` entry external, and
+   electron-builder packs whatever is in `node_modules` without comment. 0.4.58
+   shipped without the Agent SDK and `ws` (a merge added them; nobody ran
+   `npm install`) and died with `ERR_MODULE_NOT_FOUND`. `scripts/check-deps.mjs`
+   now runs first in `dist`, `dist:dir` and `publish` and refuses when a
+   non-dev lockfile package is absent, and Rebuild & relaunch runs
+   `npm install` before `npm run dist`.
 3. **`requestSingleInstanceLock()` is app-scoped, not path-scoped.** A freshly
    built copy exits instantly (code 0, no window) while an installed build of
    the same app is running. To test a packaged build side by side, give it its
@@ -58,10 +74,19 @@ These defy assumption. Each one cost real debugging time here.
    ([electron/electron#10547](https://github.com/electron/electron/issues/10547),
    open since 2017). `SetParent` reparenting mangles input, focus, and DPI *in
    the captured window* — i.e. the user's real editor. Launch and focus real
-   windows instead; use `WebContentsView` when you need embedded **web** panes.
-7. **Native modules must be unpacked from the asar.** `koffi` is listed under
-   `asarUnpack` in `electron-builder.yml`; a native `.node` inside an asar
-   cannot be loaded. Same for any packaged resource read by path.
+   windows instead. Embedded **web** content is a different matter: the `web`
+   pane (`WebPane.tsx`) is a `<webview>` guest on the workspace window, the
+   only window with `webviewTag: true`, locked down in main by
+   `installWebPaneGuards` (`src/main/webPanes.ts`). See
+   `examples/multi-view-panes.md`.
+7. **Native code must be unpacked from the asar.** `asarUnpack` in
+   `electron-builder.yml` lists `koffi`, `node-pty` and
+   `@anthropic-ai/claude-agent-sdk-win32-x64` (the SDK's bundled `claude.exe`,
+   the chat pane's fallback CLI); a `.node` or an `.exe` inside an asar cannot
+   be loaded. Same for any packaged resource read by path. `npmRebuild: false`
+   is deliberate: both native deps ship prebuilt binaries, and electron-builder's
+   rebuild step compiles node-pty from source and fails without
+   Spectre-mitigated VS libraries (MSB8040).
 8. **Renderer feature detection lies about visibility.** `document.hidden`
    *does* flip when a window hides — use it to stop polling, but never assume
    the window is visible just because the renderer is alive.
@@ -69,18 +94,23 @@ These defy assumption. Each one cost real debugging time here.
    the hook usually lives in the parent, so it keeps running after the pane
    showing it is closed. Uniqueness stops it running *twice*; only an explicit
    `enabled` flag stops it running *at all*. Cheap-looking polls are not cheap:
-   the window list is a full `EnumWindows` plus a process-table snapshot.
+   the window list is a full `EnumWindows` plus a process-table snapshot, which
+   is why it is no longer polled at all — the palette fetches it once per open
+   (`listWindows` in `App.tsx`).
 10. **The same component can be mounted twice.** A pane layout lets one view
-    appear in two places (here: the agent sidebar and an `agents` pane). State
-    held per instance over a shared `localStorage` key then desyncs — toggling
-    one leaves the other stale until remount. Broadcast changes on a custom
-    event and have instances read the stored value back (never re-set it, or
-    they loop). See `useCollapse` in this repo.
-11. **A window that steps aside must not do it under a dialog.** An always-on-top
-    full-screen window should hide when it launches or focuses something — but
-    not when the action came from inside a modal the user is still reading. Give
-    those callers an opt-out (`openPath(path, keepOpen)`), decided by the
-    renderer, which is the only side that knows a dialog is open.
+    appear in two places. State held per instance over a shared `localStorage`
+    key then desyncs — toggling one leaves the other stale until remount. Prefer
+    one place at a time (the agent list is the sidebar's Agents section *or* the
+    Agents pane; App closes one when the other opens). Where two instances are
+    unavoidable, broadcast changes on a custom event and have instances read the
+    stored value back (never re-set it, or they loop). See `useCollapse`.
+11. **The workspace layers like a normal window — do not make it
+    always-on-top.** It once was, which forced a `stepAside()` hide after every
+    launch or focus and a `keepOpen` opt-out for callers inside dialogs; both
+    were removed with the de-layering (commit `4d592db`). Anything it launches
+    now simply appears in front, and the hotkey raises a buried workspace
+    (`toggleWindowMode`). The picker is the one always-on-top window: it is a
+    popup that hides on blur.
 12. **An npm bin shim is not `node <file>`.** A package whose bin entry lacks a
     `#!/usr/bin/env node` line runs fine as `node dist/index.js` and dies as
     `npx <pkg>` on any machine whose npm `script-shell` is Git Bash (`npm config
@@ -95,6 +125,32 @@ These defy assumption. Each one cost real debugging time here.
     `Skill(name)` fails with "Unknown skill". Install it to
     `~/.claude/skills/<name>/` (see "Maintaining this skill") and it resolves
     immediately.
+14. **Synchronous parsing belongs in a `utilityProcess`, not main.** Main is the
+    IPC hub for six xterm panes and the 1 Hz snapshot; a heavy JSONL day
+    hitched all of it. The ledgers, Codex rollout scan and insights scan run in
+    `src/main/usageWorker.ts`, built as a second main input in
+    `electron.vite.config.ts` (`out/main/usageWorker.js`, imports no Electron)
+    and forked lazily by `ensureUsageWorker()`. Main keeps only the read side
+    (`LocalUsageView`), `callWorker` adds a 60 s timeout per call, a dead worker
+    re-forks under the renderer reload budget, and quit kills it only after the
+    final flush. The contract is `src/shared/usageWorkerProtocol.mjs` (tested).
+15. **A dead renderer must not take the shells with it.** Main owns the PTYs,
+    so `render-process-gone` and a 10 s `unresponsive` reload the page
+    (`recoverRenderer`, bounded by `reloadBudget` in `crashPolicy.mjs`: three
+    per five minutes, then a notification whose click reloads); panes reattach
+    to their sessions by stored id.
+16. **`skipTaskbar` is not what it looks like on Windows.** Electron implements
+    it with `ITaskbarList::DeleteTab`, so a visible window stays in Alt+Tab and
+    only loses its taskbar button. The workspace does not set it (since 0.4.7):
+    while visible its button carries the waiting count (`setOverlayIcon`) and
+    flashes once on 0→N (`flashFrame`), both decided by `attentionTransition`
+    (`attentionSignal.mjs`) in `updateTray`. Do not reintroduce it on the
+    workspace; the picker sets it because it is a popup.
+17. **A `detached` child dies with the app.** Electron's main process sits in a
+    Windows job object and a detached spawn inherits it, so a helper meant to
+    outlive the app (the Rebuild & relaunch installer waiter) is killed on
+    exit. Create it through WMI `Win32_Process.Create` instead (`app:reinstall`
+    in `src/main/index.ts`).
 
 ## Recipes
 
@@ -137,7 +193,9 @@ are not are where the bugs live:
 | 7 native | `ls dist/win-unpacked/resources/app.asar.unpacked/node_modules` |
 | 8, 9 polling | find every `setInterval` in the renderer: is it gated on both `document.hidden` **and** its consumer being mounted? |
 | 10 duplicates | can any view render in two places at once? then no per-instance state over a shared key |
-| 11 step-aside | every caller that hides the window — is any of them reachable from a dialog? |
+| 11 layering | `grep -rn "alwaysOnTop" src/main` — only `picker.ts` |
+| 14 main stalls | any synchronous file parsing on main's hot path? move it to the worker |
+| 16 taskbar | `grep -rn "skipTaskbar" src/main` — only `picker.ts` |
 
 Then run the gates below. Finish with a screenshot, because typecheck passing
 says nothing about whether the UI renders.
@@ -151,8 +209,12 @@ behaviour.
 
 1. `npm run debug:app` — launches the built app with `--remote-debugging-port`,
    mock data, a throwaway `--user-data-dir` (gotcha 3), and daemon port 7460 so
-   the installed app's hooks stay untouched. `--real` for live hooks,
-   `--packaged` for `dist/win-unpacked`.
+   the installed app's hooks stay untouched. It also strips
+   `TM_AGENT_MONITOR_ENDPOINT_FILE` and `TM_TERMINAL_ID`: run from inside one of
+   the installed app's panes, an inherited endpoint path made the debug app
+   publish its port over the installed app's file and capture every hook on the
+   machine. `--real` for live hooks, `--packaged` for `dist/win-unpacked`. The
+   picker is a second CDP page target (`?window=picker`).
 2. `get_electron_window_info` — confirms the attach (`automationReady: true`).
 3. `send_command_to_electron` `get_page_structure` — every button/select with
    its text, aria-label, and class; pick targets from this, not from memory.
@@ -215,6 +277,14 @@ awaits, so by the time it fires the summon animation is long finished and a
 short delay still yields a resting frame. To catch a transition, drive a real
 hide → show cycle and capture ~90 ms in.
 
+`CLAUDE_WATCH_CAPTURE_VIEW` seeds `tm.sidebar.v3` and `tm.panes.v3`, then
+reloads. It takes the sidebar sections `limits` and `agents` and the pane kinds
+that open with no config: `terminal` (a plain shell), `spend`, `insights`,
+`history`, `notes`, `clipboard` and `keys`. `usage` still means Spend, and
+`insights-week` opens Insights on its Week tab. Web, file and chat panes need a
+URL, a path or a live CLI, so for those drive the app through the
+electron-debug tools above instead.
+
 ## Maintaining this skill
 
 The canonical copy is committed at `.claude/skills/electron/`; the invocable
@@ -231,10 +301,10 @@ what this project does differently and why.
 
 | File | Read when |
 | --- | --- |
-| `examples/window-shell.md` | Creating/positioning a window, frameless or transparent, show/hide animation |
-| `examples/ipc-and-preload.md` | Adding an IPC route, exposing preload API, validating renderer input |
-| `examples/multi-view-panes.md` | Splitting a window into panes, or asked to embed another app |
-| `examples/tray-hotkey-lifecycle.md` | Tray icon, global shortcut, single-instance, app lifecycle |
+| `examples/window-shell.md` | Creating/positioning a window, frameless or transparent, show/hide animation, the picker window, backdrop material |
+| `examples/ipc-and-preload.md` | Adding an IPC route, exposing preload API, validating renderer input, picker-only routes |
+| `examples/multi-view-panes.md` | Splitting a window into panes, embedding web content (`<webview>`), or asked to embed another app |
+| `examples/tray-hotkey-lifecycle.md` | Tray icon, global shortcuts, single-instance and `tm` argv, app lifecycle, crash recovery |
 | `examples/native-modules.md` | Calling Win32 / any native module, or a `.node` fails to load |
 | `examples/packaging-and-update.md` | electron-builder config, asar, auto-update, installing a local build, releasing |
 

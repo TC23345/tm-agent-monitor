@@ -323,7 +323,9 @@ export class Daemon {
     if (!this.terminals) return this.json(res, 404, NOT_FOUND)
     const agents = this.store.snapshot()
     const terminals = this.terminals.list().map((t) => {
-      const agent = agentForTerminal(agents, t)
+      // `sessionId` is what `agentForTerminal` matches a hook's `terminalId`
+      // against; a listed terminal carries its PTY id as `id`.
+      const agent = agentForTerminal(agents, { launch: t.launch, cwd: t.cwd, sessionId: t.id })
       return agent ? { ...t, agentId: agent.id } : t
     })
     return this.json(res, 200, { terminals, schemaVersion: 1 })

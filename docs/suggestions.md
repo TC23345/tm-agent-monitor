@@ -1,5 +1,11 @@
 # Suggestions
 
+> **Status as of 2026-10-18: reference, and not about this app.** It covers Claude
+> Code's own spinner tips, not TaylorMade Agent Monitor (the app's state is in
+> `CLAUDE.md` and `CHANGELOG.md`). Tips 1–4 are in `~/.claude/spinner-tips.json`, but
+> `spinnerTipsOverride` is not set in `~/.claude/settings.json`, so they are not in
+> rotation. The two candidates at the end are not added.
+
 > Four custom spinner tips written on 2026-09-08 to sit alongside Anthropic's
 > built-in set, not replace it. Each covers a real Claude Code feature that has
 > no built-in tip of its own. The built-in 70 are catalogued in `claude-tips.md`.

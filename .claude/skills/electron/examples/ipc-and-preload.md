@@ -31,7 +31,8 @@ renderer is sandboxed and treated as untrusted input:
 ipcMain.on('windows:focus', (_e, hwnd: string, pid: number) => {
   if (typeof hwnd !== 'string' || hwnd.length > 32 || !/^\d+$/.test(hwnd)) return
   if (!Number.isInteger(pid) || pid <= 0 || pid > 0xffffffff) return
-  if (focusHwnd(hwnd, pid)) stepAside()
+  // focusHwnd re-checks that the HWND still belongs to this pid before it acts.
+  focusHwnd(hwnd, pid)
 })
 ```
 
@@ -82,6 +83,10 @@ The rule this repo follows: expose the *smallest* API, never `ipcRenderer`
 itself. Upstream calls this out explicitly — exposing `ipcRenderer.on` bound to
 arbitrary channels hands the renderer the whole IPC surface.
 
+A dropped file's path must be read in the preload: `File.path` was removed in
+Electron 32, so `src/preload/index.ts` calls `webUtils.getPathForFile` and
+hands the renderer a string.
+
 ## Adding a route: the four-file change
 
 1. `src/shared/types.ts` — the payload/return type, if it is not a primitive.
@@ -94,33 +99,27 @@ typeof api`) and surfaced on `Window` in `src/preload/index.d.ts`, so steps 3
 and 4 typecheck against each other automatically. Forgetting step 3 is the
 usual cause of `window.watch.x is not a function` at runtime.
 
-## Side effects belong to the caller, not the channel
+If the picker needs the route too, step 3 has a second file:
+`src/preload/picker.ts` (`window.picker`, typed in `picker.d.ts`). Give it the
+narrowest version — the picker's preload deliberately has no merge, clear or
+capture settings — and narrow the arguments there as well as in main.
 
-A route that hides the window is doing two things, and the second one is not
-always wanted. `path:open` opens a folder **and** dismissed the workspace so
-Explorer was visible — correct from the agent list, wrong from inside the
-Settings dialog, where it tore down what the user was reading.
+## A route only one window may call
 
-Main cannot know: only the renderer knows a modal is open. So the flag is an
-argument, defaulted to the common case, and validated like any other input:
+Both windows talk to the same `ipcMain`. A route that only makes sense from the
+picker (resize, reset size, the hand-offs to the workspace) checks the sender,
+and a route that takes no arguments refuses any:
 
 ```ts
-// main — keepOpen is optional, and still type-checked
-ipcMain.on('path:open', (_e, p: string, keepOpen?: boolean) => {
-  if (typeof p !== 'string' || p.length > 32_767 || !existsSync(p)) return
-  if (keepOpen !== undefined && typeof keepOpen !== 'boolean') return
-  void shell.openPath(p)
-  if (!keepOpen) stepAside()
+ipcMain.on('picker:reset-size', (event, ...args: unknown[]) => {
+  if (args.length || event.sender !== pickerWindow()?.webContents) return
+  setPickerSize(null, true)
 })
 ```
 
-```ts
-// preload
-openPath: (p: string, keepOpen?: boolean) => ipcRenderer.send('path:open', p, keepOpen)
-```
-
-Optional arguments still need validation — `undefined` is allowed, anything
-else of the wrong type is rejected, exactly as for required fields.
+`hotkeys:suspend` accepts either window's page and nothing else. Optional
+arguments still need validation — `undefined` is allowed, anything else of the
+wrong type is rejected, exactly as for required fields.
 
 ## Choosing the channel type
 
@@ -128,6 +127,6 @@ else of the wrong type is rejected, exactly as for required fields.
 | --- | --- |
 | Fire and forget (focus, launch, hide) | `ipcRenderer.send` / `ipcMain.on` |
 | Need a value back (status, settings, window list) | `ipcRenderer.invoke` / `ipcMain.handle` |
-| Main-initiated (status push, animation phase) | `webContents.send` + preload subscribe |
+| Main-initiated (status push, animation phase) | `webContents.send` + preload subscribe; send to every window that lists the data (`clips:changed` goes to both) |
 
 Avoid `sendSync` — it blocks the renderer until main replies.

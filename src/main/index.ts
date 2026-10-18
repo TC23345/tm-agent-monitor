@@ -1995,8 +1995,11 @@ function registerIpc(): void {
     if (!existsSync(join(repo, 'package.json'))) return `no repo at ${repo} — set CLAUDE_WATCH_REPO in .env`
     reinstalling = true
     try {
+      // `npm install` first, like scripts/reinstall-local.ps1: a merge that adds
+      // a dependency (0.4.58's Agent SDK) leaves this checkout without it, and
+      // the installed app then dies at launch (scripts/check-deps.mjs).
       const build = await new Promise<{ code: number | null; tail: string }>((resolve, reject) => {
-        const child = spawn('cmd.exe', ['/d', '/s', '/c', 'npm run dist'], { cwd: repo, windowsHide: true })
+        const child = spawn('cmd.exe', ['/d', '/s', '/c', 'npm install --no-audit --no-fund && npm run dist'], { cwd: repo, windowsHide: true })
         let tail = ''
         const keep = (chunk: Buffer) => { tail = (tail + chunk.toString()).slice(-2_000) }
         child.stdout?.on('data', keep)
@@ -2127,7 +2130,10 @@ function registerIpc(): void {
       if (r.kind === 'image') {
         if (typeof r.name !== 'string' || r.name.length > 200 || typeof r.mime !== 'string' || !IMAGE_MIMES.has(r.mime)) return null
         if (typeof r.data !== 'string' || r.data.length > 28_000_000 || !/^[A-Za-z0-9+/=]*$/.test(r.data)) return null
-        out.push({ kind: 'image', name: r.name, mime: r.mime, data: r.data })
+        const px = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v > 0 && v <= 100_000 ? v : undefined)
+        const width = px(r.width)
+        const height = px(r.height)
+        out.push({ kind: 'image', name: r.name, mime: r.mime, data: r.data, ...(width && height ? { width, height } : {}) })
       } else if (r.kind === 'file') {
         if (typeof r.path !== 'string' || r.path.length === 0 || r.path.length > 32_767) return null
         out.push({ kind: 'file', path: r.path, name: typeof r.name === 'string' && r.name.length <= 200 ? r.name : undefined })
@@ -2177,6 +2183,38 @@ function registerIpc(): void {
       }
     }
     try { await chats.answerQuestion(id, questionId, clean) } catch { /* already answered */ }
+  })
+  // The composer's chips: model, effort, permission mode. Answers null, or a sentence the pane shows.
+  // Efforts are each provider's own list (Codex adds levels such as `ultra`), so main checks the shape
+  // and the session checks the value; neither reaches a command line.
+  const validEffort = (e: unknown): e is string => typeof e === 'string' && /^[a-z][a-z_-]{1,23}$/.test(e)
+  const CHAT_MODES = new Set(['default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'read-only', 'full-access'])
+  ipcMain.handle('chat:configure', async (_e, id: unknown, patch: unknown): Promise<string | null> => {
+    if (!validTermId(id) || typeof patch !== 'object' || patch === null) return 'Invalid request'
+    const p = patch as Record<string, unknown>
+    const clean: { model?: string | null; effort?: string | null; permissionMode?: string } = {}
+    if ('model' in p) {
+      if (p.model !== null && (typeof p.model !== 'string' || !/^[A-Za-z0-9._:[\]/-]{1,100}$/.test(p.model))) return 'Invalid model'
+      clean.model = p.model as string | null
+    }
+    if ('effort' in p) {
+      if (p.effort !== null && !validEffort(p.effort)) return 'Invalid effort'
+      clean.effort = p.effort as string | null
+    }
+    if ('permissionMode' in p) {
+      if (typeof p.permissionMode !== 'string' || !CHAT_MODES.has(p.permissionMode)) return 'Invalid mode'
+      clean.permissionMode = p.permissionMode
+    }
+    try {
+      await chats.configure(id, clean)
+      return null
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error)
+    }
+  })
+  ipcMain.handle('chat:options', async (_e, id: unknown) => {
+    if (!validTermId(id)) return null
+    try { return await chats.options(id) } catch (error) { console.error(`[chat] options failed: ${error instanceof Error ? error.message : error}`); return null }
   })
   ipcMain.handle('chat:close', async (_e, id: unknown) => {
     if (!validTermId(id)) return
@@ -2958,8 +2996,8 @@ if (!gotLock) {
     // uninstall, which a dev electron.exe does not.
     if (process.platform === 'win32' && app.isPackaged) {
       app.setUserTasks([
-        { program: process.execPath, arguments: 'open --launch claude', iconPath: process.execPath, iconIndex: 0, title: 'New Claude Code', description: 'Start Claude Code in the workspace' },
-        { program: process.execPath, arguments: 'open --launch codex', iconPath: process.execPath, iconIndex: 0, title: 'New Codex', description: 'Start Codex in the workspace' },
+        { program: process.execPath, arguments: 'open --launch claude', iconPath: process.execPath, iconIndex: 0, title: 'New Claude Code terminal', description: 'Start Claude Code in a terminal pane in the workspace' },
+        { program: process.execPath, arguments: 'open --launch codex', iconPath: process.execPath, iconIndex: 0, title: 'New Codex terminal', description: 'Start Codex in a terminal pane in the workspace' },
         { program: process.execPath, arguments: 'open --launch shell', iconPath: process.execPath, iconIndex: 0, title: 'New terminal', description: 'Open a terminal in the workspace' },
         { program: process.execPath, arguments: 'show', iconPath: process.execPath, iconIndex: 0, title: 'Show workspace', description: 'Bring the workspace to the front' }
       ])
@@ -3219,29 +3257,30 @@ if (!gotLock) {
               await sleep(300)
             }
           } else if (captureView) {
-            // Layout is renderer state: seed the stored sidebar views and
-            // main-frame panes, then reload. `spend`/`insights` were sidebar
-            // views; they now live in the `usage` pane, so both map to it.
-            const parts = (captureView.startsWith('insights') ? ['usage'] : captureView.split(','))
-              .map((k) => (k === 'spend' || k === 'insights' ? 'usage' : k))
-            const sidebar = parts.filter((k) => ['limits', 'windows'].includes(k))
+            // Layout is renderer state: seed the stored sidebar sections and
+            // main-frame panes, then reload. `agents` and `limits` are the
+            // sidebar's sections (the Agents pane yields to the section); the
+            // pane kinds are the ones that open with no config. `usage` is the
+            // retired name of Spend, and `insights-week` is Insights on its
+            // Week tab.
+            const parts = captureView.split(',').map((k) => (k === 'usage' ? 'spend' : k === 'insights-week' ? 'insights' : k))
+            const sidebar = parts.filter((k) => k === 'limits' || k === 'agents')
             const panes = parts
-              .filter((k) => k === 'terminal' || k === 'usage' || k === 'activity')
+              .filter((k) => ['terminal', 'spend', 'insights', 'history', 'notes', 'clipboard', 'keys'].includes(k))
               .map((kind, i) => ({ id: `capture-${i}`, kind, ...(kind === 'terminal' ? { term: { launch: 'shell' } } : {}) }))
             await win!.webContents.executeJavaScript(
-              // The current key, and by default no rolled-up sections: a capture
-              // asked for a view to see it, not to see its header. (The legacy
-              // v1 key would migrate, silently adding Open windows to every
-              // capture.) CLAUDE_WATCH_CAPTURE_COLLAPSED rolls views back up.
-              `localStorage.setItem('tm.sidebar.v2', ${JSON.stringify(JSON.stringify(sidebar))});` +
+              // The current keys, and by default no rolled-up sections: a capture
+              // asked for a view to see it, not to see its header.
+              // CLAUDE_WATCH_CAPTURE_COLLAPSED rolls sections back up.
+              `localStorage.setItem('tm.sidebar.v3', ${JSON.stringify(JSON.stringify(sidebar))});` +
               `localStorage.setItem('tm.sidebar.collapsed.v1', ${JSON.stringify(JSON.stringify((process.env.CLAUDE_WATCH_CAPTURE_COLLAPSED ?? '').split(',').filter(Boolean)))});` +
               // Dragged sizes are renderer state too: CLAUDE_WATCH_CAPTURE_LAYOUT
-              // takes the `tm.layout.v1` shape ({cols, sidebar, fracs}) so a
+              // takes the `tm.layout.v1` shape ({sizes: {full, half}}) so a
               // resized workspace can be screenshotted without a real drag.
               (process.env.CLAUDE_WATCH_CAPTURE_LAYOUT
                 ? `localStorage.setItem('tm.layout.v1', ${JSON.stringify(process.env.CLAUDE_WATCH_CAPTURE_LAYOUT)});`
                 : '') +
-              (panes.length ? `localStorage.setItem('tm.panes.v2', ${JSON.stringify(JSON.stringify(panes))});` : '') +
+              `localStorage.setItem('tm.panes.v3', ${JSON.stringify(JSON.stringify(panes))});` +
               'location.reload()'
             )
             // Terminal panes start a real shell after the reload; give a cold

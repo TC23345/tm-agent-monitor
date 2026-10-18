@@ -96,5 +96,12 @@ export const USAGE = `tm — drive the TaylorMade Agent Monitor workspace
     tm send <terminal-id> <text…> [--no-enter]
     tm read <terminal-id> [--lines <n>]   last lines of its output, plain text
     tm wait <agent-id> [--until waiting|complete|idle|running|ended] [--timeout <s>]
+    tm clip [list] [--q <text>] [--group <view>] [--limit <n>]
+                                          clipboard history, newest first
+    tm clip show <id> | copy <id>         print a clip, or put it on the clipboard
+    tm clip add <text…> [--title <title>] [--group <group>]
+                                          save a clip; prints its id
+    tm clip paste <id> [--terminal <terminal-id>]
+                                          paste into a pane (default: this one)
     tm skill [--install]                  the agent skill (install to ~/.claude/skills)
 `

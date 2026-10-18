@@ -20,10 +20,22 @@ import {
 } from './fold.mjs'
 import { LineSplitter, PendingCalls, errorResponseLine, notificationLine, parseIncoming, requestLine, responseLine, type Incoming } from './rpc.mjs'
 import {
-  answerQuestion as answerQuestionItem, decideApproval, setStatus, summarizeAttachments,
-  type ApprovalChoice, type Attachment, type SessionSummary, type Transcript
+  answerQuestion as answerQuestionItem, beginTurn, decideApproval, setStatus, summarizeAttachments,
+  type ApprovalChoice, type Attachment, type ChatConfigPatch, type ChatOptions, type ModelOption, type ModeOption, type SessionSummary, type Transcript
 } from '../shared/chatModel.mjs'
 import { resolveCodex } from '../shared/findCli.mjs'
+
+/**
+ * The approval presets the composer offers for Codex: its own trio
+ * (read-only, auto, full access) spelled as the `turn/start` overrides
+ * `approvalPolicy` and `sandboxPolicy` (generated types, v2/TurnStartParams).
+ * Until the user picks one, the user's config.toml decides.
+ */
+export const CODEX_MODES: (ModeOption & { approvalPolicy: string; sandboxPolicy: Record<string, unknown> })[] = [
+  { id: 'read-only', label: 'Read only', description: 'Codex can read files; it asks before editing or running anything else', approvalPolicy: 'on-request', sandboxPolicy: { type: 'readOnly', networkAccess: false } },
+  { id: 'auto', label: 'Auto', description: 'Codex edits and runs commands in this folder and asks before anything outside it', approvalPolicy: 'on-request', sandboxPolicy: { type: 'workspaceWrite', writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false } },
+  { id: 'full-access', label: 'Full access', description: 'Codex edits files and runs commands anywhere without asking', approvalPolicy: 'never', sandboxPolicy: { type: 'dangerFullAccess' } }
+]
 
 /**
  * own: spawn `codex app-server` as our child. daemon: make sure the user's
@@ -285,8 +297,26 @@ export class CodexAppServer extends EventEmitter {
     })
   }
 
-  startTurn(threadId: string, input: unknown[], opts: { model?: string | null; effort?: string | null; cwd?: string | null } = {}): Promise<{ turn: any }> {
-    return this.request('turn/start', { threadId, input, model: opts.model ?? null, effort: opts.effort ?? null, cwd: opts.cwd ?? null })
+  startTurn(threadId: string, input: unknown[], opts: { model?: string | null; effort?: string | null; cwd?: string | null; approvalPolicy?: string | null; sandboxPolicy?: Record<string, unknown> | null } = {}): Promise<{ turn: any }> {
+    return this.request('turn/start', {
+      threadId, input, model: opts.model ?? null, effort: opts.effort ?? null, cwd: opts.cwd ?? null,
+      approvalPolicy: opts.approvalPolicy ?? null, sandboxPolicy: opts.sandboxPolicy ?? null
+    })
+  }
+
+  private modelCache: ModelOption[] | null = null
+
+  /** The picker's models (`model/list`, hidden ones left out), with each one's reasoning efforts. Cached per connection. */
+  async listModels(): Promise<ModelOption[]> {
+    if (this.modelCache) return this.modelCache
+    await this.start()
+    const res = await this.request<{ data: any[] }>('model/list', { limit: 100, includeHidden: false })
+    this.modelCache = (res.data ?? []).filter((m) => !m.hidden).map((m) => ({
+      id: String(m.model ?? m.id), label: String(m.displayName ?? m.model ?? m.id), description: m.description || undefined,
+      efforts: (m.supportedReasoningEfforts ?? []).map((e: any) => String(e.reasoningEffort)).filter(Boolean),
+      defaultEffort: m.defaultReasoningEffort ?? null, model: String(m.model ?? m.id)
+    }))
+    return this.modelCache
   }
 
   interruptTurn(threadId: string, turnId: string): Promise<unknown> {
@@ -325,6 +355,8 @@ export class CodexThread extends EventEmitter {
   threadId: string | null
   readonly server: CodexAppServer
   private turnId: string | null = null
+  /** The composer's picks; sent with every turn (they persist server-side for the turns after too). */
+  private overrides: { model?: string | null; effort?: string | null; mode?: (typeof CODEX_MODES)[number] } = {}
   private approvals = new Map<string, ServerRequest>()
   private questions = new Map<string, ServerRequest>()
   private onNotification = (n: Notification) => this.handleNotification(n)
@@ -386,9 +418,13 @@ export class CodexThread extends EventEmitter {
   async send(text: string, attachments: Attachment[] = [], opts: { model?: string | null; effort?: string | null } = {}): Promise<void> {
     if (!this.threadId) await this.open()
     const at = Date.now()
-    this.update(setStatus({ ...this.transcript, items: [...this.transcript.items, { kind: 'user', id: `local:${at}`, text, attachments: summarizeAttachments(attachments), at }] }, 'running'))
+    this.update(beginTurn({ ...this.transcript, items: [...this.transcript.items, { kind: 'user', id: `local:${at}`, text, attachments: summarizeAttachments(attachments), at }] }, at))
     try {
-      const res = await this.server.startTurn(this.threadId!, userInputs(text, attachments), opts)
+      const o = this.overrides
+      const res = await this.server.startTurn(this.threadId!, userInputs(text, attachments), {
+        model: opts.model ?? o.model ?? null, effort: opts.effort ?? o.effort ?? null,
+        approvalPolicy: o.mode?.approvalPolicy ?? null, sandboxPolicy: o.mode?.sandboxPolicy ?? null
+      })
       this.turnId = res.turn?.id ?? this.turnId
     } catch (err) {
       this.update(setStatus(this.transcript, 'error', (err as Error).message))
@@ -399,6 +435,32 @@ export class CodexThread extends EventEmitter {
   async interrupt(): Promise<void> {
     if (!this.threadId || !this.turnId) return
     await this.server.interruptTurn(this.threadId, this.turnId)
+  }
+
+  /** Pick a model, an effort or an approval preset; they ride on the next `turn/start`. */
+  async configure(patch: ChatConfigPatch): Promise<void> {
+    let t = this.transcript
+    if (patch.model !== undefined && patch.model !== null) {
+      this.overrides.model = patch.model
+      t = { ...t, model: patch.model }
+    }
+    if (patch.effort !== undefined) {
+      this.overrides.effort = patch.effort
+      t = { ...t, effort: patch.effort ?? null }
+    }
+    if (patch.permissionMode !== undefined && patch.permissionMode !== null) {
+      const mode = CODEX_MODES.find((m) => m.id === patch.permissionMode)
+      if (!mode) throw new Error(`unknown Codex mode ${patch.permissionMode}`)
+      this.overrides.mode = mode
+      t = { ...t, permissionMode: mode.id }
+    }
+    this.update(t)
+  }
+
+  /** The composer's menus. Codex's slash commands are its TUI's, not the app-server's, so there are none here. */
+  async options(): Promise<ChatOptions> {
+    const models = await this.server.listModels().catch(() => [])
+    return { models, modes: CODEX_MODES.map(({ id, label, description }) => ({ id, label, description })), commands: [] }
   }
 
   answer(approvalId: string, choice: ApprovalChoice): void {

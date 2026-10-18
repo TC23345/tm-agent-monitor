@@ -1,4 +1,4 @@
-import type { SessionSummary, Transcript } from '../shared/chatModel.mjs'
+import type { ChatItemTool, SessionSummary, Transcript } from '../shared/chatModel.mjs'
 
 export interface ClaudeFold {
   transcript: Transcript
@@ -7,6 +7,7 @@ export interface ClaudeFold {
 
 export function startFold(transcript: Transcript): ClaudeFold
 export function toolTitle(name: string, input: unknown): string
+export function toolView(name: string, input: unknown): Pick<ChatItemTool, 'label' | 'detail' | 'detailMono' | 'view' | 'edits' | 'content'>
 export function resultText(content: unknown): string
 export function foldSdkMessage(f: ClaudeFold, msg: unknown): ClaudeFold
 export function sessionMessagesToTranscript(meta: { sessionId: string; cwd: string; info?: any }, messages: any[]): Transcript
