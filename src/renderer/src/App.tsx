@@ -1036,7 +1036,7 @@ export function App() {
   const paneTitle = (pane: PaneInstance) =>
     pane.kind === 'terminal' && pane.term ? terminalName(pane.term.launch)
       : pane.kind === 'chat' && pane.chat ? (pane.chat.provider === 'claude' ? 'Claude Code chat' : 'Codex chat')
-      : pane.kind === 'notes' ? "TC's NOTES"
+      : pane.kind === 'notes' ? "TC's Notes"
         : pane.kind === 'web' ? pane.web?.label
           : pane.kind === 'file' && pane.file ? `${fileBaseName(pane.file.path)}${fileDirty[pane.id] ? ' •' : ''}` : undefined
 
@@ -1629,7 +1629,6 @@ export function App() {
                 kind={pane.kind}
                 onClose={() => closePane(pane.id)}
                 title={paneTitle(pane)}
-                plainTitle={pane.kind === 'notes' || pane.kind === 'file'}
                 context={paneContext(pane)}
                 path={pane.kind === 'terminal' ? pane.term?.cwd : pane.kind === 'chat' ? pane.chat?.cwd : pane.kind === 'notes' ? notesDir : pane.kind === 'web' ? (webState[pane.id]?.url ?? pane.web?.url) : pane.kind === 'file' && pane.file ? parentDir(pane.file.path) : undefined}
                 onCopyPath={

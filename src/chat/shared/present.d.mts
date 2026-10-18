@@ -5,6 +5,7 @@ export function splitMcpName(name: string): { server: string; tool: string } | n
 export function argDetail(args: unknown): string | undefined
 export function effortLabel(effort: string | null | undefined): string
 export function modelLabel(id: string | null | undefined): string
+export function latestModels<M extends { id: string; label: string }>(models: M[], keep?: string): M[]
 export function formatElapsed(ms: number): string
 export function clockTime(at: number, locale?: string): string
 export function fmtTokens(n: number): string

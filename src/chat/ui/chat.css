@@ -191,6 +191,12 @@
 .chat-pop { position: absolute; left: 12px; right: 12px; bottom: calc(100% - 4px); z-index: 20; max-height: min(380px, 60vh); overflow: auto; padding: 4px; border: 1px solid var(--chat-line); border-radius: var(--r-card, 8px); background: var(--card, #1f1e23); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); }
 .chat-pop.is-model, .chat-pop.is-mode { left: auto; width: min(360px, calc(100% - 24px)); }
 .chat-pop.is-model { right: auto; left: 12px; }
+/* The + menu hangs from its button at the footer's left edge. */
+.chat-add { position: relative; display: inline-flex; flex: 0 0 auto; }
+.chat-pop.is-add { left: -2px; right: auto; bottom: calc(100% + 6px); width: 236px; }
+.chat-pop-item.is-row { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; padding-right: 8px; }
+.chat-pop-key { font-size: 11.5px; color: var(--faint, var(--muted, #888)); white-space: nowrap; }
+.chat-pop-item:focus-visible { outline: 2px solid var(--accent, #4a7bd0); outline-offset: -2px; }
 .chat-pop-title { display: flex; align-items: center; gap: 6px; padding: 6px 8px 4px; font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted, #888); }
 .chat-pop-hint { color: var(--faint, var(--muted, #888)); font-weight: 400; text-transform: none; letter-spacing: 0; }
 .chat-pop-item { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 6px 28px 6px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }

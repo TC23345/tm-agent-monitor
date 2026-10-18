@@ -1,14 +1,15 @@
 // The composer, after the Claude Code extension's (docs/rea-findings.md,
 // webview pass): one box holding the attachments, the text and a footer of
-// controls — attach, reference, the slash-command menu (also opened by typing
-// `/`), a clock, the model and effort chip, the context pie (click to
-// compact), the permission mode chip (Shift+Tab cycles it, as in the CLI) and
-// send / stop. Menus open inside the pane and close on Escape; in claude-watch
-// they carry `data-escape-close`, so the host hands them its Escape
-// (`tm-escape`) instead of hiding the workspace.
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
-import { AtSign, Check, ChevronDown, CircleStop, Clock, FileCode, Hand, ListChecks, Lock, Paperclip, PencilLine, Send, ShieldCheck, ShieldOff, Slash, Sparkles, X } from 'lucide-react'
-import { effortLabel, fmtTokens, formatElapsed, modelLabel } from '../shared/present.mjs'
+// controls — the + menu (attach an image, reference a file, the slash-command
+// menu, which typing `/` also opens; it opens on hover), a clock, the model
+// and effort chip, the context pie (click to compact), the permission mode
+// chip (Shift+Tab cycles it, as in the CLI) and send / stop. Menus open
+// inside the pane and close on Escape; in claude-watch they carry
+// `data-escape-close`, so the host hands them its Escape (`tm-escape`)
+// instead of hiding the workspace.
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
+import { AtSign, Check, ChevronDown, CircleStop, Clock, FileCode, Hand, ListChecks, Lock, Paperclip, PencilLine, Plus, Send, ShieldCheck, ShieldOff, Slash, Sparkles, X } from 'lucide-react'
+import { effortLabel, fmtTokens, formatElapsed, latestModels, modelLabel } from '../shared/present.mjs'
 import type { Attachment, ChatConfigPatch, ChatOptions, CommandOption, ModelOption, Provider, Transcript } from '../shared/chatModel.mjs'
 
 const PROVIDER_LABEL: Record<Provider, string> = { claude: 'Claude Code', codex: 'Codex' }
@@ -30,7 +31,7 @@ interface Props {
   onNotice: (text: string) => void
 }
 
-type Menu = 'model' | 'mode' | 'slash' | null
+type Menu = 'add' | 'model' | 'mode' | 'slash' | null
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ provider, transcript, chatId, options, onRefreshOptions, onSend, onInterrupt, onConfigure, onNotice }, ref) {
   const [text, setText] = useState('')
@@ -121,7 +122,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ pr
     if (e.key === 'Escape') {
       // In claude-watch the host already routed this Escape to whatever owns it (`tm-escape`).
       if (e.defaultPrevented) return
-      if (slashOpen) {
+      if (menu === 'add') {
+        e.preventDefault()
+        setMenu(null)
+      } else if (slashOpen) {
         e.preventDefault()
         setMenu(null)
         setSlashDismissed(true)
@@ -147,14 +151,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ pr
     const el = inputBox.current
     if (!el) return
     const onEscape = () => {
-      if (slashOpen) {
+      // The + menu sits inside this box, so while the box owns Escape it closes that first.
+      if (menu === 'add') setMenu(null)
+      else if (slashOpen) {
         setMenu(null)
         setSlashDismissed(true)
       } else if (running) onInterrupt()
     }
     el.addEventListener('tm-escape', onEscape)
     return () => el.removeEventListener('tm-escape', onEscape)
-  }, [running, slashOpen, onInterrupt])
+  }, [menu, running, slashOpen, onInterrupt])
 
   const addImages = useCallback((files: Iterable<File>) => {
     for (const file of files) {
@@ -273,11 +279,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ pr
           data-testid="chat-composer"
         />
         <div className="chat-input-foot">
-          <button className="chat-iconbtn" title="Attach an image" aria-label="Attach an image" onClick={() => fileInput.current?.click()} disabled={!chatId} data-testid="chat-tool:attach"><Paperclip className="chat-ic" /></button>
-          <button className={`chat-iconbtn ${refField ? 'is-on' : ''}`} title="Reference a file (@path)" aria-label="Reference a file" onClick={() => setRefField((v) => !v)} disabled={!chatId} data-testid="chat-tool:reference"><AtSign className="chat-ic" /></button>
-          {canSlash ? (
-            <button className={`chat-iconbtn ${slashOpen ? 'is-on' : ''}`} title="Slash commands" aria-label="Slash commands" onClick={() => { setMenu((m) => (m === 'slash' ? null : 'slash')); setSlashDismissed(false); area.current?.focus() }} disabled={!chatId} data-testid="chat-tool:slash"><Slash className="chat-ic" /></button>
-          ) : null}
+          <AddMenu
+            open={menu === 'add'}
+            blocked={menu !== null && menu !== 'add'}
+            onOpen={() => setMenu('add')}
+            onClose={() => setMenu((m) => (m === 'add' ? null : m))}
+            disabled={!chatId}
+            onAttach={() => fileInput.current?.click()}
+            onReference={() => setRefField((v) => !v)}
+            onSlash={canSlash ? () => { setMenu('slash'); setSlashDismissed(false); area.current?.focus() } : undefined}
+          />
           <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={onPickFiles} />
           {transcript ? <ElapsedChip transcript={transcript} /> : null}
           {transcript ? (
@@ -306,10 +317,22 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ pr
   )
 })
 
-/** A menu that opens above the composer and closes on Escape or a click outside it. */
+/**
+ * A menu that opens above the composer and closes on Escape or a click
+ * outside it. It never runs above the top of the chat pane (the pane clips
+ * it, and the top of a menu is where it starts): its height is capped at the
+ * room between the pane's top and the composer, and it scrolls inside that.
+ */
 function Popover({ onClose, className, testid, children }: { onClose: () => void; className: string; testid: string; children: ReactNode }) {
   const el = useRef<HTMLDivElement | null>(null)
   useOutside(el, onClose)
+  useLayoutEffect(() => {
+    const node = el.current
+    const pane = node?.closest('.chat')
+    if (!node || !pane) return
+    const room = node.getBoundingClientRect().bottom - pane.getBoundingClientRect().top - 8
+    node.style.maxHeight = `${Math.max(96, Math.min(380, Math.floor(room)))}px`
+  }, [])
   useEffect(() => {
     const node = el.current
     if (!node) return
@@ -337,13 +360,31 @@ function useOutside(ref: RefObject<HTMLElement | null>, onOut: () => void) {
   }, [ref, onOut])
 }
 
+/**
+ * Effort first (it changes per turn; the model rarely does), then the models
+ * of the newest generation only (`latestModels`; the session's own model
+ * stays listed if it is older). Picking an effort keeps the menu open, so a
+ * model can follow; picking a model closes it.
+ */
 function ModelMenu({ transcript, options, onConfigure, onClose }: { transcript: Transcript | null; options: ChatOptions | null; onConfigure: (p: ChatConfigPatch) => void; onClose: () => void }) {
-  const models = options?.models ?? []
   const current = currentModel(transcript, options)
+  const models = latestModels(options?.models ?? [], current?.id)
   const efforts = current?.efforts ?? []
   const effort = transcript?.effort ?? null
   return (
     <Popover onClose={onClose} className="is-model" testid="chat-menu:model">
+      {efforts.length ? (
+        <>
+          <div className="chat-pop-title">Effort <EffortDots effort={effort} /> <span className="chat-pop-hint">{effortLabel(effort)}</span></div>
+          <div className="chat-effort" role="radiogroup" aria-label="Effort">
+            <button className={`chat-seg ${effort === null ? 'is-on' : ''}`} role="radio" aria-checked={effort === null} onClick={() => onConfigure({ effort: null })} title="The model's default" data-testid="chat-effort:auto">Auto</button>
+            {efforts.map((e) => (
+              <button key={e} className={`chat-seg ${e === effort ? 'is-on' : ''}`} role="radio" aria-checked={e === effort} onClick={() => onConfigure({ effort: e })} data-testid={`chat-effort:${e}`}>{effortLabel(e)}</button>
+            ))}
+          </div>
+          <div className="chat-pop-sep" />
+        </>
+      ) : null}
       <div className="chat-pop-title">Model</div>
       {options === null ? <div className="chat-pop-empty">Loading…</div> : models.length === 0 ? <div className="chat-pop-empty">No models listed</div> : models.map((m) => (
         <button key={m.id} className={`chat-pop-item ${m === current ? 'is-on' : ''}`} onClick={() => { onConfigure({ model: m.id }); onClose() }} data-testid={`chat-model:${m.id}`}>
@@ -352,25 +393,117 @@ function ModelMenu({ transcript, options, onConfigure, onClose }: { transcript: 
           {m === current ? <Check className="chat-ic chat-pop-check" /> : null}
         </button>
       ))}
-      {efforts.length ? (
-        <>
-          <div className="chat-pop-sep" />
-          <div className="chat-pop-title">Effort <EffortDots effort={effort} /> <span className="chat-pop-hint">{effortLabel(effort)}</span></div>
-          <div className="chat-effort" role="radiogroup" aria-label="Effort">
-            <button className={`chat-seg ${effort === null ? 'is-on' : ''}`} role="radio" aria-checked={effort === null} onClick={() => onConfigure({ effort: null })} title="The model's default" data-testid="chat-effort:auto">Auto</button>
-            {efforts.map((e) => (
-              <button key={e} className={`chat-seg ${e === effort ? 'is-on' : ''}`} role="radio" aria-checked={e === effort} onClick={() => onConfigure({ effort: e })} data-testid={`chat-effort:${e}`}>{effortLabel(e)}</button>
-            ))}
-          </div>
-        </>
-      ) : null}
     </Popover>
   )
 }
 
-/** The extension's five-dot effort meter. */
+/**
+ * The footer's + : attach an image, reference a file, the slash commands.
+ * It opens on hover (closing a beat after the pointer leaves, so the pointer
+ * can cross to the menu) or on a click, which pins it open until a pick, a
+ * second click, a click elsewhere or Escape. The arrow keys walk the items.
+ */
+function AddMenu({ open, blocked, onOpen, onClose, disabled, onAttach, onReference, onSlash }: {
+  open: boolean
+  /** Another menu is open: a hover must not swap it out (a click still does). */
+  blocked: boolean
+  onOpen: () => void
+  onClose: () => void
+  disabled: boolean
+  onAttach: () => void
+  onReference: () => void
+  /** Claude only: Codex has no slash commands. */
+  onSlash?: () => void
+}) {
+  const wrap = useRef<HTMLDivElement | null>(null)
+  const timer = useRef<number | null>(null)
+  const [pinned, setPinned] = useState(false)
+  const cancel = () => {
+    if (timer.current !== null) window.clearTimeout(timer.current)
+    timer.current = null
+  }
+  useEffect(() => cancel, [])
+  useEffect(() => { if (!open) setPinned(false) }, [open])
+  useOutside(wrap, open ? onClose : noop)
+  useEffect(() => {
+    const node = wrap.current
+    if (!node || !open) return
+    const onEscape = () => onClose()
+    node.addEventListener('tm-escape', onEscape)
+    return () => node.removeEventListener('tm-escape', onEscape)
+  }, [open, onClose])
+
+  const pick = (run: () => void) => {
+    cancel()
+    onClose()
+    run()
+  }
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape' && open && !e.defaultPrevented) {
+      e.preventDefault()
+      onClose()
+      wrap.current?.querySelector<HTMLButtonElement>('.chat-add-btn')?.focus()
+      return
+    }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    const items = Array.from(wrap.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])
+    if (!items.length) return
+    e.preventDefault()
+    if (!open) onOpen()
+    const at = items.indexOf(document.activeElement as HTMLButtonElement)
+    const next = at < 0 ? (e.key === 'ArrowDown' ? 0 : items.length - 1) : (at + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+    items[next]?.focus()
+  }
+
+  return (
+    <div
+      ref={wrap}
+      className="chat-add"
+      onMouseEnter={() => { cancel(); if (!disabled && !open && !blocked) onOpen() }}
+      onMouseLeave={() => { cancel(); if (open && !pinned) timer.current = window.setTimeout(onClose, 200) }}
+      onKeyDown={onKey}
+      {...(open ? { 'data-escape-close': '' } : {})}
+    >
+      <button
+        className={`chat-iconbtn chat-add-btn ${open ? 'is-on' : ''}`}
+        aria-label="Add: attach, reference, slash commands" aria-haspopup="menu" aria-expanded={open}
+        onClick={() => {
+          cancel()
+          if (open && pinned) onClose()
+          else { setPinned(true); if (!open) onOpen() }
+        }}
+        disabled={disabled}
+        data-testid="chat-tool:add"
+      >
+        <Plus className="chat-ic" />
+      </button>
+      {open ? (
+        <div className="chat-pop is-add" role="menu" data-testid="chat-menu:add">
+          <button role="menuitem" className="chat-pop-item is-row" onClick={() => pick(onAttach)} data-testid="chat-tool:attach">
+            <span className="chat-pop-label"><Paperclip className="chat-ic" aria-hidden /> Attach an image</span>
+            <span className="chat-pop-key">or paste one</span>
+          </button>
+          <button role="menuitem" className="chat-pop-item is-row" onClick={() => pick(onReference)} data-testid="chat-tool:reference">
+            <span className="chat-pop-label"><AtSign className="chat-ic" aria-hidden /> Reference a file</span>
+            <span className="chat-pop-key">@path</span>
+          </button>
+          {onSlash ? (
+            <button role="menuitem" className="chat-pop-item is-row" onClick={() => pick(onSlash)} data-testid="chat-tool:slash">
+              <span className="chat-pop-label"><Slash className="chat-ic" aria-hidden /> Slash commands</span>
+              <kbd className="chat-kbd">/</kbd>
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function noop() {}
+
+/** The extension's five-dot effort meter; Codex's `ultra` fills it like `max`. */
 function EffortDots({ effort }: { effort: string | null }) {
-  const level = effort ? EFFORT_SCALE.indexOf(effort) + 1 : 0
+  const level = effort ? (effort === 'ultra' ? EFFORT_SCALE.length : EFFORT_SCALE.indexOf(effort) + 1) : 0
   return (
     <svg className="chat-effort-dots" width="30" height="8" viewBox="0 0 30 8" aria-hidden>
       {EFFORT_SCALE.map((_, i) => <circle key={i} cx={3 + i * 6} cy="4" r="2.2" className={i < level ? 'is-on' : ''} />)}

@@ -5,11 +5,8 @@ import { PANE_KINDS, type PaneKind } from './panes'
 interface Props {
   kind: PaneKind
   /** Overrides the kind's label — a terminal pane says what it runs
-   * (Claude Code / Codex / Terminal) instead of wearing a chip. */
+   * (Claude Code terminal / Codex terminal / Terminal), a file pane its name. */
   title?: string
-  /** The title stands alone: no kind icon, and written as given rather than
-   * uppercased (the notepad's "TC's NOTES" keeps its lowercase s). */
-  plainTitle?: boolean
   onClose: () => void
   /** Rendered right after the title — the launch-context chip, a cwd label. */
   context?: ReactNode
@@ -44,7 +41,7 @@ interface Props {
  * whose header carries its kind's tools. The kind itself is fixed for the
  * pane's life — swapping one kind for another would kill a running shell, so
  * a different kind is a new pane (View → Add pane, or the palette). */
-export function Pane({ kind, title, plainTitle, onClose, context, path, onCopyPath, tools, attention, zoomed, onZoom, dragHandle, children }: Props) {
+export function Pane({ kind, title, onClose, context, path, onCopyPath, tools, attention, zoomed, onZoom, dragHandle, children }: Props) {
   const meta = PANE_KINDS.find((p) => p.id === kind)!
   const Icon = meta.icon
   const [copied, setCopied] = useState(false)
@@ -76,8 +73,8 @@ export function Pane({ kind, title, plainTitle, onClose, context, path, onCopyPa
           onZoom?.()
         }}
       >
-        {!plainTitle && <Icon className="gpane-ic" strokeWidth={2} />}
-        <span className={`gpane-title ${plainTitle ? 'gpane-title--plain' : ''}`} title={meta.hint}>{title ?? meta.label}</span>
+        <Icon className="gpane-ic" strokeWidth={2} />
+        <span className="gpane-title" title={meta.hint}>{title ?? meta.label}</span>
         {/* The chip shares the path's click: both copy, both flash. */}
         {context && onCopyPath ? <span className="gpane-ctxwrap" onClick={copy}>{context}</span> : context}
         {path && (
@@ -90,7 +87,6 @@ export function Pane({ kind, title, plainTitle, onClose, context, path, onCopyPa
             {copied ? <><Check className="gpane-path-ic" strokeWidth={2.5} />Copied</> : <span className="gpane-path-text">{path}</span>}
           </button>
         )}
-        {path && <span className="gpane-sep" aria-hidden="true" />}
         {attention && (
           <span className="gpane-attn" title={`Waiting for your input: ${attention}`} data-testid="pane-attention">
             <BellRing strokeWidth={2} />
@@ -98,6 +94,7 @@ export function Pane({ kind, title, plainTitle, onClose, context, path, onCopyPa
         )}
         <span className="gpane-actions">
           {tools && <span className="gpane-tools">{tools}</span>}
+          {tools && <span className="gpane-divider" aria-hidden="true" />}
           {onZoom && (
             <button
               className="iconbtn iconbtn--sm"
@@ -115,7 +112,7 @@ export function Pane({ kind, title, plainTitle, onClose, context, path, onCopyPa
           </button>
         </span>
       </div>
-      <div className={`gpane-body ${kind === 'terminal' || kind === 'web' || kind === 'chat' ? 'gpane-body--term' : ''}`}>{children}</div>
+      <div className={`gpane-body ${kind === 'terminal' || kind === 'web' || kind === 'chat' || kind === 'file' ? 'gpane-body--term' : ''}`}>{children}</div>
     </section>
   )
 }

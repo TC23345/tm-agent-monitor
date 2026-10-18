@@ -26,6 +26,19 @@
   --st-complete: #44c480;
   --st-idle: #8b847c;
 
+  /* Code (the file pane's editor). Muted, warm, and off every hue above:
+     red, amber, blue and green each mean a state here, so no token may read
+     as one. Comments sit at --faint's level, punctuation at --muted. */
+  --syn-keyword: #d98f6f;
+  --syn-string: #a9c08a;
+  --syn-number: #c5a3d9;
+  --syn-comment: #7d746c;
+  --syn-function: #e3c58f;
+  --syn-type: #8fc1c7;
+  --syn-property: #d7cbbd;
+  --syn-tag: #d98f6f;
+  --syn-punct: var(--muted);
+
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
 }
@@ -288,37 +301,40 @@ kbd {
   background: rgba(0, 0, 0, 0.16);
   overflow: hidden;
 }
+/* The pane header is an editor title bar in the title bar's own vocabulary:
+   sentence-case text in the chrome's sizes (13 px menus, 12 px status, 12.5 px
+   here), the kind's icon on every pane, and the title bar's 24 px icon
+   buttons with a 6 px radius. The focused pane's title brightens, as an
+   editor's active tab does; its border carries the accent. */
 .gpane-head {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 10px 9px 12px;
+  height: 36px;
+  padding: 0 6px 0 12px;
   border-bottom: 1px solid var(--hairline);
 }
-.gpane-ic { width: 14px; height: 14px; flex: 0 0 14px; color: var(--muted); }
-/* The pane kind, fixed for the pane's life — the header is an editor title
-   bar with tools, not a content picker. */
+.gpane-ic { width: 14px; height: 14px; flex: 0 0 14px; color: var(--faint); }
+/* The pane kind (or what it runs, or its file), fixed for the pane's life —
+   the header is an editor title bar with tools, not a content picker. */
 .gpane-title {
   flex: 0 0 auto;
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0.9px;
-  text-transform: uppercase;
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--muted);
+  white-space: nowrap;
 }
-/* A title written as given (no icon before it), e.g. the notepad's "TC's NOTES". */
-.gpane-title--plain { text-transform: none; margin-left: 2px; }
-.gpane-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-/* Per-kind tool buttons, separated from zoom/close by a hairline. */
-.gpane-tools {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-right: 8px;
-  margin-right: 2px;
-  border-right: 1px solid var(--hairline);
-}
+.pane-slot.is-focused > .gpane .gpane-title { color: var(--text); }
+.pane-slot.is-focused > .gpane .gpane-ic { color: var(--muted); }
+.gpane-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.gpane-tools { display: flex; align-items: center; gap: 2px; }
+/* A hairline between the kind's own tools and zoom / close. */
+.gpane-divider { width: 1px; height: 16px; margin: 0 4px; background: var(--hairline); }
+/* A kind whose tools are all conditional (a terminal's /compact) may render none. */
+.gpane-tools:empty, .gpane-tools:empty + .gpane-divider { display: none; }
+.gpane-actions .iconbtn { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; margin: 0; border-radius: 6px; }
+.gpane-actions .iconbtn:disabled { opacity: 0.4; cursor: default; background: none; }
 .gpane-head .pane-context { margin-left: 4px; }
 .gpane-body {
   flex: 1 1 auto;
@@ -650,7 +666,9 @@ kbd {
 .ptree-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ptree-empty { padding: 4px 8px; font-size: 11.5px; color: var(--faint); }
 /* The file pane: the notes editor's textarea and status line, an image centred, a binary file as a note. */
-.filepane { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+/* The pane body is full-bleed for a file (gpane-body--term), so the pane is its whole height. */
+.filepane { flex: 1 1 auto; height: 100%; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.code-editor { flex: 1 1 auto; min-height: 0; overflow: hidden; }
 .filepane-center { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; padding: 16px; overflow: auto; }
 .filepane-img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--r-control); }
 .filepane-note { display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 360px; font-size: 12.5px; line-height: 1.5; color: var(--ink-4); text-align: center; }
@@ -1997,8 +2015,6 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .gpane-path:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
 .gpane-path:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .gpane-path.is-copied { color: var(--st-complete); cursor: default; }
-/* A hairline closing off the path from whatever follows it in the header. */
-.gpane-sep { flex: 0 0 auto; width: 1px; height: 14px; margin: 0 2px 0 4px; background: var(--border); }
 .gpane-path-ic { width: 12px; height: 12px; }
 .gpane-path-text { direction: rtl; unicode-bidi: plaintext; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gpane-ctxwrap { display: contents; }

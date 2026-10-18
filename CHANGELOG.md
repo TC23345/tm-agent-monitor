@@ -2,6 +2,14 @@
 
 Releases are GitHub Releases on `TC23345/tm-agent-monitor`; installed apps update from `latest.yml` there. Local builds land in `dist/` as `tm-agent-monitor-<version>-x64.exe`.
 
+## 0.4.60 — 2026-10-18
+
+- **Fixed: a file opened from a project's tree showed two lines.** The pane's body was not a flex container, so the editor never stretched; it now fills the pane.
+- **File panes colour code.** The editor is CodeMirror: line numbers, syntax colours for the language the file name names (loaded only when such a file opens), Ctrl+F to find, and the same Ctrl+S to save. The colours are a muted set of their own, so no token reads as a status.
+- **Pane headers match the title bar.** Every pane shows its icon and a sentence-case title (*Claude Code chat*, *attention.mjs*), not an uppercase label. The focused pane's title brightens. The buttons are the title bar's 24 px icon buttons, and the stray divider after the path is gone.
+- **One + for what you add to a message.** The chat composer's attach, reference and slash-command buttons are one **+** at the bottom left, which opens on hover (a click pins it open).
+- **The model menu puts effort first and lists only the newest models:** Opus, Sonnet and Haiku 5.5 and Fable 5.1 for Claude Code, the GPT-6 models for Codex. A session already on an older model still shows it. A short pane no longer cuts off the top of the menu.
+
 ## 0.4.59 — 2026-10-17
 
 - **A chat and a terminal no longer share a name.** Both run the same CLI, so every launch now says which one it is: *New Claude Code terminal* / *New Codex terminal* beside *New Claude Code chat* / *New Codex chat*, in the Terminal menu, a badge's menu, the palette, an agent's *Start in ▸* and the taskbar Jump List; a terminal pane's header reads *Claude Code terminal*, a chat pane's *Claude Code chat*.

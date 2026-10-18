@@ -1,6 +1,22 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { argDetail, clockTime, effortLabel, fmtTokens, formatElapsed, imageSize, mcpTitle, modelLabel, serverTitle, splitMcpName } from './present.mjs'
+import { argDetail, clockTime, effortLabel, fmtTokens, formatElapsed, imageSize, latestModels, mcpTitle, modelLabel, serverTitle, splitMcpName } from './present.mjs'
+
+test('the model menu offers the newest generation only', () => {
+  // The lists the CLIs returned on 2026-10-18 (scripts/probe-models.mjs), labels and ids only.
+  const claude = [
+    ['default', 'Default (recommended)'], ['opus', 'Opus 5.5'], ['fable', 'Fable 5.1'], ['sonnet', 'Sonnet 5.5'], ['haiku', 'Haiku 5.5'],
+    ['claude-haiku-4-5-20251001', 'Haiku 4.5'], ['claude-sonnet-5', 'Sonnet 5'], ['claude-opus-5', 'Opus 5'], ['claude-fable-5', 'Fable 5'],
+    ['claude-opus-4-8', 'Opus 4.8'], ['claude-opus-4-6', 'Opus 4.6'], ['claude-sonnet-4-6', 'Sonnet 4.6']
+  ].map(([id, label]) => ({ id, label }))
+  const ids = (list) => list.map((m) => m.id)
+  assert.deepEqual(ids(latestModels(claude)), ['default', 'opus', 'fable', 'sonnet', 'haiku'])
+  assert.deepEqual(ids(latestModels(claude, 'claude-opus-4-8')), ['default', 'opus', 'fable', 'sonnet', 'haiku', 'claude-opus-4-8'], 'the running model stays listed')
+  const codex = ['GPT-6.1-Sol', 'GPT-6-Astra', 'GPT-6-Sol', 'GPT-6-Luna', 'GPT-5.6-Sol', 'GPT-5.6-Terra', 'GPT-5.6-Luna'].map((label) => ({ id: label.toLowerCase(), label }))
+  assert.deepEqual(ids(latestModels(codex)), ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna'])
+  assert.deepEqual(ids(latestModels([{ id: 'a', label: 'Opus 5.10' }, { id: 'b', label: 'Opus 5.9' }])), ['a'], 'minor versions compare as numbers')
+  assert.deepEqual(ids(latestModels([{ id: 'x', label: 'Custom' }])), ['x'])
+})
 
 const b64 = (bytes) => Buffer.from(bytes).toString('base64')
 const pad = (bytes, n = 64) => [...bytes, ...new Array(Math.max(0, n - bytes.length)).fill(0)]

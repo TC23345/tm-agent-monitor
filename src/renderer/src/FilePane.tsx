@@ -1,7 +1,9 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, lazy, Suspense, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { FileContent } from '@shared/types'
 import { baseName, fileKind } from '@shared/fileTree.mjs'
 import { MarkdownView } from './MarkdownView'
+
+const CodeEditor = lazy(() => import('./CodeEditor'))
 
 export interface FilePaneHandle {
   /** Write the text back (Ctrl+S, the header's Save). */
@@ -17,8 +19,8 @@ function sizeLabel(bytes: number): string {
 }
 
 /**
- * A project file in a pane (a click in a project's tree): text in the notes
- * editor's textarea — saved on Ctrl+S or the header's Save, never on its own,
+ * A project file in a pane (a click in a project's tree): text in a
+ * syntax-coloured editor (CodeEditor) — saved on Ctrl+S or the header's Save, never on its own,
  * because an agent or git may be writing the same file — Markdown rendered
  * when the pane's Preview is on, an image inline, anything binary as its
  * size with a way to open it elsewhere. `onDirty` tells App whether the pane
@@ -104,14 +106,9 @@ export const FilePane = forwardRef<FilePaneHandle, { path: string; preview: bool
       {preview && fileKind(path) === 'markdown' ? (
         <div className="notes-rendered"><MarkdownView source={text} /></div>
       ) : (
-        <textarea
-          className="notes-text"
-          value={text}
-          spellCheck={false}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => { if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); void save() } }}
-          data-testid="file-text"
-        />
+        <Suspense fallback={<div className="code-editor" />}>
+          <CodeEditor path={path} value={text} onChange={onChange} onSave={() => { void save() }} />
+        </Suspense>
       )}
       <div className="notes-status" aria-live="polite">
         {status === 'saving' ? 'Saving…' : status === 'error' ? 'Could not save — is the file writable?' : dirty ? 'Unsaved — Ctrl+S' : status === 'saved' ? 'Saved' : sizeLabel(content.bytes)}

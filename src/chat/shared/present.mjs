@@ -123,6 +123,39 @@ export function modelLabel(id) {
   return `${family} ${m[2]}${m[3] ? `.${m[3]}` : ''}${m[4] ? ` ${m[4]}` : ''}`
 }
 
+/**
+ * The models worth offering: the newest generation only. A row's version is
+ * the first number in its label ("Opus 5.5", "GPT-6.1-Sol") and its family the
+ * label without it ("opus", "gpt sol"). Within the newest major version any
+ * row lists, each family keeps only its newest version, so Opus 5 and Opus 4.8
+ * go once Opus 5.5 is listed, and a family only an older generation has
+ * (GPT-5.6-Terra beside the GPT-6 rows) goes with it. A row with no version
+ * ("Default") always stays, and so does the row whose id is `keep` (the
+ * session's model), so the menu can still show what is running.
+ * @template {{ id: string, label: string }} M
+ * @param {M[]} models
+ * @param {string} [keep]
+ * @returns {M[]}
+ */
+export function latestModels(models, keep) {
+  const rows = models.map((m) => ({ m, v: modelVersion(m.label) }))
+  const majors = rows.flatMap((r) => (r.v ? [r.v.major] : []))
+  if (!majors.length) return models
+  const top = Math.max(...majors)
+  const newest = new Map()
+  for (const { v } of rows) {
+    if (v && v.major === top && !(newest.get(v.family) >= v.rank)) newest.set(v.family, v.rank)
+  }
+  return rows.filter(({ m, v }) => !v || (v.major === top && newest.get(v.family) === v.rank) || (keep !== undefined && m.id === keep)).map((r) => r.m)
+}
+
+function modelVersion(label) {
+  const match = /(\d+)(?:\.(\d+))?/.exec(String(label))
+  if (!match) return null
+  const family = `${label.slice(0, match.index)} ${label.slice(match.index + match[0].length)}`.toLowerCase().replace(/[^a-z]+/g, ' ').trim()
+  return { major: Number(match[1]), rank: Number(match[1]) * 1000 + Number(match[2] ?? 0), family }
+}
+
 /** A duration for the composer's clock: "42s", "12m", "1h 05m", "3d 4h". */
 export function formatElapsed(ms) {
   const s = Math.max(0, Math.floor(ms / 1000))
