@@ -1,6 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { MAX_DIR_ENTRIES, baseName, extOf, fileKind, hasNul, imageMime, isAbsolutePath, parentDir, sanitizeFileConfig, sortEntries } from './fileTree.mjs'
+import { MAX_DIR_ENTRIES, baseName, extOf, fileKind, hasNul, imageMime, isAbsolutePath, parentDir, parseFileList, sanitizeFileConfig, sortEntries } from './fileTree.mjs'
+
+test('the chat @ picker reads git’s file list: relative, forward slashes, nothing ignored, bounded', () => {
+  const out = parseFileList('src/a.ts\r\nsrc\\ui\\b.tsx\n\nnode_modules/x/index.js\n"odd\\tname.txt"\nREADME.md\n')
+  assert.deepEqual(out, ['src/a.ts', 'src/ui/b.tsx', 'README.md'])
+  assert.deepEqual(parseFileList('a\nb\nc\n', 2), ['a', 'b'])
+})
 
 test('entries sort folders first in a natural, case-insensitive order and drop the ignored folders', () => {
   const sorted = sortEntries([

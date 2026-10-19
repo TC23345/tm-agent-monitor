@@ -2,7 +2,57 @@
 
 Releases are GitHub Releases on `TC23345/tm-agent-monitor`; installed apps update from `latest.yml` there. Local builds land in `dist/` as `tm-agent-monitor-<version>-x64.exe`.
 
-## 0.4.60 — 2026-10-18
+## 0.4.62 — 2026-10-18
+
+- **Codex chats read like the Codex extension.** Reverse-engineered from the extension's own strings (`tc-rea/chat-panes/docs/rea-findings.md`, *Codex pass*):
+  - A finished turn folds to *Worked for 23s · Ran commands, edited a file*, leaving its answer open; a click shows the steps.
+  - Steps read *Ran …*, *Read …*, *Searched for …*, *Edited …* with how long they took, and a command shows without its PowerShell wrapper.
+  - Codex's preambles (*I'll read the file first*) are quiet steps, not answers.
+  - An interrupt reads *You stopped after 12s*.
+  - New rows: subagents, web searches, viewed images, code reviews, reroutes, model changes and reconnects.
+- **Codex approvals in Codex's words.** *Do you want Codex to run this command?* lists exactly the choices Codex offers, numbered: *Allow once*, *Allow similar commands* (naming the rule, e.g. `node -e …`), *Allow this conversation*, *Deny*. A file edit shows its diff with *Allow all edits*. A blocked host asks *Allow Codex to connect to …?*.
+- **Codex's permission menu:** *Ask for approval*, *Approve for me*, *Full access* (with a *Turn on Full Access?* confirmation), and *Custom* when your config.toml sets something else. The chip shows the thread's real setting from the start.
+- **Keep typing while Codex works.** A message sent mid-turn waits as the next turn. *Steer* sends it into the running turn now, without interrupting. After you stop a turn the queue pauses until *Resume*.
+- **Undo a Codex turn's edits.** The turn footer's *Undo* reverse-applies that turn's changes with git, and *Reapply* puts them back.
+- **Codex plan mode.** `/plan` (or the *Plan* chip) has Codex plan first. The plan ends with *Implement this plan?*; *Yes, implement this plan* switches plan mode off and starts.
+- **Codex slash commands:** `/compact`, `/review` (uncommitted changes, or against a branch), `/plan`, `/fork` (continue in a new chat), `/new`, `/init` (AGENTS.md), `/status` (session, context, rate limits), `/mcp`, `/side`.
+- **`!` runs a shell command** in a Codex chat (`!git status`). The row reads *You ran …*.
+- **More for Codex:**
+  - Side questions answered without interrupting.
+  - The MCP servers panel.
+  - *Fast* from the model menu, priced by the model's own tier.
+  - Codex's effort names (*Light* … *Ultra*).
+  - The weekly limit in the context hover.
+  - Codex's background terminals with Stop.
+- **Fixed: one Codex chat could take over another's session.** A new thread on the shared Codex connection (another pane's, or a side question's) was adopted by every Codex pane, which then showed the wrong conversation and stopped updating. Each pane now listens only to its own thread.
+
+## 0.4.61 — 2026-10-18
+
+- **Select anything in a chat and it is copied.** Prompts, replies, a command's IN and OUT, diffs, thoughts, code blocks and the turn footer all select like text now. Releasing the mouse copies the selection, the same way a terminal pane does, and a small bar confirms *Copied* with a *Quote* button that puts the selection in the composer. Inside a plan waiting for approval the bar offers *Comment*. Ctrl+C copies as well.
+- **A clearer hierarchy in the transcript.** Replies are the largest, fullest text. A step's head is a bold tool name over a quieter detail; output, summaries and system lines are muted; times, the thinking label and the turn footer are fainter still. Only size, weight and shade changed: the colours still mean what they meant.
+- **Go back from any prompt.** A prompt's *Message actions* menu offers *Fork conversation from here*, *Rewind code to here* and both. A rewind first lists the files it will restore and the lines that change. A fork opens in the same pane with the prompt back in the box to edit, and the original stays in *Sessions*.
+- **Keep typing while Claude works.** A message sent mid-turn is shown as *Queued* until Claude reads it, and × takes it back. The empty box's ↑ brings back your earlier prompts. Tab takes the next prompt Claude Code suggests.
+- **Permission prompts like the extension's.** Numbered options you can press (1, 2, 3); *Yes, and don't ask again* says exactly which rule it saves; *No* has *Tell Claude what to do instead*, and Claude reads that as your reason rather than as a stop. The edit's diff or the command shows in the prompt. A plan asks *Accept this plan?*, with *auto-accept edits*, *manually approve edits* or *keep planning*. A question shows a preview of each option, and number keys pick one.
+- **More of the extension's conversation view:**
+  - *Working…* now has the Atom loader and Claude Code's working verbs.
+  - Thinking shows its summary and a live token count.
+  - Interrupts, compactions (with the summary), slash commands and their output each get their own line, and an error has *Copy error* and *Retry*.
+  - Long prompts fold.
+  - A subagent's steps sit under its *Agent* row, and TodoWrite shows as a checklist.
+  - A running command can go to the background and be stopped.
+  - Each turn ends with how long it took, the tokens it wrote and the files it changed (click one to open it).
+  - Diffs mark the words that changed, and code blocks in replies have colours and a copy button.
+- **New in the composer and the pane:**
+  - `@` lists the project's files.
+  - Files dropped on the pane are attached, and a pasted image opens a preview.
+  - The model menu adds fast mode and the output style.
+  - Hover the context pie for what fills the context.
+  - The **+** menu adds *Ask a side question*, answered without interrupting the turn, and *MCP servers* (status, turn one off, reconnect).
+  - The pane header adds *Find in conversation* (Ctrl+F), *Focus view* (only your prompts and Claude's replies) and *Save conversation*. The palette adds rename and copy-as-Markdown.
+  - *Jump to latest* appears when you scroll back while a turn streams, and the current prompt stays pinned at the top.
+- **Codex chats fork and compact** through the same prompt menu and the context pie.
+- **Fixed: closing a Claude Code chat left its MCP servers running.** Only `claude.exe` was stopped. The servers it had started kept running, and one held a port. Closing a chat or quitting now ends the whole process tree.
+- **Fixed: a resumed session showed *Default* instead of *Manual*.**
 
 - **Fixed: a file opened from a project's tree showed two lines.** The pane's body was not a flex container, so the editor never stretched; it now fills the pane.
 - **File panes colour code.** The editor is CodeMirror: line numbers, syntax colours for the language the file name names (loaded only when such a file opens), Ctrl+F to find, and the same Ctrl+S to save. The colours are a muted set of their own, so no token reads as a status.

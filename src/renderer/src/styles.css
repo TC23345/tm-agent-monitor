@@ -1197,6 +1197,15 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .md code { padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.07); font: 12.5px ui-monospace, "Cascadia Code", Consolas, monospace; }
 .md pre { margin: 0 0 0.9em; padding: 10px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.28); overflow-x: auto; }
 .md pre code { padding: 0; background: transparent; font-size: 12.5px; line-height: 1.5; }
+/* A fenced block's syntax colours (highlightCode.ts): the file pane's --syn-* set, never a state colour. */
+.md .syn-keyword, .md .syn-tag { color: var(--syn-keyword); }
+.md .syn-string { color: var(--syn-string); }
+.md .syn-number { color: var(--syn-number); }
+.md .syn-comment { color: var(--syn-comment); font-style: italic; }
+.md .syn-function { color: var(--syn-function); }
+.md .syn-type { color: var(--syn-type); }
+.md .syn-property { color: var(--syn-property); }
+.md .syn-punct, .md .syn-meta { color: var(--syn-punct); }
 .md blockquote { margin: 0 0 0.75em; padding: 2px 0 2px 12px; border-left: 3px solid var(--hairline); color: var(--muted); }
 .md hr { border: 0; border-top: 1px solid var(--hairline); margin: 1em 0; }
 .md a { color: var(--accent-bright); text-decoration: none; }

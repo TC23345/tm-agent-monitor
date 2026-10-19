@@ -2,10 +2,65 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   MAX_ITEMS, addUsage, answerQuestion, appendDelta, appendItem, clip, decideApproval, emptyTranscript, firstLine, pendingApprovals,
-  beginTurn, pendingQuestions, pendingRequests, setStatus, settleStreams, sortSessions, summarizeAttachments, transcriptSummary, updateItem
+  beginTurn, pendingQuestions, pendingRequests, setStatus, settleStreams, sortSessions, summarizeAttachments, transcriptSummary, updateItem,
+  closeTurn, removeItem, turnFiles, enqueue, dequeue, unqueue
 } from './chatModel.mjs'
 
+test('a queued prompt waits outside the transcript, joins it when read, or is taken back', () => {
+  const running = setStatus(appendItem(t0, { kind: 'user', id: 'u1', text: 'first', at: 1 }), 'running')
+  let t = enqueue(running, { kind: 'user', id: 'q1', text: 'then this', at: 2 })
+  t = enqueue(t, { kind: 'user', id: 'q2', text: 'and this', at: 3 })
+  assert.deepEqual([t.items.length, t.queue.map((x) => x.id)], [1, ['q1', 'q2']])
+  t = dequeue(t, 'q1', 4)
+  assert.deepEqual([t.items.map((x) => x.id), t.queue.map((x) => x.id), t.status], [['u1', 'q1'], ['q2'], 'running'])
+  t = unqueue(t, 'q2')
+  assert.deepEqual(t.queue, [])
+  const idle = dequeue(enqueue(setStatus(t0, 'idle'), { kind: 'user', id: 'q3', text: 'x', at: 5 }), 'q3', 6)
+  assert.deepEqual([idle.status, idle.turnStartedAt], ['running', 6], 'read after the turn ended, it starts the next')
+  assert.equal(dequeue(t0, 'nope', 1), t0)
+})
+
 const t0 = emptyTranscript('claude', { cwd: 'C:\\p' })
+
+test('removeItem drops one item by id and keeps identity for unknown ids', () => {
+  const t = appendItem(appendItem(t0, { kind: 'user', id: 'u1', text: 'a', at: 1 }), { kind: 'user', id: 'u2', text: 'b', at: 2, queued: true })
+  assert.deepEqual(removeItem(t, 'u2').items.map((x) => x.id), ['u1'])
+  assert.equal(removeItem(t, 'nope'), t)
+})
+
+test('turnFiles adds up a turn’s edits and writes per file, skipping failed steps', () => {
+  const items = [
+    { kind: 'tool', id: 'e1', name: 'Edit', title: '', status: 'done', at: 1, view: 'edit', path: 'C:\\p\\a.ts', edits: [{ path: 'C:\\p\\a.ts', before: 'x\ny', after: 'x\nz\nw' }] },
+    { kind: 'tool', id: 'w1', name: 'Write', title: '', status: 'done', at: 2, view: 'write', path: 'C:\\p\\b.md', content: 'one\ntwo\n' },
+    { kind: 'tool', id: 'e2', name: 'Edit', title: '', status: 'failed', at: 3, view: 'edit', path: 'C:\\p\\c.ts', edits: [{ path: 'C:\\p\\c.ts', before: 'q', after: 'r' }] },
+    { kind: 'tool', id: 'e3', name: 'Edit', title: '', status: 'done', at: 4, view: 'edit', path: 'C:\\p\\a.ts', edits: [{ path: 'C:\\p\\a.ts', before: 'w', after: '' }] }
+  ]
+  assert.deepEqual(turnFiles(items), [{ path: 'C:\\p\\a.ts', added: 2, removed: 2 }, { path: 'C:\\p\\b.md', added: 2, removed: 0 }])
+})
+
+test('closeTurn appends one footer after the turn’s steps, once', () => {
+  let t = appendItem(t0, { kind: 'user', id: 'u1', text: 'go', at: 1 })
+  t = appendItem(t, { kind: 'assistant', id: 'a1', text: 'done', streaming: false, at: 2 })
+  const closed = closeTurn(t, { at: 9, durationMs: 8000, outputTokens: 120 })
+  assert.deepEqual(closed.items.at(-1), { kind: 'turn', id: 'turn:9', at: 9, files: [], durationMs: 8000, outputTokens: 120 })
+  assert.equal(closeTurn(closed, { at: 10 }), closed, 'a turn closes once')
+  const onlyCommand = appendItem(appendItem(t0, { kind: 'user', id: 'u', text: '/compact', at: 1 }), { kind: 'system', id: 's', text: 'Context compacted', level: 'info', at: 2 })
+  assert.equal(closeTurn(onlyCommand, { at: 3 }), onlyCommand, 'a turn of only system lines gets no footer')
+})
+
+test('beginTurn spends the suggestion and clears a retry', () => {
+  const t = beginTurn({ ...t0, suggestion: 'run the tests', retry: { attempt: 2, max: 10 } }, 5)
+  assert.equal(t.suggestion, null)
+  assert.equal(t.retry, null)
+  assert.equal(t.turnStartedAt, 5)
+})
+
+test('decideApproval keeps what the user told the agent', () => {
+  const t = appendItem(t0, { kind: 'approval', id: 'p1', title: 'Allow Bash', choices: ['allow', 'deny'], at: 1 })
+  const decided = decideApproval(t, 'p1', 'deny', 'use npm ci instead')
+  assert.equal(decided.items[0].decided, 'deny')
+  assert.equal(decided.items[0].message, 'use npm ci instead')
+})
 
 test('emptyTranscript starts idle with no items', () => {
   assert.equal(t0.status, 'idle')

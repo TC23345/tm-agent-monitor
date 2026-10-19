@@ -1,6 +1,61 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { argDetail, clockTime, effortLabel, fmtTokens, formatElapsed, imageSize, latestModels, mcpTitle, modelLabel, serverTitle, splitMcpName } from './present.mjs'
+import {
+  argDetail, clockTime, effortLabel, fmtTokens, formatElapsed, imageSize, latestModels, mcpTitle, modelLabel, serverTitle, splitMcpName,
+  WORKING_VERBS, activitySummary, describePermissionUpdates, limitLines, limitName, matchFiles, relPath, resetPhrase, transcriptMarkdown, verbDelay
+} from './present.mjs'
+import { emptyTranscript } from './chatModel.mjs'
+
+test('the working line uses the extension’s 82 verbs on its 2 s, 3 s, 5 s schedule', () => {
+  assert.equal(WORKING_VERBS.length, 82)
+  assert.ok(WORKING_VERBS.includes('Clauding'))
+  assert.deepEqual([0, 1, 2, 3, 9].map(verbDelay), [2000, 3000, 5000, 5000, 5000])
+})
+
+test('describePermissionUpdates names what "don’t ask again" saves', () => {
+  assert.equal(describePermissionUpdates([{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], behavior: 'allow', destination: 'localSettings' }]), 'Bash(npm test:*) in this project')
+  assert.equal(describePermissionUpdates([{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }]), 'Edit automatically for this session')
+  assert.equal(describePermissionUpdates([{ type: 'addDirectories', directories: ['C:\\tmp'], destination: 'session' }]), 'access to C:\\tmp for this session')
+  assert.equal(describePermissionUpdates([{ type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'deny', destination: 'session' }]), undefined)
+  assert.equal(describePermissionUpdates(undefined), undefined)
+})
+
+test('relPath shortens a path inside the folder, whatever the slashes', () => {
+  assert.equal(relPath('C:\\Users\\me\\proj\\src\\a.ts', 'C:\\Users\\me\\proj'), 'src/a.ts')
+  assert.equal(relPath('c:/users/me/proj/src/a.ts', 'C:\\Users\\me\\proj\\'), 'src/a.ts')
+  assert.equal(relPath('D:\\elsewhere\\b.ts', 'C:\\Users\\me\\proj'), 'D:/elsewhere/b.ts')
+})
+
+test('matchFiles ranks file-name matches and adjacent runs first', () => {
+  const paths = ['src/ui/composer.tsx', 'src/shared/chatModel.mjs', 'docs/composition.md', 'src/ui/ChatPane.tsx', 'README.md']
+  assert.deepEqual(matchFiles(paths, 'comp').slice(0, 2).sort(), ['docs/composition.md', 'src/ui/composer.tsx'])
+  assert.deepEqual(matchFiles(['src/composer/a.ts', 'src/b/composer.ts'], 'composer')[0], 'src/b/composer.ts', 'the file name beats a folder')
+  assert.deepEqual(matchFiles(paths, 'chpane'), ['src/ui/ChatPane.tsx'])
+  assert.deepEqual(matchFiles(paths, ''), paths)
+  assert.deepEqual(matchFiles(paths, 'zzz'), [])
+})
+
+test('transcriptMarkdown writes prompts, replies and one line per step', () => {
+  const t = {
+    ...emptyTranscript('claude', { cwd: 'C:\\p', title: 'Fix the build' }),
+    items: [
+      { kind: 'user', id: 'u', text: 'Run the tests', at: Date.UTC(2026, 9, 18, 9, 5) },
+      { kind: 'thinking', id: 'th', text: 'secret', streaming: false, at: 2 },
+      { kind: 'tool', id: 't', name: 'Bash', title: 'npm test', input: 'npm test', status: 'done', at: 3, label: 'Bash', detail: 'Run tests', view: 'command' },
+      { kind: 'tool', id: 'c', name: 'Read', title: '', status: 'done', at: 3, label: 'Read', parent: 't' },
+      { kind: 'assistant', id: 'a', text: 'All green.', streaming: false, at: 4 }
+    ]
+  }
+  const md = transcriptMarkdown(t)
+  assert.match(md, /^# Fix the build\n/)
+  assert.match(md, /## You · .*\n\nRun the tests/)
+  assert.match(md, /- \*\*Bash\*\* Run tests\n\n```\nnpm test\n```/)
+  assert.match(md, /## Claude · .*\n\nAll green\./)
+  assert.doesNotMatch(md, /secret/, 'thinking stays out')
+  assert.doesNotMatch(md, /\*\*Read\*\*/, 'a subagent’s steps stay under its Agent row')
+  const afterLine = transcriptMarkdown({ ...t, items: [{ kind: 'system', id: 's', text: 'Context compacted', level: 'info', at: 1 }, t.items[4]] })
+  assert.match(afterLine, /- _Context compacted_\n\n## Claude/, 'a heading after a list line gets its blank line')
+})
 
 test('the model menu offers the newest generation only', () => {
   // The lists the CLIs returned on 2026-10-18 (scripts/probe-models.mjs), labels and ids only.
@@ -68,4 +123,30 @@ test('durations, times and token counts', () => {
   assert.equal(fmtTokens(12_400), '12.4k')
   assert.equal(fmtTokens(250_000), '250k')
   assert.equal(fmtTokens(1_200_000), '1.2M')
+})
+
+test('Codex panes use the Codex extension’s effort names', () => {
+  assert.equal(effortLabel('low', 'codex'), 'Light')
+  assert.equal(effortLabel('xhigh', 'codex'), 'Extra High')
+  assert.equal(effortLabel('ultra', 'codex'), 'Ultra')
+  assert.equal(effortLabel('low'), 'Low')
+})
+
+test('activitySummary says what a turn did, in the extension’s words', () => {
+  const tool = (x) => ({ kind: 'tool', id: Math.random().toString(), name: 'x', title: '', status: 'done', at: 1, ...x })
+  assert.equal(activitySummary([tool({ view: 'command' }), tool({ view: 'command' }), tool({ view: 'edit', edits: [{ path: 'a' }] })]), 'Ran commands, edited a file')
+  assert.equal(activitySummary([tool({ view: 'read', label: 'Read' }), tool({ name: 'webSearch', view: 'other' })]), 'Read files, searched the web')
+  assert.equal(activitySummary([tool({ view: 'other' })]), 'Called a tool')
+  assert.equal(activitySummary([{ kind: 'assistant', id: 'a', text: 'x', streaming: false, at: 1 }]), '')
+})
+
+test('rate limits read as the extension writes them', () => {
+  assert.equal(limitName(10080), 'Weekly limit')
+  assert.equal(limitName(300), '5h limit')
+  assert.equal(limitName(null), 'Rate limit')
+  const now = Date.UTC(2026, 9, 18, 12)
+  assert.match(resetPhrase(Math.floor(Date.UTC(2026, 9, 25, 12) / 1000), now), /^resets Oct 2[45]$/)
+  assert.equal(resetPhrase(null), 'reset time unavailable')
+  assert.deepEqual(limitLines({ primary: { usedPercent: 12.4, windowMins: 10080, resetsAt: null }, secondary: null }), ['Weekly limit: 88% left (reset time unavailable)'])
+  assert.deepEqual(limitLines(null), [])
 })

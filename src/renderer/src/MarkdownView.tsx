@@ -1,5 +1,32 @@
-import { useMemo, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { parseMarkdown, type BlockNode, type InlineNode } from '@shared/markdown.mjs'
+import type { CodePart } from './highlightCode'
+
+/** Past this size a block stays plain: colouring it would cost more than it helps. */
+const MAX_HIGHLIGHT = 100_000
+
+/**
+ * A fenced block: plain at once, then in the `--syn-*` colours once the
+ * grammar its fence names has loaded (`highlightCode`, imported on demand).
+ */
+function CodeBlock({ lang, text }: { lang: string; text: string }) {
+  const [parts, setParts] = useState<CodePart[] | null>(null)
+  useEffect(() => {
+    let live = true
+    setParts(null)
+    if (!lang || text.length > MAX_HIGHLIGHT) return
+    import('./highlightCode')
+      .then((m) => m.highlightCode(text, lang))
+      .then((p) => { if (live) setParts(p) })
+      .catch(() => { /* an unknown or broken grammar leaves the block plain */ })
+    return () => { live = false }
+  }, [lang, text])
+  return (
+    <pre data-lang={lang || undefined}>
+      <code>{parts ? parts.map((p, i) => (p.cls ? <span key={i} className={p.cls}>{p.text}</span> : p.text)) : text}</code>
+    </pre>
+  )
+}
 
 /**
  * Renders the Notes pane's preview from the parser's tree — React elements
@@ -25,7 +52,7 @@ function Block({ node }: { node: BlockNode }): ReactNode {
     case 'hr':
       return <hr />
     case 'code':
-      return <pre data-lang={node.lang || undefined}><code>{node.text}</code></pre>
+      return <CodeBlock lang={node.lang} text={node.text} />
     case 'quote':
       return <blockquote>{node.children.map((child, i) => <Block key={i} node={child} />)}</blockquote>
     case 'list': {

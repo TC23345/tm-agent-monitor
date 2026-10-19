@@ -4,6 +4,14 @@ import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, Clip
 import type { ChatBridge } from '../chat/ui/bridge'
 import type { ChatOptions, Transcript } from '../chat/shared/chatModel.mjs'
 
+/** The newer chat routes answer `{ ok, value }` or `{ ok: false, error }`; null is a request main refused. */
+async function settled<T>(call: Promise<{ ok: true; value: T } | { ok: false; error: string } | null>): Promise<T> {
+  const r = await call
+  if (!r) throw new Error('That request was refused')
+  if (!r.ok) throw new Error(r.error)
+  return r.value
+}
+
 /** Chat panes (src/chat): main owns the CLI processes the way it owns PTYs; this is the pane's `ChatBridge` over `chat:*`. */
 const chat: ChatBridge = {
   create: async (req) => {
@@ -14,7 +22,7 @@ const chat: ChatBridge = {
   get: (id) => ipcRenderer.invoke('chat:get', id),
   send: (id, text, attachments) => ipcRenderer.invoke('chat:send', id, text, attachments ?? []),
   interrupt: (id) => ipcRenderer.invoke('chat:interrupt', id),
-  answer: (id, approvalId, choice) => ipcRenderer.invoke('chat:answer', id, approvalId, choice),
+  answer: (id, approvalId, choice, message) => ipcRenderer.invoke('chat:answer', id, approvalId, choice, message ?? null),
   answerQuestion: (id, questionId, answers) => ipcRenderer.invoke('chat:answer-question', id, questionId, answers),
   configure: async (id, patch) => {
     const problem = (await ipcRenderer.invoke('chat:configure', id, patch)) as string | null
@@ -34,7 +42,23 @@ const chat: ChatBridge = {
     }
   },
   listSessions: (provider, cwd) => ipcRenderer.invoke('chat:sessions', provider, cwd),
-  loadTranscript: (provider, sessionId, cwd) => ipcRenderer.invoke('chat:transcript', provider, sessionId, cwd)
+  loadTranscript: (provider, sessionId, cwd) => ipcRenderer.invoke('chat:transcript', provider, sessionId, cwd),
+  removeQueued: (id, itemId) => settled(ipcRenderer.invoke('chat:remove-queued', id, itemId)),
+  rewind: (id, itemId, dryRun) => settled(ipcRenderer.invoke('chat:rewind', id, itemId, dryRun)),
+  fork: (id, itemId) => settled(ipcRenderer.invoke('chat:fork', id, itemId)),
+  sideQuestion: (id, question) => settled(ipcRenderer.invoke('chat:side-question', id, question)),
+  contextUsage: (id) => settled(ipcRenderer.invoke('chat:context', id)),
+  mcp: (id, req) => settled(ipcRenderer.invoke('chat:mcp', id, req)),
+  background: (id, toolUseId) => settled(ipcRenderer.invoke('chat:background', id, toolUseId)),
+  stopTask: (id, taskId) => settled(ipcRenderer.invoke('chat:stop-task', id, taskId)),
+  rename: (id, title) => settled(ipcRenderer.invoke('chat:rename', id, title)),
+  compact: (id) => settled(ipcRenderer.invoke('chat:compact', id)),
+  steer: (id, itemId) => settled(ipcRenderer.invoke('chat:steer', id, itemId)),
+  resumeQueue: (id) => settled(ipcRenderer.invoke('chat:resume-queue', id)),
+  shell: (id, command) => settled(ipcRenderer.invoke('chat:shell', id, command)),
+  review: (id, target) => settled(ipcRenderer.invoke('chat:review', id, target)),
+  status: (id) => settled(ipcRenderer.invoke('chat:status', id)),
+  undoTurn: (id, turnItemId, reapply) => settled(ipcRenderer.invoke('chat:undo-turn', id, turnItemId, reapply))
 }
 
 const api = {
@@ -148,6 +172,10 @@ const api = {
       return ''
     }
   },
+  /** A chat pane's `@` picker: the folder's files, relative and forward-slashed (git's list, else a bounded walk). */
+  listChatFiles: async (cwd: string): Promise<string[]> => ((await ipcRenderer.invoke('chat:files', cwd)) as string[] | null) ?? [],
+  /** Save conversation: a save dialog, then the Markdown written where the user picked; false when cancelled. */
+  saveChat: (name: string, text: string): Promise<boolean> => ipcRenderer.invoke('chat:save', name, text),
   /** A dropped path as a folder: the directory itself, or a file's parent. */
   describePath: (path: string): Promise<{ dir: string; label: string } | null> => ipcRenderer.invoke('path:describe', path),
   /** The project tree (a badge's left-click): one folder's entries, folders first, `.git` and `node_modules` left out, capped. */

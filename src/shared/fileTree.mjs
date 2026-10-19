@@ -13,6 +13,28 @@ export const MAX_DIR_ENTRIES = 500
 export const MAX_TEXT_BYTES = 2 * 1024 * 1024
 /** The biggest image the pane shows inline (as a data URL). */
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024
+/** Most files a chat pane's `@` picker is given for one folder. */
+export const MAX_PICKER_FILES = 20_000
+
+/**
+ * `git ls-files` output → the `@` picker's list: one relative path a line,
+ * forward slashes, no blanks, nothing under an ignored folder, at most `max`.
+ * Git quotes a path with unusual characters ("…"); those are dropped rather
+ * than guessed at.
+ * @param {string} stdout
+ * @param {number} [max]
+ * @returns {string[]}
+ */
+export function parseFileList(stdout, max = MAX_PICKER_FILES) {
+  const out = []
+  for (const raw of String(stdout ?? '').split(/\r?\n/)) {
+    const line = raw.trim().replace(/\\/g, '/')
+    if (!line || line.startsWith('"') || line.split('/').some((seg) => IGNORED_DIRS.includes(seg.toLowerCase()))) continue
+    out.push(line)
+    if (out.length >= max) break
+  }
+  return out
+}
 const MAX_PATH = 4_096
 
 const IMAGE_MIME = Object.freeze({

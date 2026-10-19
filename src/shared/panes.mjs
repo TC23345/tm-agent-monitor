@@ -28,6 +28,7 @@ export function sanitizeChatConfig(raw) {
   if (typeof raw.chatId === 'string' && /^[0-9a-f-]{36}$/.test(raw.chatId)) out.chatId = raw.chatId
   if (typeof raw.resumeId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(raw.resumeId)) out.resumeId = raw.resumeId
   if (typeof raw.model === 'string' && raw.model.length > 0 && raw.model.length <= 100) out.model = raw.model
+  if (raw.focus === true) out.focus = true
   return out
 }
 

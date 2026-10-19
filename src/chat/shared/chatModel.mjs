@@ -5,6 +5,7 @@
 // `src/codex/fold.mjs` own the provider vocabularies; this file owns the
 // shape and the pure operations on it, so the React pane never sees a
 // provider message. Everything here is pure and tested.
+import { changeLines, countChanges, splitLines } from './diff.mjs'
 
 /** @typedef {'claude' | 'codex'} Provider */
 
@@ -32,6 +33,8 @@
  * @property {string} text
  * @property {AttachmentSummary[]} [attachments]
  * @property {number} at epoch ms
+ * @property {string} [uuid] the provider's id for this message: Claude's message uuid (what `rewindFiles` and a fork take)
+ * @property {string} [turnId] Codex: the turn this message started (what `thread/fork` takes)
  */
 /**
  * @typedef {Object} ChatItemAssistant
@@ -49,6 +52,7 @@
  * @property {boolean} streaming
  * @property {number} at
  * @property {number} [durationMs] from the block's start to its end, once it ended ("Thought for 2s")
+ * @property {number} [tokens] the CLI's live estimate of the thinking tokens so far
  */
 /**
  * @typedef {Object} ChatItemTool
@@ -66,13 +70,21 @@
  * @property {ToolView} [view] which body the row gets
  * @property {FileChange[]} [edits] for `edit` rows: what changed, file by file
  * @property {string} [content] for `write` rows: the written text
+ * @property {string} [path] the file a Read, Edit or Write touched, in full (the host can open it)
+ * @property {TodoEntry[]} [todos] for `todo` rows: the list as TodoWrite left it
+ * @property {string} [prompt] for `agent` rows: the subagent's prompt
+ * @property {string} [parent] the Agent row this step ran under (a subagent's step)
+ * @property {string} [taskId] the CLI's task id while this command or agent is a task (what `stopTask` takes)
+ * @property {boolean} [background] the command or agent now runs in the background
  */
 /**
  * `command`: IN (the command) and OUT (its output), open. `edit`: a summary and
  * the diff. `write`: a line count and the content. `read`: the line alone.
- * `search`: a match count, OUT on click. `other`: IN/OUT on click.
- * @typedef {'command' | 'edit' | 'write' | 'read' | 'search' | 'other'} ToolView
+ * `search`: a match count, OUT on click. `todo`: the checklist. `agent`: the
+ * prompt, the subagent's own steps and its result. `other`: IN/OUT on click.
+ * @typedef {'command' | 'edit' | 'write' | 'read' | 'search' | 'todo' | 'agent' | 'other'} ToolView
  */
+/** @typedef {{ content: string, status: 'pending' | 'in_progress' | 'completed', activeForm?: string }} TodoEntry */
 /**
  * One file's change: a before/after pair (Claude's Edit) or a unified diff /
  * whole content (Codex's fileChange).
@@ -87,16 +99,43 @@
  * @property {ApprovalChoice[]} choices what the pane may answer
  * @property {ApprovalChoice} [decided] once answered
  * @property {number} at
+ * @property {string} [toolName] the tool asking (Bash, Edit, ExitPlanMode…)
+ * @property {'tool' | 'plan'} [variant] `plan`: ExitPlanMode — the plan, then approve it or keep planning
+ * @property {string} [question] the tool's own question ("Allow fetching this url?"); else "Do you want to proceed with <tool>?"
+ * @property {string} [command] a shell command to show as IN
+ * @property {FileChange[]} [edits] an edit to show as a diff
+ * @property {string} [plan] the plan, Markdown
+ * @property {string} [rule] what "don't ask again" saves, in words ("Bash(npm test:*) in this project")
+ * @property {string} [message] what the user told the agent with a refusal
  */
-/** @typedef {'allow' | 'allow-session' | 'deny' | 'cancel'} ApprovalChoice */
+/**
+ * `plan-auto` / `plan-manual` approve a plan and leave plan mode for
+ * *Edit automatically* or *Manual*.
+ * @typedef {'allow' | 'allow-session' | 'deny' | 'cancel' | 'plan-auto' | 'plan-manual'} ApprovalChoice
+ */
 /**
  * @typedef {Object} ChatItemSystem
  * @property {'system'} kind
  * @property {string} id
  * @property {string} text
- * @property {'info' | 'error'} level
+ * @property {'info' | 'warning' | 'error'} level
  * @property {number} at
+ * @property {'interrupt' | 'compact' | 'command' | 'cleared' | 'task' | 'limit' | 'notice'} [variant]
+ * @property {string} [detail] the compaction's summary, a command's output, a task's summary
+ * @property {number} [tokens] a compaction: the context it started from
  */
+/**
+ * The end of a turn: how long it took, what it produced, and the files it
+ * changed — a footer under the reply, not a step on the rail.
+ * @typedef {Object} ChatItemTurn
+ * @property {'turn'} kind
+ * @property {string} id
+ * @property {number} at
+ * @property {number} [durationMs]
+ * @property {number} [outputTokens]
+ * @property {TurnFile[]} files
+ */
+/** @typedef {{ path: string, added: number, removed: number }} TurnFile */
 /**
  * One question the agent asks (Claude's AskUserQuestion, Codex's
  * item/tool/requestUserInput, an MCP form elicitation). `options` null means
@@ -105,7 +144,7 @@
  * @property {string} id the provider's question id (Codex) or the question text (Claude)
  * @property {string} text
  * @property {string} [header]
- * @property {{ label: string, description?: string }[] | null} options
+ * @property {{ label: string, description?: string, preview?: string }[] | null} options `preview`: Markdown shown while the option is focused (Claude's previewFormat "markdown")
  * @property {boolean} multiSelect
  * @property {boolean} allowOther
  * @property {boolean} [secret]
@@ -121,7 +160,7 @@
  * @property {boolean} [cancelled]
  * @property {number} at
  */
-/** @typedef {ChatItemUser | ChatItemAssistant | ChatItemThinking | ChatItemTool | ChatItemApproval | ChatItemQuestion | ChatItemSystem} ChatItem */
+/** @typedef {ChatItemUser | ChatItemAssistant | ChatItemThinking | ChatItemTool | ChatItemApproval | ChatItemQuestion | ChatItemSystem | ChatItemTurn} ChatItem */
 
 /**
  * @typedef {Object} Usage
@@ -146,7 +185,16 @@
  * @property {string | null} effort the reasoning effort the next request uses; null is the model's default
  * @property {string | null} permissionMode Claude's PermissionMode, or the Codex preset id
  * @property {number | null} turnStartedAt when the turn in flight started (epoch ms)
+ * @property {'compacting' | null} activity what the agent is doing besides a turn's steps
+ * @property {{ attempt: number, max: number } | null} retry the API call is being retried (the working line says so)
+ * @property {BackgroundTask[]} background what runs in the background now
+ * @property {string | null} suggestion the CLI's guess at the next prompt, until the user types or sends
+ * @property {boolean} checkpoints file checkpoints exist, so code can be rewound (Claude)
+ * @property {string | null} outputStyle the session's output style
+ * @property {'off' | 'on' | 'cooldown' | null} fastMode
+ * @property {ChatItemUser[]} queue prompts sent while a turn ran, not yet read by the agent; each joins `items` where the agent reads it
  */
+/** @typedef {{ id: string, description: string, type: string, toolUseId?: string }} BackgroundTask */
 
 /**
  * What the composer's menus offer, fetched on demand (`ChatBridge.options`).
@@ -154,9 +202,24 @@
  * @typedef {{ id: string, label: string, description?: string, efforts: string[], defaultEffort?: string | null, model?: string }} ModelOption
  * @typedef {{ id: string, label: string, description: string }} ModeOption
  * @typedef {{ name: string, description: string, argumentHint?: string }} CommandOption
- * @typedef {{ models: ModelOption[], modes: ModeOption[], commands: CommandOption[] }} ChatOptions
+ * `outputStyles` and `fastMode` (whether the current model offers it) are Claude's.
+ * @typedef {{ models: ModelOption[], modes: ModeOption[], commands: CommandOption[], outputStyles?: string[], fastMode?: boolean }} ChatOptions
  */
-/** @typedef {{ model?: string | null, effort?: string | null, permissionMode?: string | null }} ChatConfigPatch */
+/** @typedef {{ model?: string | null, effort?: string | null, permissionMode?: string | null, fastMode?: boolean, outputStyle?: string }} ChatConfigPatch */
+
+/**
+ * What a rewind would change (a dry run) or did change.
+ * @typedef {{ canRewind: boolean, files: string[], insertions: number, deletions: number, error?: string }} RewindResult
+ */
+/**
+ * The context window by category (Claude's `getContextUsage`).
+ * @typedef {{ total: number, max: number, percent: number, categories: { name: string, tokens: number, kind: string }[], memoryFiles: { path: string, tokens: number }[] }} ContextUsage
+ */
+/**
+ * One MCP server as the session sees it.
+ * @typedef {{ name: string, status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled', error?: string, tools: number, scope?: string }} McpServer
+ */
+/** @typedef {{ op: 'list' } | { op: 'toggle', name: string, enabled: boolean } | { op: 'reconnect', name: string }} McpRequest */
 
 export const MAX_ITEMS = 2000
 export const MAX_TOOL_OUTPUT = 64 * 1024
@@ -180,8 +243,41 @@ export function emptyTranscript(provider, init) {
     error: null,
     effort: init.effort ?? null,
     permissionMode: init.permissionMode ?? null,
-    turnStartedAt: null
+    turnStartedAt: null,
+    activity: null,
+    retry: null,
+    background: [],
+    suggestion: null,
+    checkpoints: false,
+    outputStyle: null,
+    fastMode: null,
+    queue: [],
+    limits: null,
+    planMode: false,
+    queuePaused: false,
+    pendingPlan: null
   }
+}
+
+/** Hold a prompt sent mid-turn until the agent reads it. */
+export function enqueue(t, item) {
+  return { ...t, queue: [...t.queue, item] }
+}
+
+/**
+ * The agent read a queued prompt (`id`): it joins the transcript here, and
+ * starts a turn when none is running. Unknown ids leave the transcript as is.
+ */
+export function dequeue(t, id, at) {
+  const item = t.queue.find((x) => x.id === id)
+  if (!item) return t
+  const next = appendItem({ ...t, queue: t.queue.filter((x) => x.id !== id) }, item)
+  return next.status === 'running' || next.status === 'waiting' ? next : beginTurn(next, at)
+}
+
+/** Take a queued prompt back before the agent reads it. */
+export function unqueue(t, id) {
+  return t.queue.some((x) => x.id === id) ? { ...t, queue: t.queue.filter((x) => x.id !== id) } : t
 }
 
 /** Bound a text to `max` characters, keeping the head (a command's first
@@ -224,6 +320,63 @@ export function updateItem(t, id, update) {
   const items = t.items.slice()
   items[i] = next
   return { ...t, items }
+}
+
+/** Drop the item with `id` (a queued prompt the user took back). Unknown ids leave the transcript untouched. */
+export function removeItem(t, id) {
+  const items = t.items.filter((x) => x.id !== id)
+  return items.length === t.items.length ? t : { ...t, items }
+}
+
+/**
+ * The files a run of items changed, in first-touched order, with the lines
+ * each added and removed: Edit rows by their diffs, Write rows by the lines
+ * they wrote (a write replaces a file, so its old lines are not known here).
+ * A subagent's edits count too; failed and declined steps do not.
+ * @param {ChatItem[]} items
+ * @returns {TurnFile[]}
+ */
+export function turnFiles(items) {
+  const files = new Map()
+  const add = (path, added, removed) => {
+    if (!path) return
+    const f = files.get(path) ?? { path, added: 0, removed: 0 }
+    files.set(path, { path, added: f.added + added, removed: f.removed + removed })
+  }
+  for (const x of items) {
+    if (x.kind !== 'tool' || x.status === 'failed' || x.status === 'declined') continue
+    if (x.view === 'edit') {
+      for (const e of x.edits ?? []) {
+        const c = countChanges(changeLines(e))
+        add(e.path || x.path, c.added, c.removed)
+      }
+    } else if (x.view === 'write') add(x.path, splitLines(x.content ?? '').length, 0)
+  }
+  return [...files.values()]
+}
+
+/**
+ * Close a turn: a footer item with its duration, the output it produced and
+ * the files changed since the turn's prompt. Items after the last user
+ * message are the turn's.
+ * @param {Transcript} t
+ * @param {{ at: number, durationMs?: number, outputTokens?: number, id?: string }} info
+ */
+export function closeTurn(t, info) {
+  let start = t.items.length
+  // A message steered into the running turn is part of it, not its start.
+  while (start > 0 && (t.items[start - 1].kind !== 'user' || t.items[start - 1].steered)) start--
+  const steps = t.items.slice(start)
+  if (!steps.some((x) => x.kind !== 'turn' && x.kind !== 'system')) return t
+  if (steps.some((x) => x.kind === 'turn')) return t
+  const item = {
+    kind: 'turn', id: info.id ?? `turn:${info.at}`, at: info.at, files: turnFiles(steps),
+    ...(info.turnId ? { turnId: info.turnId } : {}),
+    ...(info.interrupted ? { interrupted: true } : {}),
+    ...(typeof info.durationMs === 'number' ? { durationMs: info.durationMs } : {}),
+    ...(typeof info.outputTokens === 'number' && info.outputTokens > 0 ? { outputTokens: info.outputTokens } : {})
+  }
+  return appendItem(t, item)
 }
 
 /** Add streamed text to an assistant/thinking item; creates it when absent. */
@@ -278,9 +431,9 @@ export function summarizeAttachments(list) {
     : { kind: 'file', name: a.name ?? a.path, path: a.path }))
 }
 
-/** A turn starts: the status goes to running and the clock starts. */
+/** A turn starts: the status goes to running, the clock starts, and the last guess at a prompt is spent. */
 export function beginTurn(t, at) {
-  return { ...setStatus(t, 'running'), turnStartedAt: at }
+  return { ...setStatus(t, 'running'), turnStartedAt: at, suggestion: null, retry: null }
 }
 
 /**
@@ -293,9 +446,9 @@ export function setStatus(t, status, error = null) {
   return { ...t, status, error }
 }
 
-/** Record an answered approval; the status returns to running unless another one waits. */
-export function decideApproval(t, id, choice) {
-  const next = updateItem(t, id, (item) => (item.kind === 'approval' && !item.decided ? { ...item, decided: choice } : item))
+/** Record an answered approval (with what the user told the agent, if anything); the status returns to running unless another one waits. */
+export function decideApproval(t, id, choice, message) {
+  const next = updateItem(t, id, (item) => (item.kind === 'approval' && !item.decided ? { ...item, decided: choice, ...(message ? { message } : {}) } : item))
   if (next === t) return t
   return pendingRequests(next).length ? next : setStatus(next, 'running')
 }

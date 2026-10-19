@@ -10,3 +10,7 @@ export function changeLines(change: { before?: string; after?: string; diff?: st
 export function splitRows(lines: DiffLine[]): DiffRow[]
 export function countChanges(lines: DiffLine[]): { added: number; removed: number }
 export function changeSummary(counts: { added: number; removed: number }): string
+export interface WordSegment { text: string; changed: boolean }
+export function wordDiff(before: string, after: string, maxCells?: number): { left: WordSegment[]; right: WordSegment[] }
+export function relTo(path: string, cwd: string): string
+export function filePatch(rel: string, kind: string | undefined, diff: string): string | null

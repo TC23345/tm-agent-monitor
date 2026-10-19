@@ -4,6 +4,7 @@
 // per `codexMode`); each Claude pane is its own `claude` process. Imports no
 // Electron — main wraps it in `chat:*` IPC routes, a Node harness calls it
 // directly.
+import { spawnSync } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -11,7 +12,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ClaudeSession, listClaudeSessions, loadClaudeTranscript } from '../claude/session'
 import { CodexAppServer, CodexThread, type CodexServerMode } from '../codex/appServer'
-import { emptyTranscript, type ApprovalChoice, type Attachment, type ChatConfigPatch, type ChatItemApproval, type ChatItemQuestion, type ChatOptions, type Provider, type SessionSummary, type Transcript } from '../shared/chatModel.mjs'
+import {
+  emptyTranscript,
+  type ApprovalChoice, type Attachment, type ChatConfigPatch, type ChatItemApproval, type ChatItemQuestion, type ChatOptions, type ContextUsage, type McpRequest, type McpServer,
+  type Provider, type ReviewTarget, type RewindResult, type SessionSummary, type Transcript, type UndoResult
+} from '../shared/chatModel.mjs'
 import type { ChatBridge, ChatCreateRequest } from '../ui/bridge'
 
 export interface ChatManagerOptions {
@@ -71,7 +76,8 @@ export class ChatManager extends EventEmitter implements ChatBridge {
     const env = this.config.envFor?.(id, req.provider) ?? {}
     if (req.provider === 'claude') {
       const transcript = req.resume ? await loadClaudeTranscript(req.resume, req.cwd).catch(() => undefined) : undefined
-      const session = new ClaudeSession({ cwd: req.cwd, resume: req.resume ?? null, model: req.model ?? null, env, claudePath: this.config.claudePath, log: this.config.log }, transcript)
+      const permissionMode = req.permissionMode ? (req.permissionMode as ConstructorParameters<typeof ClaudeSession>[0]['permissionMode']) : undefined
+      const session = new ClaudeSession({ cwd: req.cwd, resume: req.resume ?? null, model: req.model ?? null, permissionMode, env, claudePath: this.config.claudePath, log: this.config.log }, transcript)
       session.on('change', (t: Transcript) => this.emit('change', id, t))
       session.on('approval', (a: ChatItemApproval) => this.emit('approval', id, a))
       session.on('question', (q: ChatItemQuestion) => this.emit('question', id, q))
@@ -90,6 +96,7 @@ export class ChatManager extends EventEmitter implements ChatBridge {
     thread.on('open-url', (url: string) => this.emit('open-url', id, url))
     this.live.set(id, { id, provider: 'codex', cwd: req.cwd, codex: thread })
     await thread.open({ model: req.model ?? null })
+    if (req.permissionMode) await thread.configure({ permissionMode: req.permissionMode }).catch(() => { /* not a Codex preset */ })
     return { id, transcript: thread.transcript }
   }
 
@@ -123,10 +130,111 @@ export class ChatManager extends EventEmitter implements ChatBridge {
     else await l.codex!.interrupt()
   }
 
-  async answer(id: string, approvalId: string, choice: ApprovalChoice): Promise<void> {
+  async answer(id: string, approvalId: string, choice: ApprovalChoice, message?: string): Promise<void> {
     const l = this.must(id)
-    if (l.claude) l.claude.answer(approvalId, choice)
+    if (l.claude) l.claude.answer(approvalId, choice, message)
     else l.codex!.answer(approvalId, choice)
+  }
+
+  async removeQueued(id: string, itemId: string): Promise<boolean> {
+    const l = this.must(id)
+    return l.claude ? l.claude.removeQueued(itemId) : l.codex!.removeQueued(itemId)
+  }
+
+  async steer(id: string, itemId: string): Promise<void> {
+    await this.codexThread(id, 'Claude Code reads a queued message after its current step').steer(itemId)
+  }
+
+  async resumeQueue(id: string): Promise<void> {
+    await this.codexThread(id, 'Claude Code’s queue never pauses').resumeQueue()
+  }
+
+  async shell(id: string, command: string): Promise<void> {
+    await this.codexThread(id, 'Type ! commands in a Codex chat; in Claude Code, ! is a CLI mode').shell(command)
+  }
+
+  async review(id: string, target: ReviewTarget): Promise<void> {
+    await this.codexThread(id, 'In Claude Code, /review is a slash command').review(target)
+  }
+
+  async status(id: string): Promise<void> {
+    await this.codexThread(id, 'In Claude Code, /status is a slash command').status()
+  }
+
+  /**
+   * Undo (or with `reapply`, redo) the file changes of one finished Codex turn
+   * by reverse-applying its diff with `git apply` in the chat's folder — the
+   * Codex extension's Undo, which also needs a Git repository. Answers a plain
+   * sentence either way.
+   */
+  async undoTurn(id: string, turnItemId: string, reapply = false): Promise<UndoResult> {
+    const l = this.must(id)
+    const thread = this.codexThread(id, 'Claude Code rewinds code from a prompt’s menu instead')
+    const diff = thread.turnDiff(turnItemId)
+    if (!diff) return { ok: false, message: 'That turn changed no files Codex can undo.' }
+    const git = (args: string[]) => spawnSync('git', args, { cwd: l.cwd, input: diff, encoding: 'utf8', windowsHide: true, timeout: 15_000 })
+    const inside = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: l.cwd, encoding: 'utf8', windowsHide: true, timeout: 5000 })
+    if (inside.status !== 0) return { ok: false, message: `${reapply ? 'Reapply' : 'Undo'} needs a Git repository.` }
+    const args = ['apply', '--whitespace=nowarn', ...(reapply ? [] : ['-R'])]
+    const check = git([...args, '--check', '-'])
+    if (check.status !== 0) {
+      const why = (check.stderr || check.stdout || '').trim().split(/\r?\n/)[0] ?? ''
+      return { ok: false, message: `Could not ${reapply ? 'reapply' : 'undo'} the changes: the files changed since. ${why}`.trim() }
+    }
+    const run = git([...args, '-'])
+    if (run.status !== 0) return { ok: false, message: (run.stderr || 'git apply failed').trim().split(/\r?\n/)[0]! }
+    thread.markUndone(turnItemId, !reapply)
+    return { ok: true, message: reapply ? 'Changes reapplied.' : 'Changes reverted.' }
+  }
+
+  async rewind(id: string, itemId: string, dryRun: boolean): Promise<RewindResult> {
+    return this.claude(id, 'Codex keeps no file checkpoints, so there is no code to rewind').rewind(itemId, dryRun)
+  }
+
+  async fork(id: string, itemId?: string): Promise<{ sessionId: string | null; prompt: string }> {
+    const l = this.must(id)
+    if (l.claude) {
+      if (!itemId) throw new Error('Fork a Claude Code chat from a prompt’s menu')
+      return l.claude.fork(itemId)
+    }
+    return l.codex!.fork(itemId)
+  }
+
+  async sideQuestion(id: string, question: string): Promise<string | null> {
+    const l = this.must(id)
+    return l.claude ? l.claude.sideQuestion(question) : l.codex!.sideQuestion(question)
+  }
+
+  async contextUsage(id: string): Promise<ContextUsage> {
+    const l = this.must(id)
+    return l.claude ? l.claude.contextUsage() : l.codex!.contextUsage()
+  }
+
+  async mcp(id: string, req: McpRequest): Promise<McpServer[]> {
+    const l = this.must(id)
+    return l.claude ? l.claude.mcp(req) : l.codex!.mcp(req)
+  }
+
+  async background(id: string, toolUseId?: string): Promise<boolean> {
+    return this.claude(id, 'Codex starts its own background terminals; stop them from the background menu').background(toolUseId)
+  }
+
+  async stopTask(id: string, taskId: string): Promise<void> {
+    const l = this.must(id)
+    if (l.claude) await l.claude.stopTask(taskId)
+    else await l.codex!.stopTask(taskId)
+  }
+
+  async rename(id: string, title: string): Promise<void> {
+    const l = this.must(id)
+    if (l.claude) await l.claude.rename(title)
+    else await l.codex!.rename(title)
+  }
+
+  async compact(id: string): Promise<void> {
+    const l = this.must(id)
+    if (l.claude) l.claude.send('/compact')
+    else await l.codex!.compact()
   }
 
   async answerQuestion(id: string, questionId: string, answers: Record<string, string[]> | null): Promise<void> {
@@ -193,5 +301,19 @@ export class ChatManager extends EventEmitter implements ChatBridge {
     const l = this.live.get(id)
     if (!l) throw new Error(`no live chat ${id}`)
     return l
+  }
+
+  /** The live Codex thread behind `id`, or `why` as the error when it is a Claude chat. */
+  private codexThread(id: string, why: string): CodexThread {
+    const l = this.must(id)
+    if (!l.codex) throw new Error(why)
+    return l.codex
+  }
+
+  /** The live Claude session behind `id`, or `why` as the error when it is a Codex chat. */
+  private claude(id: string, why: string): ClaudeSession {
+    const l = this.must(id)
+    if (!l.claude) throw new Error(why)
+    return l.claude
   }
 }

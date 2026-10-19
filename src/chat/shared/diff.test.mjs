@@ -1,6 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { changeLines, changeSummary, countChanges, lineDiff, looksLikeUnifiedDiff, parseUnifiedDiff, splitLines, splitRows } from './diff.mjs'
+import { changeLines, changeSummary, countChanges, lineDiff, looksLikeUnifiedDiff, parseUnifiedDiff, splitLines, splitRows, wordDiff, filePatch, relTo } from './diff.mjs'
+
+test('wordDiff marks only the words that changed inside a replaced line', () => {
+  const { left, right } = wordDiff('const size = 12;', 'const size = 14;')
+  assert.deepEqual(left, [{ text: 'const size = ', changed: false }, { text: '12', changed: true }, { text: ';', changed: false }])
+  assert.deepEqual(right, [{ text: 'const size = ', changed: false }, { text: '14', changed: true }, { text: ';', changed: false }])
+})
+
+test('wordDiff treats a rewrite as one changed segment', () => {
+  assert.deepEqual(wordDiff('alpha beta gamma', 'one two three four'), { left: [{ text: 'alpha beta gamma', changed: true }], right: [{ text: 'one two three four', changed: true }] })
+  assert.deepEqual(wordDiff('', 'new'), { left: [], right: [{ text: 'new', changed: true }] })
+})
 
 const types = (lines) => lines.map((l) => `${l.type === 'eq' ? ' ' : l.type === 'del' ? '-' : l.type === 'add' ? '+' : '@'}${l.text}`)
 
@@ -51,4 +62,14 @@ test('the summary counts real changes in the extension words', () => {
   assert.equal(changeSummary(countChanges(lineDiff('a', 'a\nb'))), 'Added 1 line')
   assert.equal(changeSummary(countChanges(lineDiff('a\nb', 'a'))), 'Removed 1 line')
   assert.equal(changeSummary({ added: 0, removed: 0 }), 'Modified')
+})
+
+test('filePatch builds what git apply reads for a Codex turn’s Undo', () => {
+  assert.equal(relTo('C:\\p\\src\\a.ts', 'c:\\P\\'), 'src/a.ts')
+  assert.equal(relTo('D:\\x\\a.ts', 'C:\\p'), 'D:/x/a.ts')
+  assert.equal(filePatch('src/a.ts', 'update', '@@ -1 +1 @@\n-a\n+b'), 'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n')
+  assert.equal(filePatch('n.md', 'add', 'one\ntwo\n'), 'diff --git a/n.md b/n.md\nnew file mode 100644\n--- /dev/null\n+++ b/n.md\n@@ -0,0 +1,2 @@\n+one\n+two\n')
+  assert.match(filePatch('old.md', 'delete', 'x'), /deleted file mode 100644\n--- a\/old.md\n\+\+\+ \/dev\/null\n@@ -1,1 \+0,0 @@\n-x\n/)
+  assert.equal(filePatch('a', 'update', 'not a diff'), null)
+  assert.equal(filePatch('', 'update', '@@ -1 +1 @@'), null)
 })

@@ -66,7 +66,7 @@ import {
   AppWindow, ArrowLeft, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Clipboard, Code2, Code2 as CursorIcon, Columns3, Copy,
   ExternalLink, Eye, EyeOff, Filter, Folder, FolderPlus, Globe, Keyboard, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
   NotebookPen, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, RotateCw, Rss, Ruler, Save, Shrink, Sparkles, SquareSlash,
-  History as HistoryIcon, MessageSquare, Plus, SquareTerminal, Terminal, Trash2, X
+  History as HistoryIcon, ListCollapse, MessageSquare, Plus, Search, SquareTerminal, Terminal, Trash2, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
 
@@ -1002,6 +1002,10 @@ export function App() {
             onConfig={(patch) => updateChat(pane.id, patch)}
             renderText={(text) => <MarkdownView source={text} />}
             copyText={(text) => window.watch.copyText(text, { cwd: pane.chat?.cwd })}
+            openFile={openFile}
+            listFiles={(cwd) => window.watch.listChatFiles(cwd)}
+            saveText={(name, text) => window.watch.saveChat(name, text)}
+            pathForFile={(file) => window.watch.pathForFile(file) || null}
             onFocus={() => { if (focusedPane !== pane.id) setFocusedPane(pane.id) }}
           />
         )
@@ -1102,9 +1106,12 @@ export function App() {
     }
     if (pane.kind === 'chat' && pane.chat) {
       const handle = () => chatRefs.current.get(pane.id)
-      // Sessions (the provider's own history) and a fresh one; everything else is inside the pane.
+      // Sessions (the provider's own history), a fresh one, find, focus view and save; everything else is inside the pane.
       return (
         <>
+          {tool('Find in conversation (Ctrl+F)', ic(Search), () => handle()?.find())}
+          {tool(pane.chat.focus ? 'Show every step' : 'Focus view: only prompts and replies', ic(ListCollapse), () => handle()?.toggleFocus(), false, !!pane.chat.focus)}
+          {tool('Save conversation', ic(Save), () => handle()?.saveConversation())}
           {tool('Sessions', ic(HistoryIcon), () => handle()?.pickSession())}
           {tool('New session', ic(Plus), () => handle()?.newSession())}
         </>
@@ -1302,6 +1309,11 @@ export function App() {
       cmd('chat-sessions', 'Chat: pick a session', () => chatRefs.current.get(focusedChat.id)?.pickSession(), { icon: <MessageSquare strokeWidth={2} />, keywords: ['history', 'resume', 'thread'] })
       cmd('chat-new-session', 'Chat: new session', () => chatRefs.current.get(focusedChat.id)?.newSession(), { icon: <MessageSquare strokeWidth={2} />, keywords: ['fresh', 'conversation'] })
       cmd('chat-stop', 'Chat: stop the turn', () => chatRefs.current.get(focusedChat.id)?.interrupt(), { icon: <MessageSquare strokeWidth={2} />, keywords: ['interrupt', 'cancel'] })
+      cmd('chat-find', 'Chat: find in the conversation', () => chatRefs.current.get(focusedChat.id)?.find(), { icon: <Search strokeWidth={2} />, keywords: ['search'], keys: ['Ctrl', 'F'] })
+      cmd('chat-focus', focusedChat.chat?.focus ? 'Chat: show every step' : 'Chat: focus view (only prompts and replies)', () => chatRefs.current.get(focusedChat.id)?.toggleFocus(), { icon: <ListCollapse strokeWidth={2} />, keywords: ['fold', 'steps', 'tools', 'hide'] })
+      cmd('chat-rename', 'Chat: rename the session', () => chatRefs.current.get(focusedChat.id)?.rename(), { icon: <PenLine strokeWidth={2} />, keywords: ['title', 'name'] })
+      cmd('chat-copy', 'Chat: copy the conversation as Markdown', () => chatRefs.current.get(focusedChat.id)?.copyConversation(), { icon: <Copy strokeWidth={2} />, keywords: ['export', 'clipboard'] })
+      cmd('chat-save', 'Chat: save the conversation…', () => chatRefs.current.get(focusedChat.id)?.saveConversation(), { icon: <Save strokeWidth={2} />, keywords: ['export', 'file', 'markdown'] })
     }
     // Snippets act on the focused terminal pane (they used to be a header
     // menu; 4.3-plan.md item 5). No focused terminal, no snippets.

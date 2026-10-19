@@ -159,6 +159,57 @@ export function countChanges(lines) {
   return { added, removed }
 }
 
+/**
+ * What changed inside a removed line and the added line that replaced it,
+ * word by word, so the diff can mark the changed words rather than the whole
+ * line (the extension's Monaco diff marks characters). Words, runs of spaces
+ * and single punctuation marks are the tokens. Past `maxCells` token pairs,
+ * or when the lines share less than a fifth of their tokens, both lines are
+ * one changed segment: a rewrite reads better whole.
+ * @typedef {{ text: string, changed: boolean }} WordSegment
+ * @param {string} before
+ * @param {string} after
+ * @returns {{ left: WordSegment[], right: WordSegment[] }}
+ */
+export function wordDiff(before, after, maxCells = 40_000) {
+  const a = tokens(before)
+  const b = tokens(after)
+  const whole = { left: before ? [{ text: before, changed: true }] : [], right: after ? [{ text: after, changed: true }] : [] }
+  if (!a.length || !b.length || a.length * b.length > maxCells) return whole
+  const w = b.length + 1
+  const lcs = new Uint16Array((a.length + 1) * w)
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) lcs[i * w + j] = a[i] === b[j] ? lcs[(i + 1) * w + j + 1] + 1 : Math.max(lcs[(i + 1) * w + j], lcs[i * w + j + 1])
+  }
+  const left = []
+  const right = []
+  const push = (list, text, changed) => {
+    const last = list[list.length - 1]
+    if (last && last.changed === changed) last.text += text
+    else list.push({ text, changed })
+  }
+  let i = 0
+  let j = 0
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      push(left, a[i++], false)
+      push(right, b[j++], false)
+    } else if (lcs[(i + 1) * w + j] >= lcs[i * w + j + 1]) push(left, a[i++], true)
+    else push(right, b[j++], true)
+  }
+  while (i < a.length) push(left, a[i++], true)
+  while (j < b.length) push(right, b[j++], true)
+  // Shared spaces alone do not make two lines alike: measure the shared words.
+  const words = (list) => list.filter((s) => !s.changed).reduce((n, s) => n + (s.text.match(/[^\s]+/g)?.length ?? 0), 0)
+  const all = (text) => text.match(/\w+|[^\w\s]/g)?.length ?? 0
+  if (words(left) * 5 < Math.max(all(before), all(after))) return whole
+  return { left, right }
+}
+
+function tokens(text) {
+  return typeof text === 'string' && text ? text.match(/\w+|\s+|[^\w\s]/g) ?? [] : []
+}
+
 /** The edit row's summary line, in the extension's words ("Added 2 lines, removed 1 line", "Modified"). */
 export function changeSummary({ added, removed }) {
   const lines = (n) => `${n} line${n === 1 ? '' : 's'}`
@@ -166,4 +217,35 @@ export function changeSummary({ added, removed }) {
   if (added) return `Added ${lines(added)}`
   if (removed) return `Removed ${lines(removed)}`
   return 'Modified'
+}
+
+/** A path relative to a folder with forward slashes, case-insensitively on the prefix (what `git apply` reads); a path outside it is returned as is. */
+export function relTo(path, cwd) {
+  const norm = (x) => String(x ?? '').replace(/\\/g, '/')
+  const p = norm(path)
+  const root = norm(cwd).replace(/\/+$/, '')
+  return root && p.toLowerCase().startsWith(`${root.toLowerCase()}/`) ? p.slice(root.length + 1) : p
+}
+
+/**
+ * One file's change as a git patch, for a Codex turn's Undo when the server's
+ * aggregated turn diff is not at hand: an update's hunks under file headers,
+ * an add or a delete as one whole-file hunk. A diff that already carries
+ * headers passes through; anything else is null.
+ */
+export function filePatch(rel, kind, diff) {
+  if (!rel) return null
+  const text = String(diff ?? '')
+  if (kind === 'add' || kind === 'delete') {
+    const lines = text.replace(/\n$/, '').split('\n')
+    const mark = kind === 'add' ? '+' : '-'
+    const hunk = `@@ ${kind === 'add' ? `-0,0 +1,${lines.length}` : `-1,${lines.length} +0,0`} @@\n${lines.map((l) => mark + l).join('\n')}\n`
+    return kind === 'add'
+      ? `diff --git a/${rel} b/${rel}\nnew file mode 100644\n--- /dev/null\n+++ b/${rel}\n${hunk}`
+      : `diff --git a/${rel} b/${rel}\ndeleted file mode 100644\n--- a/${rel}\n+++ /dev/null\n${hunk}`
+  }
+  const body = text.endsWith('\n') ? text : `${text}\n`
+  if (/^(diff --git|--- )/m.test(body)) return body
+  if (!/^@@ /m.test(body)) return null
+  return `diff --git a/${rel} b/${rel}\n--- a/${rel}\n+++ b/${rel}\n${body}`
 }

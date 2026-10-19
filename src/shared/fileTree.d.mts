@@ -2,6 +2,8 @@ export const IGNORED_DIRS: readonly string[]
 export const MAX_DIR_ENTRIES: number
 export const MAX_TEXT_BYTES: number
 export const MAX_IMAGE_BYTES: number
+export const MAX_PICKER_FILES: number
+export function parseFileList(stdout: string, max?: number): string[]
 
 export interface DirEntry { name: string; kind: 'dir' | 'file' }
 /** What a persisted file pane carries: the file it shows. */

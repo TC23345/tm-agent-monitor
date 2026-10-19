@@ -16,26 +16,22 @@ import { EventEmitter } from 'node:events'
 import { Duplex } from 'node:stream'
 import WebSocket from 'ws'
 import {
-  approvalResponse, foldNotification, foldServerRequest, foldTurnItems, questionResponse, threadSummary, threadToTranscript
+  APPROVAL_METHODS, CODEX_MODES, CUSTOM_MODE, approvalResponse, codexModeId, foldNotification, foldServerRequest, foldTurnItems, mergeLimits, questionResponse, threadSummary, threadToTranscript,
+  type CodexMode
 } from './fold.mjs'
 import { LineSplitter, PendingCalls, errorResponseLine, notificationLine, parseIncoming, requestLine, responseLine, type Incoming } from './rpc.mjs'
 import {
-  answerQuestion as answerQuestionItem, beginTurn, decideApproval, setStatus, summarizeAttachments,
-  type ApprovalChoice, type Attachment, type ChatConfigPatch, type ChatOptions, type ModelOption, type ModeOption, type SessionSummary, type Transcript
+  answerQuestion as answerQuestionItem, appendItem, beginTurn, decideApproval, enqueue, firstLine, setStatus, summarizeAttachments, unqueue, updateItem,
+  type ApprovalChoice, type Attachment, type ChatConfigPatch, type ChatOptions, type CommandOption, type ContextUsage, type McpRequest, type McpServer, type ModelOption,
+  type ReviewTarget, type SessionSummary, type Transcript
 } from '../shared/chatModel.mjs'
+import { fmtTokens, limitLines } from '../shared/present.mjs'
+import { filePatch, relTo } from '../shared/diff.mjs'
 import { resolveCodex } from '../shared/findCli.mjs'
+import { killProcessTree } from '../shared/processTree.mjs'
 
-/**
- * The approval presets the composer offers for Codex: its own trio
- * (read-only, auto, full access) spelled as the `turn/start` overrides
- * `approvalPolicy` and `sandboxPolicy` (generated types, v2/TurnStartParams).
- * Until the user picks one, the user's config.toml decides.
- */
-export const CODEX_MODES: (ModeOption & { approvalPolicy: string; sandboxPolicy: Record<string, unknown> })[] = [
-  { id: 'read-only', label: 'Read only', description: 'Codex can read files; it asks before editing or running anything else', approvalPolicy: 'on-request', sandboxPolicy: { type: 'readOnly', networkAccess: false } },
-  { id: 'auto', label: 'Auto', description: 'Codex edits and runs commands in this folder and asks before anything outside it', approvalPolicy: 'on-request', sandboxPolicy: { type: 'workspaceWrite', writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false } },
-  { id: 'full-access', label: 'Full access', description: 'Codex edits files and runs commands anywhere without asking', approvalPolicy: 'never', sandboxPolicy: { type: 'dangerFullAccess' } }
-]
+/** The permission menu, in the Codex extension's words; defined with the fold, which maps thread settings back onto it. */
+export { CODEX_MODES } from './fold.mjs'
 
 /**
  * own: spawn `codex app-server` as our child. daemon: make sure the user's
@@ -164,7 +160,8 @@ export class CodexAppServer extends EventEmitter {
     }
     this.initialized = ready.then(() => this.request('initialize', {
       clientInfo: { name: this.options.clientName ?? 'tm-chat-panes', title: 'TaylorMade Agent Monitor', version: this.options.clientVersion ?? '0.1.0' },
-      capabilities: null
+      // As the Codex extension does: plan mode, background terminals and predictions are experimental methods.
+      capabilities: { experimentalApi: true, requestAttestation: false }
     })).then((info) => {
       this.info = (info ?? null) as Record<string, unknown> | null
       this.write(notificationLine('initialized', {}))
@@ -297,10 +294,13 @@ export class CodexAppServer extends EventEmitter {
     })
   }
 
-  startTurn(threadId: string, input: unknown[], opts: { model?: string | null; effort?: string | null; cwd?: string | null; approvalPolicy?: string | null; sandboxPolicy?: Record<string, unknown> | null } = {}): Promise<{ turn: any }> {
+  startTurn(threadId: string, input: unknown[], opts: { model?: string | null; effort?: string | null; cwd?: string | null; approvalPolicy?: string | null; sandboxPolicy?: Record<string, unknown> | null; approvalsReviewer?: string | null; serviceTier?: string | null; summary?: string | null } = {}): Promise<{ turn: any }> {
     return this.request('turn/start', {
       threadId, input, model: opts.model ?? null, effort: opts.effort ?? null, cwd: opts.cwd ?? null,
-      approvalPolicy: opts.approvalPolicy ?? null, sandboxPolicy: opts.sandboxPolicy ?? null
+      approvalPolicy: opts.approvalPolicy ?? null, sandboxPolicy: opts.sandboxPolicy ?? null,
+      ...(opts.approvalsReviewer ? { approvalsReviewer: opts.approvalsReviewer } : {}),
+      ...(opts.serviceTier ? { serviceTier: opts.serviceTier } : {}),
+      ...(opts.summary ? { summary: opts.summary } : {})
     })
   }
 
@@ -311,11 +311,21 @@ export class CodexAppServer extends EventEmitter {
     if (this.modelCache) return this.modelCache
     await this.start()
     const res = await this.request<{ data: any[] }>('model/list', { limit: 100, includeHidden: false })
-    this.modelCache = (res.data ?? []).filter((m) => !m.hidden).map((m) => ({
-      id: String(m.model ?? m.id), label: String(m.displayName ?? m.model ?? m.id), description: m.description || undefined,
-      efforts: (m.supportedReasoningEfforts ?? []).map((e: any) => String(e.reasoningEffort)).filter(Boolean),
-      defaultEffort: m.defaultReasoningEffort ?? null, model: String(m.model ?? m.id)
-    }))
+    this.modelCache = (res.data ?? []).filter((m) => !m.hidden).map((m) => {
+      // Fast is the model's `priority` service tier (composer.intelligencePicker.fastMode); its description says what it costs.
+      const fast = (m.serviceTiers ?? []).find((s: any) => s?.id === 'priority')
+      return {
+        id: String(m.model ?? m.id), label: String(m.displayName ?? m.model ?? m.id), description: m.description || undefined,
+        efforts: (m.supportedReasoningEfforts ?? []).map((e: any) => String(e.reasoningEffort)).filter(Boolean),
+        defaultEffort: m.defaultReasoningEffort ?? null, model: String(m.model ?? m.id),
+        ...(fast ? { fastMode: true, fastLabel: String(fast.description ?? fast.name ?? 'Faster') } : {})
+      }
+    })
+    return this.modelCache
+  }
+
+  /** The models already listed on this connection, if any (labels for the model-changed row). */
+  cachedModels(): ModelOption[] | null {
     return this.modelCache
   }
 
@@ -333,7 +343,9 @@ export class CodexAppServer extends EventEmitter {
     } catch {
       /* already gone */
     }
+    // Still running after its input closed: end it with the MCP servers it started (a plain kill orphans them on Windows).
     const killer = setTimeout(() => {
+      killProcessTree(proc.pid)
       try {
         proc.kill()
       } catch {
@@ -343,6 +355,26 @@ export class CodexAppServer extends EventEmitter {
     proc.once('exit', () => clearTimeout(killer))
   }
 }
+
+/**
+ * The Codex composer's slash commands. The app-server has no slash commands
+ * of its own (they are the TUI's and the extension's), so each is the pane's,
+ * mapped onto an app-server call (composer.*SlashCommand in the extension).
+ */
+export const CODEX_COMMANDS: CommandOption[] = [
+  { name: 'compact', description: 'Compact this chat’s context', local: true },
+  { name: 'review', description: 'Review uncommitted changes, or compare against a branch', argumentHint: '[base branch]', local: true },
+  { name: 'plan', description: 'Turn plan mode on or off', local: true },
+  { name: 'fork', description: 'Continue in a new chat from here', local: true },
+  { name: 'new', description: 'Start a blank chat in the same workspace', local: true },
+  { name: 'init', description: 'Create an AGENTS.md file with instructions for Codex', local: true },
+  { name: 'status', description: 'Show the chat ID, context usage and rate limits', local: true },
+  { name: 'mcp', description: 'Show MCP server status', local: true },
+  { name: 'side', description: 'Ask a quick side question without interrupting', local: true }
+]
+
+/** What a side question asks the throwaway fork, so it answers from the conversation without acting. */
+const SIDE_PREFIX = 'Answer this side question briefly from what you already know about this conversation and folder. Do not run commands, edit files or call tools.\n\n'
 
 /**
  * One pane's thread on a server. Holds the transcript, folds the thread's
@@ -356,9 +388,14 @@ export class CodexThread extends EventEmitter {
   readonly server: CodexAppServer
   private turnId: string | null = null
   /** The composer's picks; sent with every turn (they persist server-side for the turns after too). */
-  private overrides: { model?: string | null; effort?: string | null; mode?: (typeof CODEX_MODES)[number] } = {}
+  private overrides: { model?: string | null; effort?: string | null; mode?: CodexMode; serviceTier?: string } = {}
   private approvals = new Map<string, ServerRequest>()
   private questions = new Map<string, ServerRequest>()
+  /** Attachments of prompts queued while a turn runs, by queued item id. */
+  private queuedFiles = new Map<string, Attachment[]>()
+  /** The latest aggregated unified diff of each turn (`turn/diff/updated`), for Undo. */
+  private turnDiffs = new Map<string, string>()
+  private backgroundTimer: ReturnType<typeof setTimeout> | null = null
   private onNotification = (n: Notification) => this.handleNotification(n)
   private onRequest = (r: ServerRequest) => this.handleServerRequest(r)
   private onExit = () => this.update(setStatus(this.transcript, 'closed', 'Codex exited'))
@@ -381,9 +418,22 @@ export class CodexThread extends EventEmitter {
 
   private handleNotification(n: Notification) {
     const p = (n.params ?? {}) as any
-    if (n.method === 'turn/started' && p.threadId === this.threadId) this.turnId = p.turn?.id ?? this.turnId
-    if (n.method === 'turn/completed' && p.threadId === this.threadId) this.turnId = null
+    // Every pane shares the connection: traffic that names another thread (a sibling pane, a side question's fork) is not ours.
+    const named = p.threadId ?? p.thread?.id
+    if (named && named !== this.threadId) return
+    const mine = p.threadId === this.threadId
+    if (n.method === 'turn/started' && mine) this.turnId = p.turn?.id ?? this.turnId
+    if (n.method === 'turn/diff/updated' && mine && typeof p.diff === 'string' && p.turnId) this.turnDiffs.set(p.turnId, p.diff.slice(0, MAX_DIFF))
     this.update(foldNotification(this.transcript, n))
+    if (!mine) return
+    if (n.method === 'turn/completed') {
+      this.turnId = null
+      this.refreshBackground()
+      void this.requestPrediction(p.turn?.id)
+      // The next queued prompt goes as its own turn, unless an interrupt paused the queue.
+      if (this.transcript.queue.length && !this.transcript.queuePaused) void this.sendQueued()
+    }
+    if (n.method === 'item/completed' && p.item?.type === 'commandExecution') this.refreshBackground()
   }
 
   private handleServerRequest(r: ServerRequest) {
@@ -407,23 +457,55 @@ export class CodexThread extends EventEmitter {
     this.server.respondError(r.id, `${r.method} is not supported by this client`)
   }
 
-  /** Start a fresh thread or rejoin the transcript's. */
+  /** Start a fresh thread or rejoin the transcript's, then read the account's rate limits once. */
   async open(opts: Omit<StartThreadOptions, 'cwd'> = {}): Promise<void> {
     const cwd = this.transcript.cwd
     const res = this.threadId ? await this.server.resumeThread(this.threadId, { cwd, ...opts }) : await this.server.startThread({ cwd, ...opts })
     this.threadId = res.thread?.id ?? this.threadId
-    this.update({ ...this.transcript, sessionId: this.threadId, model: res.model ?? this.transcript.model, title: res.thread?.name ?? this.transcript.title })
+    // The start/resume answer carries the thread's effective settings: show its real mode, effort, Fast and plan mode at once.
+    const r = res as any
+    this.update({
+      ...this.transcript, sessionId: this.threadId, model: res.model ?? this.transcript.model, title: res.thread?.name ?? this.transcript.title,
+      ...(r.approvalPolicy ? { permissionMode: codexModeId({ approvalPolicy: r.approvalPolicy, sandboxPolicy: r.sandbox, approvalsReviewer: r.approvalsReviewer }) } : {}),
+      ...(r.reasoningEffort !== undefined ? { effort: r.reasoningEffort ?? null } : {}),
+      ...(r.serviceTier !== undefined ? { fastMode: r.serviceTier === 'priority' ? 'on' as const : 'off' as const } : {}),
+      ...(r.collaborationMode ? { planMode: r.collaborationMode.mode === 'plan' } : {})
+    })
+    void this.readLimits()
+    this.refreshBackground()
   }
 
+  private async readLimits(): Promise<void> {
+    try {
+      const res = await this.server.request<{ rateLimits?: unknown }>('account/rateLimits/read', {})
+      this.update({ ...this.transcript, limits: mergeLimits(this.transcript.limits, res.rateLimits) })
+    } catch {
+      /* an API-key login has no plan limits */
+    }
+  }
+
+  /** Send, or queue while a turn runs (the extension's queue: each queued prompt is its own next turn; Steer sends one now). */
   async send(text: string, attachments: Attachment[] = [], opts: { model?: string | null; effort?: string | null } = {}): Promise<void> {
     if (!this.threadId) await this.open()
     const at = Date.now()
-    this.update(beginTurn({ ...this.transcript, items: [...this.transcript.items, { kind: 'user', id: `local:${at}`, text, attachments: summarizeAttachments(attachments), at }] }, at))
+    const busy = this.transcript.status === 'running' || this.transcript.status === 'waiting'
+    if (busy || (this.transcript.queuePaused && this.transcript.queue.length)) {
+      const id = `queued:${at}`
+      this.queuedFiles.set(id, attachments)
+      this.update(enqueue(this.transcript, { kind: 'user', id, text, attachments: summarizeAttachments(attachments), at }))
+      return
+    }
+    await this.startTurn(text, attachments, opts, at)
+  }
+
+  private async startTurn(text: string, attachments: Attachment[], opts: { model?: string | null; effort?: string | null }, at: number): Promise<void> {
+    this.update(beginTurn({ ...this.transcript, pendingPlan: null, items: [...this.transcript.items, { kind: 'user', id: `local:${at}`, text, attachments: summarizeAttachments(attachments), at }] }, at))
     try {
       const o = this.overrides
       const res = await this.server.startTurn(this.threadId!, userInputs(text, attachments), {
         model: opts.model ?? o.model ?? null, effort: opts.effort ?? o.effort ?? null,
-        approvalPolicy: o.mode?.approvalPolicy ?? null, sandboxPolicy: o.mode?.sandboxPolicy ?? null
+        approvalPolicy: o.mode?.approvalPolicy ?? null, sandboxPolicy: o.mode?.sandboxPolicy ?? null, approvalsReviewer: o.mode?.approvalsReviewer ?? null,
+        serviceTier: o.serviceTier ?? null, summary: 'auto'
       })
       this.turnId = res.turn?.id ?? this.turnId
     } catch (err) {
@@ -432,15 +514,276 @@ export class CodexThread extends EventEmitter {
     }
   }
 
+  /** The queue's head as the next turn. */
+  private async sendQueued(): Promise<void> {
+    const next = this.transcript.queue[0]
+    if (!next) return
+    const files = this.queuedFiles.get(next.id) ?? []
+    this.queuedFiles.delete(next.id)
+    this.update(unqueue(this.transcript, next.id))
+    await this.startTurn(next.text, files, {}, Date.now()).catch(() => { /* the transcript shows the error */ })
+  }
+
+  /** Take a queued prompt back. */
+  removeQueued(itemId: string): boolean {
+    if (!this.transcript.queue.some((x) => x.id === itemId)) return false
+    this.queuedFiles.delete(itemId)
+    let t = unqueue(this.transcript, itemId)
+    if (!t.queue.length) t = { ...t, queuePaused: false }
+    this.update(t)
+    return true
+  }
+
+  /**
+   * Steer: send a queued prompt into the running turn now, without
+   * interrupting it (`turn/steer`, composer.queuedMessage.sendNow). With no
+   * turn running it simply goes next.
+   */
+  async steer(itemId: string): Promise<void> {
+    const item = this.transcript.queue.find((x) => x.id === itemId)
+    if (!item) return
+    const files = this.queuedFiles.get(itemId) ?? []
+    if (!this.turnId || !this.threadId) {
+      this.queuedFiles.delete(itemId)
+      this.update(unqueue(this.transcript, itemId))
+      await this.startTurn(item.text, files, {}, Date.now())
+      return
+    }
+    await this.server.request('turn/steer', { threadId: this.threadId, input: userInputs(item.text, files), expectedTurnId: this.turnId })
+    this.queuedFiles.delete(itemId)
+    // The server echoes the steered message; it lands on this row (same text) instead of doubling.
+    const t = unqueue(this.transcript, itemId)
+    this.update({ ...t, items: [...t.items, { ...item, id: `local:${Date.now()}`, steered: true, turnId: this.turnId }] })
+  }
+
+  /** After an interrupt the queue waits (composer.queuedMessage.interruptedQueue); Resume sends its head. */
+  async resumeQueue(): Promise<void> {
+    this.update({ ...this.transcript, queuePaused: false })
+    if (this.transcript.status !== 'running' && this.transcript.status !== 'waiting') await this.sendQueued()
+  }
+
   async interrupt(): Promise<void> {
     if (!this.threadId || !this.turnId) return
+    if (this.transcript.queue.length) this.update({ ...this.transcript, queuePaused: true })
     await this.server.interruptTurn(this.threadId, this.turnId)
   }
 
-  /** Pick a model, an effort or an approval preset; they ride on the next `turn/start`. */
+  /**
+   * A shell line the user typed (`!git status`): `thread/shellCommand`, which
+   * runs it in the thread's shell outside the sandbox, the way the Codex TUI's
+   * `!` does. Its output arrives as a command row.
+   */
+  async shell(command: string): Promise<void> {
+    if (!this.threadId) await this.open()
+    await this.server.request('thread/shellCommand', { threadId: this.threadId, command })
+  }
+
+  /** `/review`: a code review of the uncommitted changes or against a base branch, inline on this thread. */
+  async review(target: ReviewTarget): Promise<void> {
+    if (!this.threadId) await this.open()
+    const at = Date.now()
+    const label = target.type === 'baseBranch' ? `Review against ${target.branch}` : 'Review uncommitted changes'
+    this.update(beginTurn({ ...this.transcript, items: [...this.transcript.items, { kind: 'user', id: `review:${at}`, text: label, at }] }, at))
+    try {
+      const res = await this.server.request<{ turn?: { id?: string } }>('review/start', { threadId: this.threadId, target, delivery: 'inline' })
+      this.turnId = res.turn?.id ?? this.turnId
+    } catch (err) {
+      this.update(setStatus(this.transcript, 'error', (err as Error).message))
+      throw err
+    }
+  }
+
+  /**
+   * Fork the thread through the turn before the prompt `itemId` (`thread/fork`
+   * with `lastTurnId`), so that prompt can be edited and sent again. Null when
+   * it was the first prompt: start a fresh thread with it instead. With no
+   * `itemId`, fork the whole thread (*Continue in new chat*).
+   */
+  async fork(itemId?: string): Promise<{ sessionId: string | null; prompt: string }> {
+    if (!itemId) {
+      if (!this.threadId) return { sessionId: null, prompt: '' }
+      const res = await this.server.request<{ thread?: { id?: string } }>('thread/fork', { threadId: this.threadId, excludeTurns: true })
+      return { sessionId: res.thread?.id ?? null, prompt: '' }
+    }
+    const items = this.transcript.items
+    const at = items.findIndex((x) => x.id === itemId && x.kind === 'user')
+    const prompt = at >= 0 && items[at]?.kind === 'user' ? (items[at] as { text: string }).text : ''
+    let lastTurnId: string | undefined
+    for (let i = at - 1; i >= 0 && !lastTurnId; i--) {
+      const x = items[i]
+      if (x?.kind === 'user' && x.turnId) lastTurnId = x.turnId
+    }
+    if (!this.threadId || !lastTurnId) return { sessionId: null, prompt }
+    const res = await this.server.request<{ thread?: { id?: string } }>('thread/fork', { threadId: this.threadId, lastTurnId, excludeTurns: true })
+    return { sessionId: res.thread?.id ?? null, prompt }
+  }
+
+  /**
+   * A side question (the extension's side chat): an ephemeral fork of this
+   * thread answers it, read-only and without approvals, and is dropped after.
+   * The main thread is never interrupted.
+   */
+  async sideQuestion(question: string): Promise<string | null> {
+    if (!this.threadId) throw new Error('Send a message first — a side question is asked about the conversation so far')
+    const fork = await this.server.request<{ thread?: { id?: string } }>('thread/fork', { threadId: this.threadId, ephemeral: true, excludeTurns: true })
+    const forkId = fork.thread?.id
+    if (!forkId) return null
+    return new Promise<string | null>((resolve) => {
+      let answer = ''
+      const done = (text: string | null) => {
+        clearTimeout(timer)
+        this.server.off('notification', listen)
+        this.server.off('server-request', refuse)
+        void this.server.request('thread/unsubscribe', { threadId: forkId }).catch(() => undefined)
+        resolve(text)
+      }
+      const listen = (n: Notification) => {
+        const p = (n.params ?? {}) as any
+        if (p.threadId !== forkId) return
+        if (n.method === 'item/completed' && p.item?.type === 'agentMessage' && p.item.text) answer = p.item.text
+        if (n.method === 'turn/completed') done(answer.trim() || null)
+      }
+      // The fork must not act: anything it asks to do is declined.
+      const refuse = (r: ServerRequest) => {
+        const p = (r.params ?? {}) as any
+        if ((p.threadId ?? p.conversationId) !== forkId) return
+        if (APPROVAL_METHODS.has(r.method)) this.server.respond(r.id, approvalResponse(r.method, 'deny', r.params))
+        else this.server.respondError(r.id, 'not available in a side question')
+      }
+      const timer = setTimeout(() => done(answer.trim() || null), 120_000)
+      this.server.on('notification', listen)
+      this.server.on('server-request', refuse)
+      this.server.startTurn(forkId, userInputs(SIDE_PREFIX + question), {
+        approvalPolicy: 'never', sandboxPolicy: { type: 'readOnly', networkAccess: false }, effort: 'low', summary: 'none'
+      }).catch(() => done(null))
+    })
+  }
+
+  async rename(title: string): Promise<void> {
+    if (!this.threadId) throw new Error('The thread has no id yet — send a message first')
+    await this.server.request('thread/name/set', { threadId: this.threadId, name: title })
+    this.update({ ...this.transcript, title })
+  }
+
+  /** Compact the thread's context now (`thread/compact/start`); a contextCompaction item reports it. */
+  async compact(): Promise<void> {
+    if (!this.threadId) return
+    this.update({ ...this.transcript, activity: 'compacting' })
+    try {
+      await this.server.request('thread/compact/start', { threadId: this.threadId })
+    } catch (err) {
+      this.update({ ...this.transcript, activity: null })
+      throw err
+    }
+  }
+
+  /** The context as the pane's breakdown shows it: the last call's tokens against the window, plus the plan's rate limits. */
+  async contextUsage(): Promise<ContextUsage> {
+    await this.readLimits()
+    const t = this.transcript
+    const used = t.usage.contextTokens ?? 0
+    const max = t.usage.contextWindow ?? 0
+    return {
+      total: used, max, percent: max ? Math.round((used / max) * 100) : 0,
+      categories: max ? [{ name: 'Conversation', tokens: used, kind: 'messages' }, { name: 'Free space', tokens: Math.max(0, max - used), kind: 'free' }] : [],
+      memoryFiles: [], limits: t.limits
+    }
+  }
+
+  /** `/status`: the chat id, the model, the context and the rate limits as one row (composer.statusPlain.*). */
+  async status(): Promise<void> {
+    await this.readLimits()
+    const t = this.transcript
+    const used = t.usage.contextTokens
+    const max = t.usage.contextWindow
+    const lines = [
+      `Session: ${t.sessionId ?? 'not started'}`,
+      `Model: ${t.model ?? 'default'}${t.effort ? ` · ${t.effort}` : ''}`,
+      used && max ? `Context: ${Math.max(0, 100 - Math.round((used / max) * 100))}% left (${fmtTokens(used)} used / ${fmtTokens(max)})` : 'Context: nothing used yet',
+      ...limitLines(t.limits)
+    ]
+    this.update(appendItem(t, { kind: 'system', id: `status:${Date.now()}`, text: 'Status', level: 'info', at: Date.now(), variant: 'status', detail: lines.join('\n') }))
+  }
+
+  /** MCP servers as the panel lists them (`mcpServerStatus/list`). Codex keeps their switches in config.toml, so the panel only reads. */
+  async mcp(req: McpRequest): Promise<McpServer[]> {
+    if (req.op !== 'list') throw new Error('Codex keeps its MCP servers in config.toml — change them there or with `codex mcp` in a terminal')
+    const res = await this.server.request<{ data?: any[] }>('mcpServerStatus/list', { detail: 'toolsAndAuthOnly', limit: 100, ...(this.threadId ? { threadId: this.threadId } : {}) })
+    return (res.data ?? []).map((s) => ({
+      name: String(s.name),
+      status: s.runtimeStatus === 'connected' ? 'connected' : s.runtimeStatus === 'failed' || s.toolsError ? 'failed' : s.runtimeStatus === 'authenticationRequired' || s.authStatus === 'notLoggedIn' ? 'needs-auth' : s.runtimeStatus === 'disabled' ? 'disabled' : 'pending',
+      ...(s.toolsError ? { error: String(s.toolsError) } : {}),
+      tools: Object.keys(s.tools ?? {}).length
+    }))
+  }
+
+  /** Background terminals still running after their command row (experimental `thread/backgroundTerminals/list`), debounced. */
+  private refreshBackground(): void {
+    if (!this.threadId) return
+    if (this.backgroundTimer) clearTimeout(this.backgroundTimer)
+    this.backgroundTimer = setTimeout(() => {
+      this.backgroundTimer = null
+      this.server.request<{ data?: any[] }>('thread/backgroundTerminals/list', { threadId: this.threadId, limit: 50 })
+        .then((res) => {
+          const background = (res.data ?? []).map((b) => ({ id: String(b.processId), description: firstLine(String(b.command ?? ''), 80), type: 'terminal', toolUseId: b.itemId ? String(b.itemId) : undefined }))
+          if (JSON.stringify(background) !== JSON.stringify(this.transcript.background)) this.update({ ...this.transcript, background })
+        })
+        .catch(() => { /* a server without the experimental API */ })
+    }, 600)
+  }
+
+  /** Stop a background terminal (`thread/backgroundTerminals/terminate`). */
+  async stopTask(processId: string): Promise<void> {
+    if (!this.threadId) return
+    await this.server.request('thread/backgroundTerminals/terminate', { threadId: this.threadId, processId })
+    this.refreshBackground()
+  }
+
+  /** Ask for the suggested next prompt after a turn (experimental `thread/prediction/request`); it arrives as `thread/prediction/updated`. */
+  private async requestPrediction(turnId: string | undefined): Promise<void> {
+    if (!turnId || !this.threadId) return
+    await this.server.request('thread/prediction/request', { threadId: this.threadId, sourceTurnId: turnId }).catch(() => undefined)
+  }
+
+  /**
+   * The unified diff a turn made, for Undo and Reapply: the server's
+   * aggregated `turn/diff/updated` when this session saw the turn, else one
+   * rebuilt from the turn's file changes (a stored thread carries no turn
+   * diff). Paths are relative to the thread's folder.
+   */
+  turnDiff(turnItemId: string): string | null {
+    const items = this.transcript.items
+    const end = items.findIndex((x) => x.id === turnItemId)
+    const turn = items[end]
+    if (!turn || turn.kind !== 'turn') return null
+    if (turn.turnId && this.turnDiffs.has(turn.turnId)) return this.turnDiffs.get(turn.turnId)!
+    let start = end
+    while (start > 0 && (items[start - 1]!.kind !== 'user' || (items[start - 1] as { steered?: boolean }).steered)) start--
+    const patches: string[] = []
+    for (const x of items.slice(start, end)) {
+      if (x.kind !== 'tool' || x.view !== 'edit' || x.status !== 'done') continue
+      for (const e of x.edits ?? []) {
+        const p = filePatch(relTo(e.path || x.path || '', this.transcript.cwd), e.kind, e.diff ?? '')
+        if (p) patches.push(p)
+      }
+    }
+    return patches.length ? patches.join('') : null
+  }
+
+  /** Mark a turn's footer undone (or reapplied). */
+  markUndone(turnItemId: string, undone: boolean): void {
+    this.update(updateItem(this.transcript, turnItemId, (x) => (x.kind === 'turn' ? { ...x, undone } : x)))
+  }
+
+  /** Pick a model, an effort, a preset, Fast or plan mode; they ride on the next `turn/start` (plan mode on `thread/settings/update`). */
   async configure(patch: ChatConfigPatch): Promise<void> {
     let t = this.transcript
-    if (patch.model !== undefined && patch.model !== null) {
+    if (patch.model !== undefined && patch.model !== null && patch.model !== t.model) {
+      // Changing models mid-conversation is the extension's one warning (localConversation.modelChanged).
+      if (t.items.some((x) => x.kind === 'user') && t.model) {
+        const label = (id: string) => this.server.cachedModels()?.find((m) => m.id === id || m.model === id)?.label ?? id
+        t = appendItem(t, { kind: 'system', id: `model:${Date.now()}`, text: `Model changed from ${label(t.model)} to ${label(patch.model)}.`, level: 'info', at: Date.now(), variant: 'model', detail: 'Changing models mid-conversation can degrade performance, and the context may compact automatically.' })
+      }
       this.overrides.model = patch.model
       t = { ...t, model: patch.model }
     }
@@ -448,19 +791,38 @@ export class CodexThread extends EventEmitter {
       this.overrides.effort = patch.effort
       t = { ...t, effort: patch.effort ?? null }
     }
-    if (patch.permissionMode !== undefined && patch.permissionMode !== null) {
+    if (patch.permissionMode !== undefined && patch.permissionMode !== null && patch.permissionMode !== 'custom') {
       const mode = CODEX_MODES.find((m) => m.id === patch.permissionMode)
       if (!mode) throw new Error(`unknown Codex mode ${patch.permissionMode}`)
       this.overrides.mode = mode
       t = { ...t, permissionMode: mode.id }
     }
+    if (patch.fastMode !== undefined) {
+      this.overrides.serviceTier = patch.fastMode ? 'priority' : 'default'
+      t = { ...t, fastMode: patch.fastMode ? 'on' : 'off' }
+    }
     this.update(t)
+    if (patch.planMode !== undefined) {
+      if (!this.threadId) await this.open()
+      const model = this.overrides.model ?? this.transcript.model
+      await this.server.request('thread/settings/update', {
+        threadId: this.threadId,
+        collaborationMode: { mode: patch.planMode ? 'plan' : 'default', settings: { model, reasoning_effort: this.overrides.effort ?? this.transcript.effort ?? null, developer_instructions: null } }
+      })
+      this.update({ ...this.transcript, planMode: patch.planMode, ...(patch.planMode ? {} : { pendingPlan: null }) })
+    }
   }
 
-  /** The composer's menus. Codex's slash commands are its TUI's, not the app-server's, so there are none here. */
+  /** The composer's menus: the extension's permission set, Fast where the model has the tier, plan mode, the pane's slash commands. */
   async options(): Promise<ChatOptions> {
     const models = await this.server.listModels().catch(() => [])
-    return { models, modes: CODEX_MODES.map(({ id, label, description }) => ({ id, label, description })), commands: [] }
+    const current = models.find((m) => m.id === this.transcript.model || m.model === this.transcript.model)
+    const modes = CODEX_MODES.map(({ id, label, description, confirm }) => ({ id, label, description, ...(confirm ? { confirm } : {}) }))
+    if (this.transcript.permissionMode === 'custom') modes.push(CUSTOM_MODE)
+    return {
+      models, modes, commands: CODEX_COMMANDS, planMode: true, shell: true,
+      fastMode: !!current?.fastMode, ...(current?.fastLabel ? { fastLabel: current.fastLabel } : {})
+    }
   }
 
   answer(approvalId: string, choice: ApprovalChoice): void {
@@ -483,6 +845,7 @@ export class CodexThread extends EventEmitter {
   }
 
   dispose(): void {
+    if (this.backgroundTimer) clearTimeout(this.backgroundTimer)
     this.server.off('notification', this.onNotification)
     this.server.off('server-request', this.onRequest)
     this.server.off('exit', this.onExit)
@@ -496,3 +859,6 @@ export class CodexThread extends EventEmitter {
     }
   }
 }
+
+/** A turn diff kept for Undo is bounded. */
+const MAX_DIFF = 4 * 1024 * 1024

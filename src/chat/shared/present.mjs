@@ -107,11 +107,74 @@ function cut(s, max) {
 }
 
 const EFFORT_LABELS = { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' }
+/** The Codex extension's own names (composer.mode.local.reasoning.*): "Light" for low. */
+const CODEX_EFFORT_LABELS = { none: 'None', minimal: 'Minimal', low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Max', ultra: 'Ultra' }
 
-/** An effort level's name; null (the model's default) reads as "Auto", as in the extension. */
-export function effortLabel(effort) {
+/** An effort level's name; null (the model's default) reads as "Auto", as in the extension. Codex panes use the Codex extension's names. */
+export function effortLabel(effort, provider) {
   if (!effort) return 'Auto'
-  return EFFORT_LABELS[effort] ?? String(effort).charAt(0).toUpperCase() + String(effort).slice(1)
+  const table = provider === 'codex' ? CODEX_EFFORT_LABELS : EFFORT_LABELS
+  return table[effort] ?? String(effort).charAt(0).toUpperCase() + String(effort).slice(1)
+}
+
+/**
+ * What a finished Codex turn did, in the Codex extension's words
+ * (localConversation.agentActivity.summary.*): "Ran commands, edited a file,
+ * searched the web". The first phrase is capitalised; counts are words, not
+ * numbers, as the extension writes them. Empty when the turn ran no step.
+ */
+export function activitySummary(items) {
+  let commands = 0
+  let edits = 0
+  let reads = 0
+  let web = 0
+  let tools = 0
+  let agents = 0
+  for (const x of items) {
+    if (x.kind !== 'tool') continue
+    if (x.name === 'webSearch') web++
+    else if (x.view === 'edit' || x.view === 'write') edits += Math.max(1, x.edits?.length ?? 0)
+    else if (x.view === 'read' || x.label === 'Read') reads++
+    else if (x.view === 'command' || x.view === 'search') commands++
+    else if (x.view === 'agent') agents++
+    else tools++
+  }
+  const parts = []
+  if (commands) parts.push(commands === 1 ? 'ran a command' : 'ran commands')
+  if (edits) parts.push(edits === 1 ? 'edited a file' : 'edited files')
+  if (reads) parts.push('read files')
+  if (web) parts.push('searched the web')
+  if (agents) parts.push(agents === 1 ? 'used an agent' : 'used agents')
+  if (tools) parts.push(tools === 1 ? 'called a tool' : 'called tools')
+  if (!parts.length) return ''
+  const text = parts.join(', ')
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+/** The prompt a Codex pane's `/init` sends (composer.initSlashCommand): AGENTS.md is the file Codex reads for repository instructions. */
+export const CODEX_INIT_PROMPT = 'Create an AGENTS.md file in the repository root with concise instructions for coding agents working here: the project layout, how to build, test and run it, the coding conventions you can observe, and anything a contributor must not do. If AGENTS.md already exists, say so and change nothing.'
+
+/** A rate-limit window's name from its length: 300 min → "5h limit", 10080 → "Weekly limit" (composer.statusPlain.*). */
+export function limitName(windowMins) {
+  if (typeof windowMins !== 'number' || windowMins <= 0) return 'Rate limit'
+  if (windowMins === 10080) return 'Weekly limit'
+  if (windowMins % 1440 === 0) return `${windowMins / 1440}d limit`
+  if (windowMins % 60 === 0) return `${windowMins / 60}h limit`
+  return `${windowMins}m limit`
+}
+
+/** "resets 3:00 PM" today, else "resets Oct 25"; `resetsAt` is in seconds. */
+export function resetPhrase(resetsAt, now = Date.now(), locale = 'en-US') {
+  if (typeof resetsAt !== 'number') return 'reset time unavailable'
+  const at = new Date(resetsAt * 1000)
+  const sameDay = new Date(now).toDateString() === at.toDateString()
+  return `resets ${sameDay ? at.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit', hourCycle: 'h12' }) : at.toLocaleDateString(locale, { month: 'short', day: 'numeric' })}`
+}
+
+/** One line per limit window: "Weekly limit: 98% left (resets Oct 25)". */
+export function limitLines(limits, now = Date.now()) {
+  if (!limits) return []
+  return [limits.primary, limits.secondary].filter(Boolean).map((w) => `${limitName(w.windowMins)}: ${Math.max(0, Math.round(100 - w.usedPercent))}% left (${resetPhrase(w.resetsAt, now)})`)
 }
 
 /** A model id's short name: `claude-opus-5-5` → "Opus 5.5", `claude-sonnet-5[1m]` → "Sonnet 5". Unknown ids pass through. */
@@ -178,4 +241,143 @@ export function fmtTokens(n) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1000) return `${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}k`
   return String(n)
+}
+
+/**
+ * The working line's verbs: the Claude Code extension's own list, in its order
+ * (`BE1` in webview/index.js 2.1.302; docs/rea-findings.md, feature pass).
+ */
+export const WORKING_VERBS = [
+  'Accomplishing', 'Actioning', 'Actualizing', 'Baking', 'Booping', 'Brewing', 'Calculating', 'Cerebrating', 'Channeling', 'Churning',
+  'Clauding', 'Coalescing', 'Cogitating', 'Computing', 'Combobulating', 'Concocting', 'Considering', 'Contemplating', 'Cooking', 'Crafting',
+  'Creating', 'Crunching', 'Deciphering', 'Deliberating', 'Determining', 'Discombobulating', 'Doing', 'Effecting', 'Elucidating', 'Enchanting',
+  'Envisioning', 'Finagling', 'Flibbertigibbeting', 'Forging', 'Forming', 'Frolicking', 'Generating', 'Germinating', 'Hatching', 'Herding',
+  'Honking', 'Ideating', 'Imagining', 'Incubating', 'Inferring', 'Manifesting', 'Marinating', 'Meandering', 'Moseying', 'Mulling',
+  'Mustering', 'Noodling', 'Percolating', 'Perusing', 'Philosophizing', 'Pontificating', 'Pondering', 'Processing', 'Puttering', 'Puzzling',
+  'Reticulating', 'Ruminating', 'Schlepping', 'Shimmying', 'Simmering', 'Smooshing', 'Spelunking', 'Spinning', 'Stewing', 'Sussing',
+  'Synthesizing', 'Thinking', 'Tinkering', 'Transmuting', 'Unfurling', 'Unraveling', 'Vibing', 'Wandering', 'Whirring', 'Wibbling',
+  'Working', 'Wrangling'
+]
+
+/** How long a verb stays before the next: 2 s, 3 s, 5 s, then every 5 s (the extension's schedule). */
+export function verbDelay(swaps) {
+  return [2000, 3000, 5000][swaps] ?? 5000
+}
+
+const DESTINATIONS = { localSettings: 'in this project', projectSettings: 'in this project, for everyone', userSettings: 'in all your projects', session: 'for this session', cliArg: 'for this session' }
+const MODE_WORDS = { acceptEdits: 'Edit automatically', default: 'Manual', plan: 'Plan', auto: 'Auto', dontAsk: "Don't ask", bypassPermissions: 'Bypass permissions' }
+
+/**
+ * What "don't ask again" will save, from the CLI's permission suggestions
+ * (`PermissionUpdate[]`): "Bash(npm test:*) in this project", "Edit
+ * automatically for this session". Undefined when there is nothing to name.
+ * @param {unknown} suggestions
+ * @returns {string | undefined}
+ */
+export function describePermissionUpdates(suggestions) {
+  if (!Array.isArray(suggestions)) return undefined
+  const parts = []
+  for (const s of suggestions) {
+    if (!s || typeof s !== 'object') continue
+    const where = DESTINATIONS[s.destination] ?? ''
+    if ((s.type === 'addRules' || s.type === 'replaceRules') && s.behavior !== 'deny' && Array.isArray(s.rules)) {
+      const rules = s.rules.map((r) => (r?.ruleContent ? `${r.toolName}(${r.ruleContent})` : String(r?.toolName ?? ''))).filter(Boolean)
+      if (rules.length) parts.push(`${rules.join(', ')}${where ? ` ${where}` : ''}`)
+    } else if (s.type === 'setMode' && typeof s.mode === 'string') {
+      parts.push(`${MODE_WORDS[s.mode] ?? s.mode}${where ? ` ${where}` : ''}`)
+    } else if (s.type === 'addDirectories' && Array.isArray(s.directories) && s.directories.length) {
+      parts.push(`access to ${s.directories.join(', ')}${where ? ` ${where}` : ''}`)
+    }
+  }
+  return parts.length ? parts.join('; ') : undefined
+}
+
+/** A path relative to `cwd` when it lies inside it (forward slashes), else as given. */
+export function relPath(path, cwd) {
+  if (typeof path !== 'string' || !path) return ''
+  const norm = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '')
+  const p = norm(path)
+  const base = norm(cwd ?? '')
+  if (base && p.toLowerCase().startsWith(`${base.toLowerCase()}/`)) return p.slice(base.length + 1)
+  return p
+}
+
+/**
+ * The `@` picker's matches: file paths whose characters appear in order in
+ * the query, best first — a match in the file name beats one in the folders,
+ * a run of adjacent characters beats a scattered one, and shorter paths win
+ * ties. An empty query lists the first `limit` paths as given.
+ * @param {string[]} paths relative, forward slashes
+ * @param {string} query
+ * @param {number} [limit]
+ * @returns {string[]}
+ */
+export function matchFiles(paths, query, limit = 50) {
+  const q = (query ?? '').toLowerCase().replace(/\\/g, '/')
+  if (!q) return paths.slice(0, limit)
+  const scored = []
+  for (const p of paths) {
+    const s = fuzzyScore(p.toLowerCase(), q)
+    if (s !== null) scored.push({ p, s })
+  }
+  scored.sort((a, b) => b.s - a.s || a.p.length - b.p.length || a.p.localeCompare(b.p))
+  return scored.slice(0, limit).map((x) => x.p)
+}
+
+function fuzzyScore(path, q) {
+  const nameAt = path.lastIndexOf('/') + 1
+  let score = 0
+  let at = -1
+  let run = 0
+  for (const ch of q) {
+    const i = path.indexOf(ch, at + 1)
+    if (i < 0) return null
+    run = i === at + 1 ? run + 1 : 1
+    score += run * 2 + (i >= nameAt ? 3 : 0) - (at < 0 ? 0 : Math.min(i - at - 1, 6) * 0.5)
+    at = i
+  }
+  if (path.slice(nameAt).startsWith(q)) score += 10
+  return score
+}
+
+/**
+ * The conversation as Markdown, for Copy conversation and Save conversation:
+ * prompts and replies in full, each step as one line, approvals and questions
+ * with their answers. Thinking is left out (it is the model's, not the
+ * conversation's).
+ * @param {import('./chatModel.mjs').Transcript} t
+ * @returns {string}
+ */
+export function transcriptMarkdown(t) {
+  const who = t.provider === 'claude' ? 'Claude' : 'Codex'
+  const out = [`# ${t.title || `${who} conversation`}`, '']
+  if (t.cwd) out.push(`Folder: \`${t.cwd}\``, '')
+  for (const x of t.items) {
+    switch (x.kind) {
+      case 'user':
+        // A heading always starts after a blank line, whatever the line before it was.
+        out.push('', `## You · ${clockTime(x.at)}`, '', x.text || '', ...(x.attachments ?? []).map((a) => `- ${a.kind === 'image' ? 'Image' : 'File'}: ${a.path ?? a.name}`), '')
+        break
+      case 'assistant':
+        out.push('', `## ${who} · ${clockTime(x.at)}`, '', x.text, '')
+        break
+      case 'tool':
+        if (x.parent) break
+        out.push(`- **${x.label ?? x.name}**${x.detail ? ` ${x.detailMono ? `\`${x.detail}\`` : x.detail}` : ''}${x.status === 'failed' ? ' (failed)' : x.status === 'declined' ? ' (declined)' : ''}`)
+        if (x.view === 'command' && x.input) out.push('', '```', x.input, '```', '')
+        break
+      case 'approval':
+        out.push(`- **${x.variant === 'plan' ? 'Plan' : 'Approval'}:** ${x.title}${x.decided ? ` → ${x.decided}` : ''}${x.message ? ` ("${x.message}")` : ''}`)
+        break
+      case 'question':
+        for (const q of x.questions) out.push(`- **Question:** ${q.text}${x.answers ? ` → ${(x.answers[q.id] ?? []).join(', ')}` : x.cancelled ? ' → dismissed' : ''}`)
+        break
+      case 'system':
+        out.push(`- _${x.text}_`)
+        break
+      default:
+        break
+    }
+  }
+  return `${out.join('\n').replace(/\n{3,}/g, '\n\n').trim()}\n`
 }

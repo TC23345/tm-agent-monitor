@@ -35,7 +35,7 @@ import { installWebPaneGuards } from './webPanes.js'
 import { clipboardHasImage, makeThumbnail, protectText, protectionAvailable, readClipboardSnapshot, readClipboardText, unprotectText, writeClipboardImage, writeClipboardText } from './clipboardIo.js'
 import { ClipStore, type ClipSettingsPatch } from './clipStoreCore.mjs'
 import { cleanNote, clipTitle, describeSource, domainBlocked, filterClips, hotkeyProblem, orderFavorites, parseSnippetNote, shortcutProblem, shouldCapture, sourceLabel, summarize, MAX_CLIP_BYTES, MAX_GROUP_DESCRIPTION, MAX_IMAGE_BYTES, MAX_NOTE, MAX_TITLE, type ClipSource } from '../shared/clips.mjs'
-import { fileKind, hasNul, imageMime, isAbsolutePath, sortEntries, MAX_DIR_ENTRIES, MAX_TEXT_BYTES, MAX_IMAGE_BYTES as MAX_FILE_IMAGE_BYTES } from '../shared/fileTree.mjs'
+import { fileKind, hasNul, imageMime, isAbsolutePath, parseFileList, sortEntries, IGNORED_DIRS, MAX_DIR_ENTRIES, MAX_PICKER_FILES, MAX_TEXT_BYTES, MAX_IMAGE_BYTES as MAX_FILE_IMAGE_BYTES } from '../shared/fileTree.mjs'
 import { applyPickerSize, createPicker, destroyPicker, endPickerResize, hidePicker, pickClip, pickerWindow, resizePickerBy, showPicker, togglePicker } from './picker.js'
 import { sanitizePickerSize, PICKER_CARD } from '../shared/pickerPlace.mjs'
 import { noteNameFor as snippetFileName } from '../shared/notes.mjs'
@@ -43,7 +43,7 @@ import { EXTENSION_ID, HOST_NAME, inspectHostManifest } from '../../hooks/clipHo
 import { parseClipImport, snippetNote, MAX_IMPORT_BYTES } from '../shared/clipImport.mjs'
 import { agentForTerminal } from '../shared/attention.mjs'
 import { ChatManager } from '../chat/host/chatManager'
-import type { Attachment } from '../chat/shared/chatModel.mjs'
+import type { ApprovalChoice, Attachment } from '../chat/shared/chatModel.mjs'
 import { buildWindowList } from '../shared/windows.mjs'
 import { parseProjectCommands } from '../shared/projectCommands.mjs'
 import { parseGitStatus, type GitStatus } from '../shared/gitStatus.mjs'
@@ -221,6 +221,35 @@ chats.on('open-url', (_id: string, url: string) => {
   if (typeof url === 'string' && url.length <= 2048 && /^https?:\/\//i.test(url)) void shell.openExternal(url)
 })
 app.on('before-quit', () => chats.closeAll())
+
+/**
+ * The chat `@` picker's list for a folder that is not a git repository: a
+ * breadth-first walk, eight folders deep at most, that skips `.git`,
+ * `node_modules` and hidden folders and stops at `max` files.
+ */
+async function walkFiles(root: string, max: number): Promise<string[]> {
+  const out: string[] = []
+  const queue: [string, string, number][] = [[root, '', 0]]
+  while (queue.length && out.length < max) {
+    const [dir, rel, depth] = queue.shift()!
+    let entries: import('node:fs').Dirent[]
+    try {
+      entries = await fsp.readdir(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const e of entries) {
+      const path = rel ? `${rel}/${e.name}` : e.name
+      if (e.isDirectory()) {
+        if (depth < 8 && !e.name.startsWith('.') && !IGNORED_DIRS.includes(e.name.toLowerCase())) queue.push([join(dir, e.name), path, depth + 1])
+      } else if (e.isFile()) {
+        out.push(path)
+        if (out.length >= max) break
+      }
+    }
+  }
+  return out
+}
 // ---- usage worker ---------------------------------------------------------
 // The Claude ledgers, the Codex rollout scan, and the insights scan run in a
 // utilityProcess (usageWorker.ts): they read and parse JSONL synchronously, and
@@ -2143,13 +2172,14 @@ function registerIpc(): void {
   }
   ipcMain.handle('chat:create', async (_e, req: unknown) => {
     if (typeof req !== 'object' || req === null) return null
-    const r = req as { provider?: unknown; cwd?: unknown; resume?: unknown; model?: unknown }
+    const r = req as { provider?: unknown; cwd?: unknown; resume?: unknown; model?: unknown; permissionMode?: unknown }
     if (!validProvider(r.provider) || typeof r.cwd !== 'string' || r.cwd.length > 32_767) return null
     if (r.resume !== undefined && r.resume !== null && !validSessionId(r.resume)) return null
     if (r.model !== undefined && r.model !== null && (typeof r.model !== 'string' || r.model.length > 100)) return null
+    if (r.permissionMode !== undefined && r.permissionMode !== null && (typeof r.permissionMode !== 'string' || !CHAT_MODES.has(r.permissionMode))) return null
     const cwd = r.cwd && existsSync(r.cwd) ? r.cwd : app.getPath('home')
     try {
-      return await chats.create({ provider: r.provider, cwd, resume: (r.resume as string | null | undefined) ?? null, model: (r.model as string | null | undefined) ?? null })
+      return await chats.create({ provider: r.provider, cwd, resume: (r.resume as string | null | undefined) ?? null, model: (r.model as string | null | undefined) ?? null, permissionMode: (r.permissionMode as string | null | undefined) ?? null })
     } catch (error) {
       console.error(`[chat] create failed: ${error instanceof Error ? error.message : error}`)
       return null
@@ -2166,10 +2196,86 @@ function registerIpc(): void {
     if (!validTermId(id)) return
     try { await chats.interrupt(id) } catch { /* the turn may have ended */ }
   })
-  ipcMain.handle('chat:answer', async (_e, id: unknown, approvalId: unknown, choice: unknown) => {
-    if (!validTermId(id) || !validRequestId(approvalId)) return
-    if (choice !== 'allow' && choice !== 'allow-session' && choice !== 'deny' && choice !== 'cancel') return
-    try { await chats.answer(id, approvalId, choice) } catch { /* already answered */ }
+  const CHAT_CHOICES = new Set(['allow', 'allow-session', 'deny', 'cancel', 'plan-auto', 'plan-manual', 'allow-rule', 'allow-host'])
+  ipcMain.handle('chat:answer', async (_e, id: unknown, approvalId: unknown, choice: unknown, message: unknown) => {
+    if (!validTermId(id) || !validRequestId(approvalId) || typeof choice !== 'string' || !CHAT_CHOICES.has(choice)) return
+    // What the user told the agent with a refusal (or a plan's feedback): text the CLI reads, bounded.
+    if (message !== undefined && message !== null && (typeof message !== 'string' || message.length > 20_000)) return
+    try { await chats.answer(id, approvalId, choice as ApprovalChoice, (message as string | null | undefined) ?? undefined) } catch { /* already answered */ }
+  })
+  // The routes behind the pane's newer controls answer `{ ok, value }` or `{ ok: false, error }`, so the
+  // pane can show the CLI's own sentence instead of Electron's "Error invoking remote method".
+  const settle = async <T>(run: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; error: string }> => {
+    try {
+      return { ok: true, value: await run() }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+  const validItemId = (s: unknown): s is string => typeof s === 'string' && /^[A-Za-z0-9:_.-]{1,160}$/.test(s)
+  ipcMain.handle('chat:remove-queued', async (_e, id: unknown, itemId: unknown) => (validTermId(id) && validItemId(itemId) ? settle(() => chats.removeQueued(id, itemId)) : null))
+  ipcMain.handle('chat:rewind', async (_e, id: unknown, itemId: unknown, dryRun: unknown) => (validTermId(id) && validItemId(itemId) && typeof dryRun === 'boolean' ? settle(() => chats.rewind(id, itemId, dryRun)) : null))
+  // Without an item id a Codex chat forks whole (*Continue in new chat*).
+  ipcMain.handle('chat:fork', async (_e, id: unknown, itemId: unknown) => (validTermId(id) && (itemId === undefined || itemId === null || validItemId(itemId)) ? settle(() => chats.fork(id, (itemId as string | null | undefined) ?? undefined)) : null))
+  // Codex only (the manager answers a sentence for a Claude chat): steer a queued prompt, resume a paused queue,
+  // a `!` shell line, `/review`, `/status`, and Undo / Reapply of a finished turn's edits through git.
+  ipcMain.handle('chat:steer', async (_e, id: unknown, itemId: unknown) => (validTermId(id) && validItemId(itemId) ? settle(() => chats.steer(id, itemId)) : null))
+  ipcMain.handle('chat:resume-queue', async (_e, id: unknown) => (validTermId(id) ? settle(() => chats.resumeQueue(id)) : null))
+  ipcMain.handle('chat:shell', async (_e, id: unknown, command: unknown) => (validTermId(id) && typeof command === 'string' && command.trim() && command.length <= 8_000 && !/\0/.test(command) ? settle(() => chats.shell(id, command.trim())) : null))
+  ipcMain.handle('chat:review', async (_e, id: unknown, target: unknown) => {
+    if (!validTermId(id) || typeof target !== 'object' || target === null) return null
+    const t = target as Record<string, unknown>
+    if (t.type === 'uncommittedChanges') return settle(() => chats.review(id, { type: 'uncommittedChanges' }))
+    // A branch name as git allows it (no spaces, no leading dash), so it cannot read as an option.
+    if (t.type === 'baseBranch' && typeof t.branch === 'string' && /^[A-Za-z0-9._/][A-Za-z0-9._/-]{0,199}$/.test(t.branch)) return settle(() => chats.review(id, { type: 'baseBranch', branch: t.branch as string }))
+    return null
+  })
+  ipcMain.handle('chat:status', async (_e, id: unknown) => (validTermId(id) ? settle(() => chats.status(id)) : null))
+  ipcMain.handle('chat:undo-turn', async (_e, id: unknown, turnItemId: unknown, reapply: unknown) => (validTermId(id) && validItemId(turnItemId) && (reapply === undefined || typeof reapply === 'boolean') ? settle(() => chats.undoTurn(id, turnItemId, reapply === true)) : null))
+  ipcMain.handle('chat:side-question', async (_e, id: unknown, question: unknown) => (validTermId(id) && typeof question === 'string' && question.trim() && question.length <= 20_000 ? settle(() => chats.sideQuestion(id, question)) : null))
+  ipcMain.handle('chat:context', async (_e, id: unknown) => (validTermId(id) ? settle(() => chats.contextUsage(id)) : null))
+  ipcMain.handle('chat:mcp', async (_e, id: unknown, req: unknown) => {
+    if (!validTermId(id) || typeof req !== 'object' || req === null) return null
+    const r = req as Record<string, unknown>
+    const name = (v: unknown): v is string => typeof v === 'string' && /^[\w.@:-]{1,128}$/.test(v)
+    if (r.op === 'list') return settle(() => chats.mcp(id, { op: 'list' }))
+    if (r.op === 'toggle' && name(r.name) && typeof r.enabled === 'boolean') return settle(() => chats.mcp(id, { op: 'toggle', name: r.name as string, enabled: r.enabled as boolean }))
+    if (r.op === 'reconnect' && name(r.name)) return settle(() => chats.mcp(id, { op: 'reconnect', name: r.name as string }))
+    return null
+  })
+  ipcMain.handle('chat:background', async (_e, id: unknown, toolUseId: unknown) => (validTermId(id) && (toolUseId === undefined || validItemId(toolUseId)) ? settle(() => chats.background(id, toolUseId as string | undefined)) : null))
+  ipcMain.handle('chat:stop-task', async (_e, id: unknown, taskId: unknown) => (validTermId(id) && validItemId(taskId) ? settle(() => chats.stopTask(id, taskId)) : null))
+  ipcMain.handle('chat:rename', async (_e, id: unknown, title: unknown) => (validTermId(id) && typeof title === 'string' && title.trim() && title.length <= 200 && !/[\r\n\0]/.test(title) ? settle(() => chats.rename(id, title.trim())) : null))
+  ipcMain.handle('chat:compact', async (_e, id: unknown) => (validTermId(id) ? settle(() => chats.compact(id)) : null))
+  // The `@` picker's list: the folder's files, relative — git's own list when it is a repository
+  // (tracked and untracked, ignores honoured), else a bounded walk that skips `.git` and `node_modules`.
+  const fileLists = new Map<string, { at: number; files: string[] }>()
+  ipcMain.handle('chat:files', async (_e, cwd: unknown): Promise<string[] | null> => {
+    if (!isDir(cwd)) return null
+    const dir = cwd as string
+    const cached = fileLists.get(dir)
+    if (cached && Date.now() - cached.at < 30_000) return cached.files
+    const fromGit = await new Promise<string[] | null>((resolve) => {
+      execFile('git', ['-C', dir, 'ls-files', '--cached', '--others', '--exclude-standard'], { timeout: 4000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+        resolve(err ? null : parseFileList(String(stdout), MAX_PICKER_FILES))
+      })
+    })
+    const files = fromGit ?? (await walkFiles(dir, MAX_PICKER_FILES))
+    fileLists.set(dir, { at: Date.now(), files })
+    return files
+  })
+  // Save conversation: the user picks the file; nothing is written on its own.
+  ipcMain.handle('chat:save', async (_e, name: unknown, text: unknown): Promise<boolean> => {
+    if (typeof name !== 'string' || name.length > 120 || /[\\/:*?"<>|\0]/.test(name) || typeof text !== 'string' || text.length > 16 * 1024 * 1024) return false
+    if (!win || win.isDestroyed()) return false
+    const res = await dialog.showSaveDialog(win, { title: 'Save conversation', defaultPath: join(app.getPath('documents'), name), filters: [{ name: 'Markdown', extensions: ['md'] }] })
+    if (res.canceled || !res.filePath) return false
+    try {
+      await fsp.writeFile(res.filePath, text, 'utf8')
+      return true
+    } catch {
+      return false
+    }
   })
   ipcMain.handle('chat:answer-question', async (_e, id: unknown, questionId: unknown, answers: unknown) => {
     if (!validTermId(id) || !validRequestId(questionId)) return
@@ -2188,11 +2294,24 @@ function registerIpc(): void {
   // Efforts are each provider's own list (Codex adds levels such as `ultra`), so main checks the shape
   // and the session checks the value; neither reaches a command line.
   const validEffort = (e: unknown): e is string => typeof e === 'string' && /^[a-z][a-z_-]{1,23}$/.test(e)
-  const CHAT_MODES = new Set(['default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'read-only', 'full-access'])
+  const CHAT_MODES = new Set(['default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'read-only', 'full-access', 'ask', 'auto-review', 'custom'])
   ipcMain.handle('chat:configure', async (_e, id: unknown, patch: unknown): Promise<string | null> => {
     if (!validTermId(id) || typeof patch !== 'object' || patch === null) return 'Invalid request'
     const p = patch as Record<string, unknown>
-    const clean: { model?: string | null; effort?: string | null; permissionMode?: string } = {}
+    const clean: { model?: string | null; effort?: string | null; permissionMode?: string; fastMode?: boolean; outputStyle?: string; planMode?: boolean } = {}
+    if ('planMode' in p) {
+      if (typeof p.planMode !== 'boolean') return 'Invalid plan mode'
+      clean.planMode = p.planMode
+    }
+    if ('fastMode' in p) {
+      if (typeof p.fastMode !== 'boolean') return 'Invalid fast mode'
+      clean.fastMode = p.fastMode
+    }
+    if ('outputStyle' in p) {
+      // Claude's built-in and custom style names; the session checks it is one the CLI listed.
+      if (typeof p.outputStyle !== 'string' || !/^[\w .()-]{1,64}$/.test(p.outputStyle)) return 'Invalid output style'
+      clean.outputStyle = p.outputStyle
+    }
     if ('model' in p) {
       if (p.model !== null && (typeof p.model !== 'string' || !/^[A-Za-z0-9._:[\]/-]{1,100}$/.test(p.model))) return 'Invalid model'
       clean.model = p.model as string | null

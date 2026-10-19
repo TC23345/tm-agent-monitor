@@ -13,6 +13,11 @@ test('sanitizeChatConfig keeps provider, cwd, a UUID handle, a safe resume id an
   assert.equal(sanitizeChatConfig('nope'), null)
 })
 
+test('sanitizeChatConfig keeps focus view only when it is on', () => {
+  assert.deepEqual(sanitizeChatConfig({ provider: 'claude', cwd: 'C:\\p', focus: true }), { provider: 'claude', cwd: 'C:\\p', focus: true })
+  assert.deepEqual(sanitizeChatConfig({ provider: 'claude', cwd: 'C:\\p', focus: 'yes' }), { provider: 'claude', cwd: 'C:\\p' })
+})
+
 test('sanitizePanes keeps chat panes with a usable config and repeats them', () => {
   const out = sanitizePanes([
     { id: 'a', kind: 'chat', chat: { provider: 'claude', cwd: 'C:\\p', resumeId: 's1' } },

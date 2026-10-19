@@ -3,9 +3,10 @@
 // inline under 876, so a drag across the line does not flicker), no line
 // numbers, words wrapped, the height capped at 200 px with the rest one click
 // away. The extension embeds Monaco's diff editor; this is plain markup over
-// `src/shared/diff.mjs`.
-import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { changeLines, splitRows, type DiffLine } from '../shared/diff.mjs'
+// `src/shared/diff.mjs`. A removed line and the added line that replaced it
+// mark the words that changed (`wordDiff`), as Monaco marks characters.
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { changeLines, splitRows, wordDiff, type DiffLine, type WordSegment } from '../shared/diff.mjs'
 import type { FileChange } from '../shared/chatModel.mjs'
 
 const SPLIT_ON = 900
@@ -71,7 +72,41 @@ export function DiffView({ edits }: { edits: FileChange[] }) {
   )
 }
 
+/**
+ * The changed words of each removed line and the added line paired with it —
+ * the same pairing `splitRows` uses: a run of removals against the run of
+ * additions that follows it, line for line.
+ */
+function pairWords(lines: DiffLine[]): Map<number, WordSegment[]> {
+  const out = new Map<number, WordSegment[]>()
+  let i = 0
+  while (i < lines.length) {
+    if (lines[i]?.type !== 'del') {
+      i++
+      continue
+    }
+    const dels: number[] = []
+    const adds: number[] = []
+    while (i < lines.length && lines[i]?.type === 'del') dels.push(i++)
+    while (i < lines.length && lines[i]?.type === 'add') adds.push(i++)
+    for (let k = 0; k < Math.min(dels.length, adds.length); k++) {
+      const d = dels[k]!
+      const a = adds[k]!
+      const { left, right } = wordDiff(lines[d]!.text, lines[a]!.text)
+      out.set(d, left)
+      out.set(a, right)
+    }
+  }
+  return out
+}
+
+function Words({ text, segments }: { text: string; segments?: WordSegment[] }): ReactNode {
+  if (!segments || segments.every((s) => s.changed)) return text || ' '
+  return segments.map((s, i) => (s.changed ? <mark key={i} className="chat-dw">{s.text}</mark> : s.text))
+}
+
 function InlineLines({ lines }: { lines: DiffLine[] }) {
+  const words = useMemo(() => pairWords(lines), [lines])
   return (
     <>
       {lines.map((l, i) => l.type === 'hunk'
@@ -79,7 +114,7 @@ function InlineLines({ lines }: { lines: DiffLine[] }) {
         : (
           <div key={i} className={`chat-dl is-${l.type}`}>
             <span className="chat-dl-mark" aria-hidden>{MARK[l.type]}</span>
-            <span className="chat-dl-text">{l.text || ' '}</span>
+            <span className="chat-dl-text"><Words text={l.text} segments={words.get(i)} /></span>
           </div>
         ))}
     </>
@@ -87,26 +122,27 @@ function InlineLines({ lines }: { lines: DiffLine[] }) {
 }
 
 function SplitLines({ lines }: { lines: DiffLine[] }) {
+  const rows = useMemo(() => splitRows(lines).map((r) => ({ ...r, words: r.left?.type === 'del' && r.right?.type === 'add' ? wordDiff(r.left.text, r.right.text) : null })), [lines])
   return (
     <div className="chat-dsplit">
-      {splitRows(lines).map((r, i) => r.hunk !== undefined
+      {rows.map((r, i) => r.hunk !== undefined
         ? <div key={i} className="chat-dl is-hunk is-span">⋯</div>
         : (
           <Fragment key={i}>
-            <Cell line={r.left} side="left" />
-            <Cell line={r.right} side="right" />
+            <Cell line={r.left} side="left" segments={r.words?.left} />
+            <Cell line={r.right} side="right" segments={r.words?.right} />
           </Fragment>
         ))}
     </div>
   )
 }
 
-function Cell({ line, side }: { line: DiffLine | null; side: 'left' | 'right' }) {
+function Cell({ line, side, segments }: { line: DiffLine | null; side: 'left' | 'right'; segments?: WordSegment[] }) {
   if (!line) return <div className={`chat-dl is-empty is-${side}`} />
   return (
     <div className={`chat-dl is-${line.type} is-${side}`}>
       <span className="chat-dl-mark" aria-hidden>{MARK[line.type]}</span>
-      <span className="chat-dl-text">{line.text || ' '}</span>
+      <span className="chat-dl-text"><Words text={line.text} segments={segments} /></span>
     </div>
   )
 }

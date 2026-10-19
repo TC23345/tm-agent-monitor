@@ -2,19 +2,40 @@
 // stored session messages into the shared transcript. Pure; shapes are the
 // SDK 0.3.302 types (`SDKMessage`, `SessionMessage`, `SDKSessionInfo`) —
 // the same stream the Cursor extension consumes (docs/rea-findings.md).
-import { addUsage, appendDelta, appendItem, clip, emptyTranscript, MAX_TOOL_OUTPUT, setStatus, settleStreams, updateItem } from '../shared/chatModel.mjs'
-import { argDetail, imageSize, mcpTitle, splitMcpName } from '../shared/present.mjs'
+import { addUsage, appendDelta, appendItem, clip, closeTurn, dequeue, emptyTranscript, MAX_TOOL_OUTPUT, setStatus, settleStreams, updateItem } from '../shared/chatModel.mjs'
+import { argDetail, clockTime, imageSize, mcpTitle, splitMcpName } from '../shared/present.mjs'
 
 /**
  * Live fold state: the transcript plus the stream cursor — which API message
- * is streaming and which content-block index maps to which item. The pane
- * holds one of these per session.
- * @typedef {{ transcript: import('../shared/chatModel.mjs').Transcript, stream: { messageId: string | null, blocks: Record<number, string> } }} ClaudeFold
+ * is streaming and which content-block index maps to which item — and the
+ * compaction row still waiting for its summary. The pane holds one of these
+ * per session.
+ * @typedef {{ transcript: import('../shared/chatModel.mjs').Transcript, stream: { messageId: string | null, blocks: Record<number, string> }, compactId?: string | null }} ClaudeFold
  */
 
 /** @returns {ClaudeFold} */
 export function startFold(transcript) {
-  return { transcript, stream: { messageId: null, blocks: {} } }
+  return { transcript, stream: { messageId: null, blocks: {} }, compactId: null }
+}
+
+/** The text Claude Code records when the user interrupts a turn. */
+const INTERRUPT_TEXT = /^\[Request interrupted by user(?: for tool use)?\]$/
+
+/**
+ * A stored slash command (`<command-name>/compact</command-name>…<command-args>x</command-args>`)
+ * → the line the user typed (`/compact x`); null for any other text.
+ */
+export function storedCommand(text) {
+  const name = /<command-name>\s*\/?([^<\s]+)\s*<\/command-name>/.exec(text ?? '')
+  if (!name) return null
+  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim()
+  return `/${name[1]}${args ? ` ${args}` : ''}`
+}
+
+/** A stored command's output (`<local-command-stdout>…</local-command-stdout>`), or null. */
+export function storedCommandOutput(text) {
+  const m = /<local-command-(?:stdout|stderr)>([\s\S]*?)<\/local-command-(?:stdout|stderr)>/.exec(text ?? '')
+  return m ? m[1].replace(/\x1b\[[0-9;]*m/g, '').trim() : null
 }
 
 /** A tool_use block → the row's one-line title. */
@@ -43,7 +64,7 @@ export function toolTitle(name, input) {
     case 'Skill':
       return `Skill ${String(i.skill ?? i.name ?? '')}`.trim()
     case 'TodoWrite':
-      return 'Update tasks'
+      return 'Update Todos'
     case 'AskUserQuestion':
       return 'Question'
     default:
@@ -68,18 +89,18 @@ export function toolView(name, input) {
     case 'Read': {
       const from = typeof i.offset === 'number' ? i.offset + 1 : null
       const range = from !== null && typeof i.limit === 'number' ? ` (lines ${from}-${from + i.limit - 1})` : from !== null ? ` (from line ${from})` : ''
-      return { label: 'Read', detail: path ? `${baseName(path)}${range}` : undefined, detailMono: true, view: 'read' }
+      return { label: 'Read', detail: path ? `${baseName(path)}${range}` : undefined, detailMono: true, view: 'read', ...(path ? { path } : {}) }
     }
     case 'Edit':
-      return { label: 'Edit', detail: path || undefined, detailMono: true, view: 'edit', edits: [{ path, before: clip(String(i.old_string ?? ''), MAX_TOOL_OUTPUT), after: clip(String(i.new_string ?? ''), MAX_TOOL_OUTPUT) }] }
+      return { label: 'Edit', detail: path || undefined, detailMono: true, view: 'edit', ...(path ? { path } : {}), edits: [{ path, before: clip(String(i.old_string ?? ''), MAX_TOOL_OUTPUT), after: clip(String(i.new_string ?? ''), MAX_TOOL_OUTPUT) }] }
     case 'MultiEdit': {
       const edits = (Array.isArray(i.edits) ? i.edits : []).map((e) => ({ path, before: clip(String(e?.old_string ?? ''), MAX_TOOL_OUTPUT), after: clip(String(e?.new_string ?? ''), MAX_TOOL_OUTPUT) }))
-      return { label: 'Edit', detail: path || undefined, detailMono: true, view: 'edit', edits }
+      return { label: 'Edit', detail: path || undefined, detailMono: true, view: 'edit', ...(path ? { path } : {}), edits }
     }
     case 'Write':
-      return { label: 'Write', detail: path || undefined, detailMono: true, view: 'write', content: clip(typeof i.content === 'string' ? i.content : JSON.stringify(i.content ?? '', null, 2), MAX_TOOL_OUTPUT) }
+      return { label: 'Write', detail: path || undefined, detailMono: true, view: 'write', ...(path ? { path } : {}), content: clip(typeof i.content === 'string' ? i.content : JSON.stringify(i.content ?? '', null, 2), MAX_TOOL_OUTPUT) }
     case 'NotebookEdit':
-      return { label: 'Edit', detail: path || undefined, detailMono: true, view: 'edit', edits: [{ path, before: '', after: clip(String(i.new_source ?? ''), MAX_TOOL_OUTPUT) }] }
+      return { label: 'Edit', detail: path || undefined, detailMono: true, view: 'edit', ...(path ? { path } : {}), edits: [{ path, before: '', after: clip(String(i.new_source ?? ''), MAX_TOOL_OUTPUT) }] }
     case 'Glob':
       return { label: 'Glob', detail: `pattern: "${String(i.pattern ?? '')}"`, detailMono: true, view: 'search' }
     case 'Grep':
@@ -90,13 +111,24 @@ export function toolView(name, input) {
       return { label: 'Search', detail: String(i.query ?? '') || undefined, view: 'other' }
     case 'Task':
     case 'Agent':
-      return { label: 'Agent', detail: firstLineOf(String(i.description ?? i.prompt ?? ''), 120) || undefined, view: 'other' }
+      return {
+        label: 'Agent', detail: firstLineOf(String(i.description ?? i.prompt ?? ''), 120) || undefined, view: 'agent',
+        ...(typeof i.prompt === 'string' && i.prompt ? { prompt: clip(i.prompt, MAX_TOOL_OUTPUT) } : {})
+      }
     case 'Skill':
       return { label: String(i.skill ?? i.name ?? 'Skill'), detail: 'skill', view: 'other' }
-    case 'TodoWrite':
-      return { label: 'Update tasks', view: 'other' }
+    case 'TodoWrite': {
+      const todos = (Array.isArray(i.todos) ? i.todos : []).flatMap((x) => (x && typeof x.content === 'string'
+        ? [{ content: x.content, status: x.status === 'completed' || x.status === 'in_progress' ? x.status : 'pending', ...(typeof x.activeForm === 'string' ? { activeForm: x.activeForm } : {}) }]
+        : []))
+      const done = todos.filter((x) => x.status === 'completed').length
+      return { label: 'Update Todos', detail: todos.length ? `${done} of ${todos.length} done` : undefined, view: 'todo', todos }
+    }
     case 'AskUserQuestion':
       return { label: 'Question', view: 'other' }
+    case 'ExitPlanMode':
+      // The extension's header for this step; the plan itself is the approval card under it.
+      return { label: 'Claude’s plan', view: 'other' }
     default: {
       const mcp = splitMcpName(name)
       if (mcp) return { label: mcpTitle(mcp.server, mcp.tool), detail: argDetail(i), view: 'other' }
@@ -201,56 +233,140 @@ function foldAssistantBlocks(t, messageId, content, at, parentToolUseId) {
   return t
 }
 
+/** How the CLI words a refused tool call, with or without the user's reason (the extension reads the same prefix). */
+const REJECTION = "The user doesn't want to proceed with this tool use."
+const REJECTION_REASON = 'The user provided the following reason for the rejection: '
+
+/**
+ * A tool_result's outcome: done, failed, or declined when the user refused
+ * it — then the output is only the reason they gave, if any (the extension
+ * shows it as "Reason: …").
+ * @returns {{ status: 'done' | 'failed' | 'declined', output: string }}
+ */
+export function toolOutcome(text, isError) {
+  if (!isError) return { status: 'done', output: text }
+  if (!text.startsWith(REJECTION)) return { status: 'failed', output: text }
+  const at = text.indexOf(REJECTION_REASON)
+  return { status: 'declined', output: at >= 0 ? text.slice(at + REJECTION_REASON.length).trim() : '' }
+}
+
 /** tool_result blocks in a user message close their tool rows. */
 function foldToolResults(t, content, at) {
   if (!Array.isArray(content)) return t
   for (const block of content) {
     if (block?.type !== 'tool_result') continue
-    const output = clip(resultText(block.content), MAX_TOOL_OUTPUT)
-    t = updateItem(t, block.tool_use_id, (item) => (item.kind === 'tool' ? { ...item, output: output || item.output, status: block.is_error ? 'failed' : 'done' } : item))
+    const { status, output } = toolOutcome(clip(resultText(block.content), MAX_TOOL_OUTPUT), !!block.is_error)
+    t = updateItem(t, block.tool_use_id, (item) => (item.kind === 'tool' ? { ...item, output: status === 'declined' ? output || undefined : output || item.output, status } : item))
   }
   return t
 }
 
+/** A compaction's row: the extension's foldable summary, with the context it started from. */
+function compactItem(id, meta, at) {
+  // The stream says `pre_tokens`; the stored JSONL says `preTokens`.
+  const pre = meta?.pre_tokens ?? meta?.preTokens
+  const tokens = typeof pre === 'number' ? pre : undefined
+  return { kind: 'system', id, text: meta?.trigger === 'auto' ? 'Context compacted automatically' : 'Context compacted', level: 'info', at, variant: 'compact', ...(tokens ? { tokens } : {}) }
+}
+
+const TASK_WORDS = { completed: 'finished', failed: 'failed', stopped: 'was stopped' }
+
 /**
- * Fold one live SDK message.
+ * Fold one live SDK message. `opts.interrupted`: the user asked to stop this
+ * turn, so a result that ends it early reads as *Interrupted*, not an error.
  * @param {ClaudeFold} f
  * @param {any} msg an `SDKMessage`
+ * @param {{ interrupted?: boolean }} [opts]
  * @returns {ClaudeFold}
  */
-export function foldSdkMessage(f, msg) {
+export function foldSdkMessage(f, msg, opts = {}) {
   if (!msg || typeof msg !== 'object') return f
   const at = Date.now()
   let t = f.transcript
   let stream = f.stream
+  const keep = (transcript) => ({ ...f, transcript, stream })
   switch (msg.type) {
     case 'system': {
       if (msg.subtype === 'init') {
         t = {
           ...t, sessionId: msg.session_id ?? t.sessionId, model: msg.model ?? t.model, cwd: msg.cwd ?? t.cwd,
           permissionMode: typeof msg.permissionMode === 'string' ? msg.permissionMode : t.permissionMode,
-          effort: msg.effort !== undefined ? msg.effort ?? null : t.effort
+          effort: msg.effort !== undefined ? msg.effort ?? null : t.effort,
+          outputStyle: typeof msg.output_style === 'string' ? msg.output_style : t.outputStyle,
+          fastMode: msg.fast_mode_state === 'on' || msg.fast_mode_state === 'off' || msg.fast_mode_state === 'cooldown' ? msg.fast_mode_state : t.fastMode
         }
-        return { transcript: t, stream }
+        return keep(t)
       }
-      if (msg.subtype === 'status' && typeof msg.permissionMode === 'string' && msg.permissionMode !== t.permissionMode) {
-        return { transcript: { ...t, permissionMode: msg.permissionMode }, stream }
+      if (msg.subtype === 'status') {
+        const activity = msg.status === 'compacting' ? 'compacting' : null
+        const mode = typeof msg.permissionMode === 'string' ? msg.permissionMode : t.permissionMode
+        if (activity === t.activity && mode === t.permissionMode) return f
+        return keep({ ...t, activity, permissionMode: mode })
       }
-      if (msg.subtype === 'compact_boundary') return { transcript: appendItem(t, { kind: 'system', id: `compact:${msg.uuid ?? at}`, text: 'Context compacted', level: 'info', at }), stream }
-      if (msg.subtype === 'permission_denied') return { transcript: appendItem(t, { kind: 'system', id: `denied:${msg.tool_use_id ?? at}`, text: msg.message ?? `${msg.tool_name} was denied`, level: 'error', at }), stream }
+      if (msg.subtype === 'compact_boundary') {
+        const id = `compact:${msg.uuid ?? at}`
+        return { ...keep({ ...appendItem(t, compactItem(id, msg.compact_metadata, at)), activity: null }), compactId: id }
+      }
+      if (msg.subtype === 'permission_denied') return keep(appendItem(t, { kind: 'system', id: `denied:${msg.tool_use_id ?? at}`, text: msg.message ?? `${msg.tool_name} was denied`, level: 'error', at }))
+      if (msg.subtype === 'api_retry') return keep({ ...t, retry: { attempt: num(msg.attempt, 1), max: num(msg.max_retries, 0) } })
+      if (msg.subtype === 'thinking_tokens') {
+        const live = [...t.items].reverse().find((x) => x.kind === 'thinking' && x.streaming)
+        return live && typeof msg.estimated_tokens === 'number' ? keep(updateItem(t, live.id, { tokens: msg.estimated_tokens })) : f
+      }
+      if (msg.subtype === 'local_command_output' && typeof msg.content === 'string') {
+        const output = msg.content.replace(/\x1b\[[0-9;]*m/g, '').trim()
+        return output ? keep(appendItem(t, { kind: 'system', id: `cmd:${msg.uuid ?? at}`, text: firstLineOf(output, 120), level: 'info', at, variant: 'command', detail: clip(output, MAX_TOOL_OUTPUT) })) : f
+      }
+      if (msg.subtype === 'informational' && typeof msg.content === 'string' && msg.level !== 'info') {
+        const level = msg.level === 'warning' ? 'warning' : 'info'
+        return keep(appendItem(t, { kind: 'system', id: `note:${msg.uuid ?? at}`, text: msg.content, level, at, variant: 'notice' }))
+      }
+      if (msg.subtype === 'task_started' && msg.tool_use_id) {
+        return keep(updateItem(t, msg.tool_use_id, (x) => (x.kind === 'tool' ? { ...x, taskId: msg.task_id, ...(msg.is_backgrounded ? { background: true } : {}) } : x)))
+      }
+      if (msg.subtype === 'task_updated' && msg.patch?.is_backgrounded) {
+        const row = t.items.find((x) => x.kind === 'tool' && x.taskId === msg.task_id)
+        return row ? keep(updateItem(t, row.id, { background: true })) : f
+      }
+      if (msg.subtype === 'background_tasks_changed' && Array.isArray(msg.tasks)) {
+        const background = msg.tasks.filter((x) => x && !x.ambient).map((x) => ({ id: String(x.task_id), description: String(x.description ?? ''), type: String(x.task_type ?? 'task'), ...(x.tool_use_id ? { toolUseId: String(x.tool_use_id) } : {}) }))
+        return keep({ ...t, background })
+      }
+      if (msg.subtype === 'task_notification' && !msg.skip_transcript) {
+        const row = t.items.find((x) => x.kind === 'tool' && x.taskId === msg.task_id)
+        // A task that ran in the foreground ends with its tool row; only a background one gets a line of its own.
+        if (!row?.background && !t.background.some((x) => x.id === msg.task_id)) return f
+        const what = row?.label ? `${row.label}${row.detail ? ` · ${row.detail}` : ''}` : 'A background task'
+        const summary = typeof msg.summary === 'string' ? msg.summary.trim() : ''
+        return keep(appendItem(t, {
+          kind: 'system', id: `task:${msg.task_id}:${msg.status}`, text: `${what} ${TASK_WORDS[msg.status] ?? msg.status}`, level: msg.status === 'failed' ? 'warning' : 'info', at, variant: 'task',
+          ...(summary ? { detail: clip(summary, MAX_TOOL_OUTPUT) } : {})
+        }))
+      }
       return f
     }
+    case 'prompt_suggestion':
+      return typeof msg.suggestion === 'string' && msg.suggestion.trim() ? keep({ ...t, suggestion: msg.suggestion.trim() }) : f
+    case 'rate_limit_event': {
+      const info = msg.rate_limit_info ?? {}
+      if (info.status !== 'rejected') return f
+      const resets = typeof info.resetsAt === 'number' ? ` It resets at ${clockTime(info.resetsAt < 1e12 ? info.resetsAt * 1000 : info.resetsAt)}.` : ''
+      return keep(appendItem(t, { kind: 'system', id: `limit:${info.rateLimitType ?? ''}:${info.resetsAt ?? at}`, text: `You've reached your usage limit.${resets}`, level: 'warning', at, variant: 'limit' }))
+    }
+    case 'conversation_reset':
+      return keep(appendItem({ ...t, sessionId: msg.new_conversation_id ?? t.sessionId }, { kind: 'system', id: `reset:${msg.uuid ?? at}`, text: 'Conversation cleared', level: 'info', at, variant: 'cleared' }))
     case 'stream_event': {
       const ev = msg.event ?? {}
       if (ev.type === 'message_start') {
         stream = { messageId: ev.message?.id ?? msg.uuid ?? `m${at}`, blocks: {} }
-        return { transcript: t, stream }
+        // The call went through: whatever retry the working line showed is over.
+        return keep(t.retry ? { ...t, retry: null } : t)
       }
       const messageId = stream.messageId ?? msg.uuid ?? `m${at}`
       if (ev.type === 'content_block_start') {
         const b = ev.content_block ?? {}
         if (b.type === 'tool_use') {
-          t = appendItem(t, { kind: 'tool', id: b.id, name: b.name, title: toolTitle(b.name, b.input), input: '', status: 'running', at, ...toolView(b.name, b.input) })
+          t = appendItem(t, { kind: 'tool', id: b.id, name: b.name, title: toolTitle(b.name, b.input), input: '', status: 'running', at, ...(msg.parent_tool_use_id ? { parent: msg.parent_tool_use_id } : {}), ...toolView(b.name, b.input) })
           stream = { messageId, blocks: { ...stream.blocks, [ev.index]: b.id } }
         } else {
           const id = `${messageId}:${ev.index}`
@@ -259,23 +375,23 @@ export function foldSdkMessage(f, msg) {
           if ((b.type === 'thinking' || b.type === 'redacted_thinking') && !t.items.some((x) => x.id === id)) t = appendItem(t, { kind: 'thinking', id, text: '', streaming: true, at })
           stream = { messageId, blocks: { ...stream.blocks, [ev.index]: id } }
         }
-        return { transcript: t, stream }
+        return keep(t)
       }
       if (ev.type === 'content_block_stop') {
         const id = stream.blocks[ev.index]
         if (!id) return f
         const next = updateItem(t, id, (item) => (item.kind === 'thinking' && item.durationMs === undefined ? { ...item, durationMs: Math.max(0, at - item.at) } : item))
-        return next === t ? f : { transcript: next, stream }
+        return next === t ? f : keep(next)
       }
       if (ev.type === 'content_block_delta') {
         const d = ev.delta ?? {}
         const id = stream.blocks[ev.index] ?? `${messageId}:${ev.index}`
         if (d.type === 'text_delta') t = appendDelta(t, id, 'assistant', d.text, at)
         else if (d.type === 'thinking_delta') t = appendDelta(t, id, 'thinking', d.thinking, at)
-        return { transcript: t, stream }
+        return keep(t)
       }
       if (ev.type === 'message_delta' && ev.usage) {
-        return { transcript: addUsage(t, { outputTokens: num(ev.usage.output_tokens) }), stream }
+        return keep(addUsage(t, { outputTokens: num(ev.usage.output_tokens) }))
       }
       return f
     }
@@ -289,24 +405,36 @@ export function foldSdkMessage(f, msg) {
       if (msg.error) t = appendItem(t, { kind: 'system', id: `aerr:${msg.uuid ?? at}`, text: String(msg.error), level: 'error', at })
       // The stream cursor stays: this may be one block of a message still
       // streaming its next block. `message_start` and `result` reset it.
-      return { transcript: t, stream }
+      return keep(t)
     }
     case 'user': {
       const content = msg.message?.content
+      // The CLI echoes each prompt as it reads it (`--replay-user-messages`): a queued one joins the transcript here.
+      if (msg.isReplay && msg.uuid) {
+        const next = dequeue(t, msg.uuid, at)
+        return next === t ? f : keep(next)
+      }
+      // The summary a compaction leaves arrives as a synthetic prompt right after its boundary.
+      if (f.compactId && msg.isSynthetic && typeof content === 'string') {
+        return { ...keep(updateItem(t, f.compactId, { detail: clip(content, MAX_TOOL_OUTPUT) })), compactId: null }
+      }
       t = foldToolResults(t, content, at)
-      return { transcript: t, stream }
+      return keep(t)
     }
     case 'result': {
-      t = settleStreams(t)
+      t = settleStreams({ ...t, retry: null, activity: null })
       const u = msg.usage ?? {}
       // The result's usage adds up every API call of the turn — a cost, not a context size (17 calls at
       // 66k each read as "1136k"). The context comes from each assistant message; the window from modelUsage.
       t = addUsage(t, { inputTokens: num(u.input_tokens), outputTokens: 0, costUsd: num(msg.total_cost_usd), contextWindow: contextWindowOf(msg.modelUsage, t.model) })
-      if (msg.is_error || msg.subtype !== 'success') {
+      if (opts.interrupted) {
+        t = setStatus(appendItem(t, { kind: 'system', id: `interrupt:${msg.uuid ?? at}`, text: 'Interrupted', level: 'info', at, variant: 'interrupt' }), 'idle')
+      } else if (msg.is_error || msg.subtype !== 'success') {
         const text = msg.result || msg.errors?.join?.('\n') || msg.subtype || 'The turn failed'
         t = setStatus(appendItem(t, { kind: 'system', id: `result:${msg.uuid ?? at}`, text: String(text), level: 'error', at }), 'error', String(text))
       } else t = setStatus(t, 'idle')
-      return { transcript: t, stream: { messageId: null, blocks: {} } }
+      t = closeTurn(t, { at, durationMs: num(msg.duration_ms), outputTokens: num(u.output_tokens), id: `turn:${msg.uuid ?? at}` })
+      return { ...f, transcript: t, stream: { messageId: null, blocks: {} } }
     }
     default:
       return f
@@ -331,25 +459,70 @@ function contextWindowOf(modelUsage, model) {
  */
 export function sessionMessagesToTranscript(meta, messages) {
   let t = emptyTranscript('claude', { cwd: meta.cwd, sessionId: meta.sessionId, title: meta.info?.customTitle ?? null })
+  // Turn footers come from the stored times: from the first step after a prompt to the last.
+  let first = null
+  let last = null
+  let open = null
+  const close = () => {
+    if (open !== null) t = closeTurn(t, { at: last ?? open, durationMs: first !== null && last !== null ? Math.max(0, last - first) : undefined, id: `turn:${last ?? open}` })
+    first = null
+    last = null
+    open = null
+  }
+  let known = false
+  const step = (at) => {
+    open = at
+    // A line without a stored time says nothing about how long the turn took.
+    if (!known) return
+    if (first === null) first = at
+    last = at
+  }
   for (const m of messages ?? []) {
-    const at = typeof m.timestamp === 'string' ? Date.parse(m.timestamp) || Date.now() : Date.now()
+    known = typeof m.timestamp === 'string' && !Number.isNaN(Date.parse(m.timestamp))
+    const at = known ? Date.parse(m.timestamp) : Date.now()
     const inner = m.message ?? {}
     if (m.type === 'user') {
       const content = inner.content
+      const hadResults = Array.isArray(content) && content.some((c) => c?.type === 'tool_result')
       t = foldToolResults(t, content, at)
-      const text = userText(content)
+      if (hadResults) step(at)
+      const raw = userText(content)
       const images = userImages(content)
-      if ((text || images.length) && !m.isSynthetic && !m.isMeta) t = appendItem(t, { kind: 'user', id: m.uuid, text, at, ...(images.length ? { attachments: images } : {}) })
+      if (COMPACT_SUMMARY.test(raw)) {
+        const row = [...t.items].reverse().find((x) => x.kind === 'system' && x.variant === 'compact' && !x.detail)
+        t = row ? updateItem(t, row.id, { detail: clip(raw, MAX_TOOL_OUTPUT) }) : appendItem(t, { ...compactItem(`compact:${m.uuid}`, null, at), detail: clip(raw, MAX_TOOL_OUTPUT) })
+        continue
+      }
+      if (INTERRUPT_TEXT.test(raw.trim())) {
+        t = appendItem(t, { kind: 'system', id: `interrupt:${m.uuid}`, text: 'Interrupted', level: 'info', at, variant: 'interrupt' })
+        step(at)
+        continue
+      }
+      const output = storedCommandOutput(raw)
+      if (output !== null) {
+        if (output) t = appendItem(t, { kind: 'system', id: `cmd:${m.uuid}`, text: firstLineOf(output, 120), level: 'info', at, variant: 'command', detail: clip(output, MAX_TOOL_OUTPUT) })
+        continue
+      }
+      const text = storedCommand(raw) ?? raw
+      if ((text || images.length) && !m.isSynthetic && !m.isMeta) {
+        close()
+        t = appendItem(t, { kind: 'user', id: m.uuid, uuid: m.uuid, text, at, ...(images.length ? { attachments: images } : {}) })
+      }
     } else if (m.type === 'assistant') {
       t = foldAssistantBlocks(t, inner.id ?? m.uuid, inner.content, at, m.parent_tool_use_id)
       const context = m.parent_tool_use_id ? undefined : contextOf(inner.usage)
       if (context) t = addUsage(t, { contextTokens: context })
-    } else if (m.type === 'system' && inner?.subtype === 'compact_boundary') {
-      t = appendItem(t, { kind: 'system', id: `compact:${m.uuid}`, text: 'Context compacted', level: 'info', at })
+      step(at)
+    } else if (m.type === 'system' && (inner?.subtype ?? m.subtype) === 'compact_boundary') {
+      t = appendItem(t, compactItem(`compact:${m.uuid}`, inner.compact_metadata ?? inner.compactMetadata ?? m.compactMetadata, at))
     }
   }
+  close()
   return t
 }
+
+/** The prompt Claude Code writes after a compaction: the summary the conversation continues from. */
+const COMPACT_SUMMARY = /^This session is being continued from a previous conversation/
 
 /**
  * An `SDKSessionInfo` → the picker's row.
