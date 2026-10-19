@@ -13,6 +13,11 @@ test('verbs parse from a packaged or dev argv, flags before them ignored', () =>
   assert.deepEqual(parseWorkspaceArgs([EXE, 'open', '--cwd', 'C:\\proj', '--launch', 'claude']), { kind: 'open', launch: 'claude', cwd: 'C:\\proj' })
   assert.deepEqual(parseWorkspaceArgs([EXE, 'open', '--cwd=C:\\p', '--run=npm run dev']), { kind: 'open', launch: 'shell', cwd: 'C:\\p', command: 'npm run dev' })
   assert.deepEqual(parseWorkspaceArgs([EXE, 'show']), { kind: 'show' })
+  assert.deepEqual(parseWorkspaceArgs([EXE, 'chat']), { kind: 'chat', provider: 'claude' })
+  assert.deepEqual(parseWorkspaceArgs([EXE, 'chat', '--provider', 'codex', '--cwd', 'C:\\proj']), { kind: 'chat', provider: 'codex', cwd: 'C:\\proj' })
+  assert.equal(parseWorkspaceArgs([EXE, 'chat', '--provider', 'gemini']), null)
+  assert.equal(isWorkspaceCommand({ kind: 'chat', provider: 'codex' }), true)
+  assert.equal(isWorkspaceCommand({ kind: 'chat', provider: 'codex', launch: 'shell' }), false)
 })
 
 test('a plain launch or a malformed command is null, never a throw', () => {

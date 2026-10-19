@@ -365,9 +365,10 @@ export function App() {
 
   // The app's keys are one table, `@shared/keymap.mjs`, which the Settings
   // legend renders too. Inside a terminal pane only the keys marked
-  // `terminal` are ours (the Alt layer, Ctrl+Shift chords, Ctrl+Tab, Ctrl+1–6)
-  // — the rest (Ctrl+K, Ctrl+B, F1, Escape…) belong to the CLI there, and a
-  // test keeps every terminal key off Claude Code's, Codex's and the shell's.
+  // `terminal` are ours (Ctrl+K, the Alt layer, Ctrl+Shift chords, Ctrl+Tab,
+  // Ctrl+1–6) — the rest (Ctrl+B, F1, Escape…) belong to the CLI there, and a
+  // test keeps every terminal key off Claude Code's, Codex's and the shell's
+  // except the ones the user chose to take (`TAKEN`: Ctrl+K).
   // Escape closes an open menu, the palette, or a dialog, then un-zooms, and
   // otherwise dismisses the workspace.
   /** Run one of the keymap's actions; false when it had nothing to act on (Ctrl+5 with four panes). */
@@ -452,6 +453,7 @@ export function App() {
       case 'layout': applyLayout(raw.name); break
       case 'settings': setSettingsSection(raw.section); setSettingsOpen(true); break
       case 'clipboard': openClipboard(); break
+      case 'chat': startIn(raw.provider, { cwd: raw.cwd, label: raw.cwd ? raw.cwd.split(/[\\/]/).filter(Boolean).pop() : context.label }); break
       case 'open': {
         const label = raw.cwd ? raw.cwd.split(/[\\/]/).pop() : undefined
         if (raw.sessionId) {
@@ -864,11 +866,11 @@ export function App() {
     addPane('terminal', { launch: 'shell', cwd: context.cwd, label: context.label, initialCommand: command.command })
   }
 
-  /** A project group dropped on the grid: a shell there (Shift for Claude Code). */
+  /** A project group dropped on the grid: a terminal there (Shift for a Claude Code chat). */
   const dropProject = (key: string, claude: boolean) => {
     const group = groups.find((g) => g.key === key)
     if (!group?.cwd) return
-    addPane('terminal', { launch: claude ? 'claude' : 'shell', cwd: group.cwd, label: group.project })
+    startIn(claude ? 'claude' : 'shell', { cwd: group.cwd, label: group.project })
   }
 
   /** Embedded launch: a terminal pane in the current context. When the grid is
@@ -885,6 +887,24 @@ export function App() {
   const newChat = (provider: 'claude' | 'codex') => {
     if (panes.length >= MAX_PANES) return
     addPane('chat', undefined, undefined, undefined, { provider, cwd: context.cwd ?? '' })
+  }
+
+  /**
+   * Start something in a folder (a badge's menu, an agent row's *Start in ▸*,
+   * a dropped project): Claude Code and Codex start as chat panes, a shell as
+   * a terminal pane. There are no Claude Code or Codex terminal launches any
+   * more (0.4.63, the user's call) — a session in a terminal is a plain
+   * terminal you type `claude` into. A terminal degrades to a window on a
+   * full grid or Shift; a chat has nowhere else to go.
+   */
+  const startIn = (kind: TerminalLaunch, target: LaunchTarget, external = false) => {
+    if (kind === 'shell') {
+      if (external || panes.length >= MAX_PANES) window.watch.openTerminal(target.cwd, 'shell')
+      else addPane('terminal', { launch: 'shell', cwd: target.cwd, label: target.label })
+      return
+    }
+    if (panes.length >= MAX_PANES) return
+    addPane('chat', undefined, undefined, undefined, { provider: kind, cwd: target.cwd ?? '' })
   }
 
   const updateChat = (paneId: string, patch: Partial<ChatPaneConfig>) => {
@@ -1297,13 +1317,11 @@ export function App() {
     // Pinned items are the palette's resting list (before anything is typed):
     // the ways to start a session, and the jump to a waiting one.
     // "terminal" / "chat" in every launch label: the two surfaces run the same CLI and must never share a name.
-    cmd('new-claude', 'New Claude Code terminal', () => newTerminal('claude'), { icon: <ProviderBadge provider="claude" />, keywords: ['agent', 'cli'], pinned: true, detail: context.label })
-    cmd('new-codex', 'New Codex terminal', () => newTerminal('codex'), { icon: <ProviderBadge provider="codex" />, keywords: ['agent', 'cli'], pinned: true, detail: context.label })
+    // Claude Code and Codex start as chat panes; a terminal is a plain shell (type `claude` there for a CLI session).
+    cmd('new-claude-chat', 'New Claude Code chat', () => newChat('claude'), { icon: <ProviderBadge provider="claude" />, keywords: ['agent', 'chat', 'conversation', 'session'], pinned: true, detail: full ? 'all six panes are open' : context.label })
+    cmd('new-codex-chat', 'New Codex chat', () => newChat('codex'), { icon: <ProviderBadge provider="codex" />, keywords: ['agent', 'chat', 'conversation', 'thread', 'session'], pinned: true, detail: full ? 'all six panes are open' : context.label })
     cmd('new-terminal', 'New terminal', () => newTerminal('shell'), { icon: <Terminal strokeWidth={2} />, keywords: ['shell', 'powershell'], keys: ['Ctrl', 'Shift', '`'], pinned: true, detail: full ? 'opens a window — all six panes are open' : context.label })
     cmd('ext-terminal', 'Open external terminal', () => window.watch.openTerminal(context.cwd, 'shell'), { icon: <SquareTerminal strokeWidth={2} />, detail: context.label ?? 'home folder' })
-    // Chat panes: the extensions' conversation UI over the same CLIs, with their own history.
-    cmd('new-claude-chat', 'New Claude Code chat', () => newChat('claude'), { icon: <ProviderBadge provider="claude" />, keywords: ['agent', 'chat', 'conversation'], detail: full ? 'all six panes are open' : context.label })
-    cmd('new-codex-chat', 'New Codex chat', () => newChat('codex'), { icon: <ProviderBadge provider="codex" />, keywords: ['agent', 'chat', 'conversation', 'thread'], detail: full ? 'all six panes are open' : context.label })
     const focusedChat = panes.find((p) => p.id === focusedPane && p.kind === 'chat')
     if (focusedChat) {
       cmd('chat-sessions', 'Chat: pick a session', () => chatRefs.current.get(focusedChat.id)?.pickSession(), { icon: <MessageSquare strokeWidth={2} />, keywords: ['history', 'resume', 'thread'] })
@@ -1534,11 +1552,11 @@ export function App() {
             onOpenMenu={setOpenMenu}
             onSelect={selectProject}
             onLaunch={(kind, target, external) => {
-              // Starting something records it as that folder's usual launch (the menu's check).
+              // Starting something records it as that folder's usual start (the menu's check).
               setLaunchPrefs((current) => withLaunch(current, target.cwd, kind))
-              if (external || panes.length >= MAX_PANES) window.watch.openTerminal(target.cwd, kind)
-              else addPane('terminal', { launch: kind, cwd: target.cwd, label: target.label })
+              startIn(kind, target, external)
             }}
+            paneFull={panes.length >= MAX_PANES}
             launchKindFor={(cwd) => launchFor(launchPrefs, cwd)}
             onNewProject={() => setNewProjectOpen(true)}
             onOpenWeb={openWeb}
@@ -1606,8 +1624,8 @@ export function App() {
             <div className="gridempty" data-testid="grid-empty">
               <SquareTerminal strokeWidth={1.5} style={{ width: 28, height: 28 }} />
               <div className="gridempty-hint">
-                Nothing open. Right-click a project at the top of the sidebar to open a Claude Code or Codex terminal there; the Terminal menu has the chats.
-                <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>`</kbd> opens a plain terminal; <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd> finds everything else.
+                Nothing open. Right-click a project at the top of the sidebar to start a Claude Code or Codex chat there (File has them too).
+                <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>`</kbd> opens a terminal; <kbd>Ctrl</kbd><kbd>K</kbd> finds everything else.
               </div>
             </div>
           )}
@@ -1751,11 +1769,8 @@ export function App() {
           inPane={!!menuPane}
           onGoTo={focusAgentAnywhere}
           onRename={(id) => { setMenu(null); setRenaming(id) }}
-          onLaunch={(launch, cwd) => {
-            // Same as a project badge: a pane in that folder; a full grid opens a window.
-            if (panes.length >= MAX_PANES) window.watch.openTerminal(cwd, launch)
-            else addPane('terminal', { launch, cwd, label: cwd.split(/[\\/]/).filter(Boolean).pop() })
-          }}
+          onLaunch={(launch, cwd) => startIn(launch, { cwd, label: cwd.split(/[\\/]/).filter(Boolean).pop() })}
+          paneFull={panes.length >= MAX_PANES}
         />
       )}
       {renaming && (

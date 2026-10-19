@@ -11,6 +11,7 @@ export type WorkspaceCommand =
   | { kind: 'settings'; section?: 'shortcuts' }
   | { kind: 'clipboard' }
   | { kind: 'open'; launch: TerminalLaunch; cwd?: string; command?: string; sessionId?: string }
+  | { kind: 'chat'; provider: 'claude' | 'codex'; cwd?: string }
 
 export function parseWorkspaceArgs(argv: unknown): WorkspaceCommand | null
 export function isWorkspaceCommand(value: unknown): value is WorkspaceCommand

@@ -1,11 +1,12 @@
 /**
  * Commands a second instance can hand the running app (F12): the argv of
- * `tm open --cwd C:\proj --launch claude`, `tm layout Build`, `tm palette`,
- * `tm usage`, `tm activity`. Parsed here so main and the renderer validate
+ * `tm open --cwd C:\proj --launch claude`, `tm chat --provider codex`,
+ * `tm layout Build`, `tm palette`, `tm usage`, `tm activity`. Parsed here so main and the renderer validate
  * the same shape, and the CLI wrapper can print the same help.
  */
 
 const LAUNCHES = new Set(['shell', 'claude', 'codex'])
+const CHAT_PROVIDERS = new Set(['claude', 'codex'])
 const MAX_PATH = 4096
 const MAX_NAME = 40
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -14,7 +15,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 function userArgs(argv) {
   const list = Array.isArray(argv) ? argv.filter((a) => typeof a === 'string') : []
   // The first entry is the executable (dev: electron.exe + script path).
-  const start = list.findIndex((a) => a === '--' || a === 'open' || a === 'layout' || a === 'palette' || a === 'usage' || a === 'activity' || a === 'notes' || a === 'show' || a === 'hide')
+  const start = list.findIndex((a) => a === '--' || a === 'open' || a === 'chat' || a === 'layout' || a === 'palette' || a === 'usage' || a === 'activity' || a === 'notes' || a === 'show' || a === 'hide')
   if (start < 0) return []
   return list.slice(list[start] === '--' ? start + 1 : start)
 }
@@ -46,6 +47,14 @@ export function parseWorkspaceArgs(argv) {
     if (!name || name.length > MAX_NAME || name.startsWith('--')) return null
     return { kind: 'layout', name }
   }
+  if (verb === 'chat') {
+    // A chat pane (the Jump List's starts): Claude Code unless --provider says Codex.
+    const provider = option(args, 'provider') ?? 'claude'
+    const cwd = option(args, 'cwd')
+    if (!CHAT_PROVIDERS.has(provider)) return null
+    if (cwd !== undefined && (typeof cwd !== 'string' || cwd.length === 0 || cwd.length > MAX_PATH || /[\r\n\0]/.test(cwd))) return null
+    return { kind: 'chat', provider, ...(cwd ? { cwd } : {}) }
+  }
   if (verb === 'open') {
     const cwd = option(args, 'cwd')
     const launch = option(args, 'launch') ?? 'shell'
@@ -69,6 +78,10 @@ export function isWorkspaceCommand(value) {
     case 'settings': return Object.keys(c).every((k) => k === 'kind' || k === 'section') && (c.section === undefined || c.section === 'shortcuts')
     // Only main sends this too (the picker's Clips → Open Clipboard pane).
     case 'clipboard': return Object.keys(c).every((k) => k === 'kind')
+    case 'chat':
+      return CHAT_PROVIDERS.has(c.provider)
+        && Object.keys(c).every((k) => k === 'kind' || k === 'provider' || k === 'cwd')
+        && (c.cwd === undefined || (typeof c.cwd === 'string' && c.cwd.length > 0 && c.cwd.length <= MAX_PATH && !/[\r\n\0]/.test(c.cwd)))
     case 'open':
       return LAUNCHES.has(c.launch)
         && (c.cwd === undefined || (typeof c.cwd === 'string' && c.cwd.length > 0 && c.cwd.length <= MAX_PATH && !/[\r\n\0]/.test(c.cwd)))
@@ -85,6 +98,7 @@ export const USAGE = `tm — drive the TaylorMade Agent Monitor workspace
 
   Workspace (opens the window):
     tm show | hide | palette | usage | activity | notes
+    tm chat [--provider claude|codex] [--cwd <folder>]
     tm open [--cwd <folder>] [--launch shell|claude|codex] [--run "<command>"]
     tm layout <name>
 

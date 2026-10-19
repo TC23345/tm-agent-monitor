@@ -80,16 +80,17 @@ export function MenuItem({ icon, label, hint, disabled, keys, onClick }: {
  * `onClick` gets the event because some rows are launches, where Shift means
  * "in an external window"; `testId` overrides the label-derived default for a
  * row automation already knows by another name. */
-export function MenuCheckItem({ icon, label, hint, checked, onClick, testId }: {
+export function MenuCheckItem({ icon, label, hint, checked, disabled, onClick, testId }: {
   icon?: ReactNode
   label: string
   hint?: string
   checked: boolean
+  disabled?: boolean
   onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void
   testId?: string
 }) {
   return (
-    <button className="menu-item" onClick={onClick} title={hint} aria-pressed={checked} data-testid={testId ?? tid('menu', label)}>
+    <button className="menu-item" disabled={disabled} onClick={onClick} title={hint} aria-pressed={checked} data-testid={testId ?? tid('menu', label)}>
       <span className="menu-item-ic">{icon}</span>
       {label}
       <span className={`menu-check ${checked ? '' : 'menu-check--off'}`}>

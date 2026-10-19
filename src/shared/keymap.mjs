@@ -6,8 +6,11 @@
  * A key marked `terminal: true` fires even while a terminal pane has focus:
  * App's capture-phase listener takes it before xterm, so the CLI never sees
  * it. Those must never collide with a key in `RESERVED` — the test enforces
- * it. A key with `terminal: false` fires everywhere else and goes to the CLI
- * inside a pane (Ctrl+K is kill-to-end-of-line in Claude Code's prompt).
+ * it — unless the user chose to take that key from the CLI (`TAKEN`). A key
+ * with `terminal: false` fires everywhere else and goes to the CLI inside a
+ * pane (Ctrl+B backgrounds a Claude Code task). `page: false` leaves a key
+ * to a web pane's page even when it works in a terminal (Ctrl+K is a site's
+ * search).
  *
  * Chords use the accelerator spelling of `hotkeys.mjs` (`Control+Shift+P`),
  * keys from the physical `code`, so Shift never changes the key's name.
@@ -48,13 +51,15 @@ export function keyLabel(chord) {
 }
 
 const k = (chord, terminal, arg) => (arg === undefined ? { chord, terminal } : { chord, terminal, arg })
+/** A key that works inside a terminal but stays the page's in a web pane. */
+const notInPage = (key) => ({ ...key, page: false })
 
 /**
  * Every in-app action App's handler runs from a key. `display` shortens a run
  * of keys (Ctrl+1 … Ctrl+6) in the legend; matching still uses `keys`.
  */
 export const APP_KEYS = Object.freeze([
-  { action: 'palette', label: 'Command palette', keys: [k('Control+K', false), k('Control+P', false), k('Control+Shift+P', true), k('Alt+K', true)] },
+  { action: 'palette', label: 'Command palette', keys: [notInPage(k('Control+K', true)), k('Control+P', false), k('Control+Shift+P', true), k('Alt+K', true)] },
   { action: 'legend', label: 'Keys pane on / off (this legend)', keys: [k('F1', false), k('Control+/', false)] },
   { action: 'settings', label: 'Settings', keys: [k('Control+,', false)] },
   { action: 'sidebar', label: 'Hide / show the sidebar', keys: [k('Control+B', false), k('Alt+S', true)] },
@@ -165,20 +170,30 @@ export const RESERVED = Object.freeze([
   ...[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => r(PS, `Alt+${n}`, 'repeat count'))
 ])
 
+/**
+ * Keys the user chose to take from the CLI inside a terminal pane (0.4.63):
+ * the palette on Ctrl+K everywhere, at the cost of the prompt's
+ * delete-to-end-of-line there. They stay in `RESERVED`, so the legend's
+ * *Check a key* still names what the shell loses.
+ */
+export const TAKEN = Object.freeze(['Control+K'])
+
 /** The owners reading the legend groups by, in order. */
 export const RESERVED_OWNERS = Object.freeze([CC, CX, RL, PS])
 
 /**
  * The in-app action a keydown runs, or null. `inTerminal`: focus is inside a
- * terminal pane, where only the `terminal: true` keys are the app's.
+ * terminal pane, where only the `terminal: true` keys are the app's;
+ * `inPage`: inside a web pane's page, which also keeps the `page: false` ones.
  */
-export function matchAppKey(chord, inTerminal) {
+export function matchAppKey(chord, inTerminal, inPage = false) {
   const want = canonicalChord(chord)
   if (!want) return null
   for (const entry of APP_KEYS) {
     for (const key of entry.keys) {
       if (canonicalChord(key.chord) !== want) continue
       if (inTerminal && !key.terminal) return null
+      if (inPage && key.page === false) return null
       return key.arg === undefined ? { action: entry.action } : { action: entry.action, arg: key.arg }
     }
   }
@@ -209,9 +224,10 @@ export function ownersOf(chord) {
   return out
 }
 
-/** App keys that fire inside a terminal yet belong to a CLI or the shell. Must stay empty. */
+/** App keys that fire inside a terminal yet belong to a CLI or the shell, other than the `TAKEN` ones. Must stay empty. */
 export function terminalCollisions() {
-  const reserved = new Map(RESERVED.map((x) => [canonicalChord(x.chord), x]))
+  const taken = new Set(TAKEN.map(canonicalChord))
+  const reserved = new Map(RESERVED.filter((x) => !taken.has(canonicalChord(x.chord))).map((x) => [canonicalChord(x.chord), x]))
   const out = []
   for (const entry of APP_KEYS) {
     for (const key of entry.keys) {

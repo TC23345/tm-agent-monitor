@@ -216,8 +216,12 @@
 
 /* ---- approvals, plans and questions ---- */
 /* No focus ring on a card: an accent ring reads as red beside the waiting border, and a card keeps
-   focus after it is answered. Its numbered options say it takes the keys. */
-.chat-card { border: 1px solid var(--chat-wait); border-radius: var(--r-card, 8px); padding: 8px 10px; background: color-mix(in srgb, var(--chat-wait) 8%, transparent); outline: none; }
+   focus after it is answered. Its numbered options say it takes the keys.
+   The waiting red is the border alone, never a wash: a translucent red ground showed through the
+   see-through children (the IN grid, the No row's field) and not through the solid ones (the
+   options), so the card came out red in uneven patches (0.4.64). On a neutral ground every child
+   reads the same. */
+.chat-card { border: 1px solid var(--chat-wait); border-radius: var(--r-card, 8px); padding: 8px 10px; background: var(--chat-tool-bg); outline: none; }
 .is-decided > .chat-card { border-color: var(--chat-rule); background: transparent; }
 .chat-pre { margin: 6px 0 0; font: 12px/1.4 var(--chat-mono); white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; color: var(--muted, #999); }
 .chat-approval-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; color: var(--chat-ink); }
@@ -232,10 +236,13 @@
 .chat-options { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
 .chat-option, .chat-option-btn { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 5px 8px; border: 1px solid var(--chat-line); border-radius: 6px; background: var(--elev, rgba(127, 127, 127, 0.08)); color: var(--chat-ink); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
 .chat-option:hover, .chat-option-btn:hover { filter: brightness(1.1); }
-.chat-option.is-primary, .chat-option.is-primary .chat-option-btn { border-color: var(--accent, #4a7bd0); }
+/* The primary option is a brighter neutral edge, not the accent: terracotta beside the waiting red read as
+   a second, slightly different red. */
+.chat-option.is-primary, .chat-option.is-primary .chat-option-btn { border-color: color-mix(in srgb, var(--chat-ink) 40%, transparent); }
 .chat-option.is-deny { padding: 0; gap: 0; cursor: default; align-items: stretch; flex-wrap: wrap; background: transparent; border: 0; }
 .chat-option.is-deny .chat-option-btn { width: auto; flex: 0 0 auto; border-top-right-radius: 0; border-bottom-right-radius: 0; }
-.chat-option-input { flex: 1 1 160px; min-width: 0; font: inherit; font-size: 12.5px; padding: 4px 8px; border: 1px solid var(--chat-line); border-left: 0; border-radius: 0 6px 6px 0; background: transparent; color: inherit; outline: none; }
+/* The No row's field has the options' own ground, so the row reads as one control like the rows above it. */
+.chat-option-input { flex: 1 1 160px; min-width: 0; font: inherit; font-size: 12.5px; padding: 4px 8px; border: 1px solid var(--chat-line); border-left: 0; border-radius: 0 6px 6px 0; background: var(--elev, rgba(127, 127, 127, 0.08)); color: inherit; outline: none; }
 .chat-option-input:focus { border-color: var(--accent, #4a7bd0); border-left: 1px solid var(--accent, #4a7bd0); }
 .chat-option-key { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 3px; border: 1px solid var(--chat-rule); border-radius: 4px; font: 10.5px var(--chat-mono); color: var(--faint, var(--muted, #888)); }
 .chat-option-label { min-width: 0; }

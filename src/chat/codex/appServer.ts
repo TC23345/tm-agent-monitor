@@ -343,16 +343,17 @@ export class CodexAppServer extends EventEmitter {
     } catch {
       /* already gone */
     }
-    // Still running after its input closed: end it with the MCP servers it started (a plain kill orphans them on Windows).
-    const killer = setTimeout(() => {
-      killProcessTree(proc.pid)
-      try {
-        proc.kill()
-      } catch {
-        /* already gone */
-      }
-    }, 1500)
-    proc.once('exit', () => clearTimeout(killer))
+    // End it now, with the MCP servers it started. Waiting for it to exit on its
+    // own lost the race on app quit: the host is gone before any timer fires, and
+    // an app-server that exits by itself leaves its MCP servers' node processes
+    // behind on Windows (a `railway mcp` outlived the debug app, 0.4.63). The
+    // thread store is written as it goes, so there is nothing to flush.
+    killProcessTree(proc.pid)
+    try {
+      proc.kill()
+    } catch {
+      /* already gone */
+    }
   }
 }
 

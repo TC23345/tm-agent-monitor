@@ -3115,8 +3115,8 @@ if (!gotLock) {
     // uninstall, which a dev electron.exe does not.
     if (process.platform === 'win32' && app.isPackaged) {
       app.setUserTasks([
-        { program: process.execPath, arguments: 'open --launch claude', iconPath: process.execPath, iconIndex: 0, title: 'New Claude Code terminal', description: 'Start Claude Code in a terminal pane in the workspace' },
-        { program: process.execPath, arguments: 'open --launch codex', iconPath: process.execPath, iconIndex: 0, title: 'New Codex terminal', description: 'Start Codex in a terminal pane in the workspace' },
+        { program: process.execPath, arguments: 'chat --provider claude', iconPath: process.execPath, iconIndex: 0, title: 'New Claude Code chat', description: 'Start a Claude Code chat pane in the workspace' },
+        { program: process.execPath, arguments: 'chat --provider codex', iconPath: process.execPath, iconIndex: 0, title: 'New Codex chat', description: 'Start a Codex chat pane in the workspace' },
         { program: process.execPath, arguments: 'open --launch shell', iconPath: process.execPath, iconIndex: 0, title: 'New terminal', description: 'Open a terminal in the workspace' },
         { program: process.execPath, arguments: 'show', iconPath: process.execPath, iconIndex: 0, title: 'Show workspace', description: 'Bring the workspace to the front' }
       ])

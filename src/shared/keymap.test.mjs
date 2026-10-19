@@ -39,7 +39,9 @@ test('the common keys run their actions outside a terminal', () => {
 })
 
 test('inside a terminal the CLI keeps its keys and the Alt layer still reaches the app', () => {
-  assert.equal(matchAppKey('Control+K', true), null, "Ctrl+K is the prompt's delete-to-end")
+  assert.deepEqual(matchAppKey('Control+K', true), { action: 'palette' }, 'Ctrl+K opens the palette everywhere (the user took it from the prompt)')
+  assert.equal(matchAppKey('Control+K', true, true), null, "a web page keeps Ctrl+K (a site's search)")
+  assert.equal(matchAppKey('Control+P', true), null, "Ctrl+P is still the prompt's previous line")
   assert.equal(matchAppKey('Control+B', true), null, 'Ctrl+B backgrounds a Claude Code task')
   assert.equal(matchAppKey('F1', true), null, "F1 is PowerShell's command help")
   assert.deepEqual(matchAppKey('Alt+K', true), { action: 'palette' })

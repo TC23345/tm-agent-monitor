@@ -9,7 +9,7 @@ See [CHANGELOG.md](./CHANGELOG.md) for what each version added, and [CLAUDE.md](
 ## The workspace
 
 - **Title bar.** The brand mark and the **File / Terminal / User** menus are at the left, the **command center** is in the middle, and the waiting count and provider connection sit at the right. Menus hold verbs. Workspace state lives in the status bar.
-- **Sidebar.** The **Activity** head shows a badge for every project you worked in over the last four hours. A red dot means a session there is waiting on you; a blue dot means one is working. Below the badges is a stream of what sessions asked, finished, started, ended and edited. Left-click a badge to make it the launch target and swap the stream for that project's **file tree**. Right-click a badge for its menu: *New Claude Code terminal*, *New Codex terminal*, *New terminal*, and web links. Under the Activity head sit **Limits** (quota bars per provider) and **Agents** (live sessions by project, with subagents nested). Every section folds and resizes by its handle. Ctrl+B (Alt+S inside a terminal) hides the sidebar.
+- **Sidebar.** The **Activity** head shows a badge for every project you worked in over the last four hours. A red dot means a session there is waiting on you; a blue dot means one is working. Below the badges is a stream of what sessions asked, finished, started, ended and edited. Left-click a badge to make it the launch target and swap the stream for that project's **file tree**. Right-click a badge for its menu: *New Claude Code chat*, *New Codex chat*, *New terminal*, and web links (the File menu starts with the same three). Under the Activity head sit **Limits** (quota bars per provider) and **Agents** (live sessions by project, with subagents nested). Every section folds and resizes by its handle. Ctrl+B (Alt+S inside a terminal) hides the sidebar.
 - **Pane grid.** Up to **six panes**, which you can drag to reorder, resize by their gutters, and zoom with a double-click on the header. Each header shows the pane's kind, its live folder (click to copy) and a few tools.
 - **Status bar.** The **Update** chip rebuilds this checkout and reinstalls it. The **Panes** popover chooses which panes and sidebar sections show. The **Layout** popover holds the workspace size, column count, saved layouts and *Reset sizes*. At the right are a `CDP :port` chip when remote debugging is on, and the version.
 
@@ -17,7 +17,7 @@ See [CHANGELOG.md](./CHANGELOG.md) for what each version added, and [CLAUDE.md](
 
 | Pane | What it is |
 | --- | --- |
-| **Claude Code terminal / Codex terminal / Terminal** | A real ConPTY shell (`node-pty` + xterm.js) in a folder, optionally running the CLI. It survives hide/show, and after a restart it comes back in the folder its shell was in, resuming the exact session it ran. Copy on select, Ctrl+C copies a selection, Ctrl+V pastes text or forwards an image to the CLI. |
+| **Terminal** | A real ConPTY shell (`node-pty` + xterm.js) in a folder. Type `claude` or `codex` in it and the pane becomes a *Claude Code terminal* / *Codex terminal*. It survives hide/show, and after a restart it comes back in the folder its shell was in, resuming the exact session it ran. Copy on select, Ctrl+C copies a selection, Ctrl+V pastes text or forwards an image to the CLI. |
 | **Claude Code chat / Codex chat** | The CLI as a conversation, the way the Claude Code extension draws it. Every step of a reply is a dot on a timeline, commands open as IN / OUT, edits show as diffs, and approvals and questions are answered inline. The composer carries the model and effort, the permission mode, slash commands, a context pie and pasted images. It runs your installed CLI through the Claude Agent SDK or `codex app-server`, and history is the providers' own (*Sessions*). |
 | **File** | A project file opened from a badge's tree: text in an editor that saves on Ctrl+S, Markdown rendered, and images inline. |
 | **Notes** | A shared notepad over `%USERPROFILE%\Notes`: a file tree with template folders (Daily, Meetings, Plans, Prompts), drag and drop, and autosave. Agents read and write the same files. |
@@ -34,7 +34,7 @@ See [CHANGELOG.md](./CHANGELOG.md) for what each version added, and [CLAUDE.md](
 | **Ctrl+Alt+W** / **Alt+Q** | Summon the workspace / the half view (global; rebind in Settings → Keyboard shortcuts) |
 | **Ctrl+Alt+V** | The clipboard picker at the cursor (global); Enter pastes the clip back into the window you were in |
 | **Alt+Shift+1–3** | Paste favorite 1–3 (global) |
-| **Ctrl+K** (Alt+K anywhere) | Command palette: every command, live agent and open window. `>` lists commands, `@` agents, `#` windows, `!` clips |
+| **Ctrl+K** (inside a terminal too; Alt+K anywhere) | Command palette: every command, live agent and open window. `>` lists commands, `@` agents, `#` windows, `!` clips |
 | **Ctrl+Tab**, **Ctrl+1–6** | Next pane, a pane by number |
 | **Alt+J** | Jump to the next session that is waiting on you (its pane, else its window) |
 | **Alt+Z** | Zoom the focused pane / restore |

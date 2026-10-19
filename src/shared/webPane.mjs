@@ -63,8 +63,9 @@ export function sanitizeWebConfig(raw) {
  * A key pressed inside a web page, as Electron's `before-input-event` reports
  * it: the workspace action it means, or null for the page. Only the keys that
  * work inside a terminal count (the Alt layer, Ctrl+Tab, Ctrl+1–6, the
- * Ctrl+Shift chords) — the plain Ctrl keys (Ctrl+K, Ctrl+B…) belong to the
- * page, the way they belong to the CLI in a terminal pane.
+ * Ctrl+Shift chords) — the plain Ctrl keys (Ctrl+B…) belong to the page, the
+ * way they belong to the CLI in a terminal pane, and so does Ctrl+K, which
+ * the workspace takes inside a terminal but a site uses for its own search.
  */
 export function webPaneKey(input) {
   // Electron reports a real press as `keyDown`; `rawKeyDown` (injected input) is a press too.
@@ -76,5 +77,5 @@ export function webPaneKey(input) {
     altKey: !!input.alt,
     shiftKey: !!input.shift,
     metaKey: !!input.meta
-  }), true)
+  }), true, true)
 }

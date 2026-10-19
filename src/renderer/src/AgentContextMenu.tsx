@@ -43,7 +43,7 @@ function resumeCommand(provider: ProviderId, raw?: string): string | null {
  * it, then the folder. Starting opens an embedded pane like a project badge
  * does (a full grid degrades to a window); nothing here hides the workspace.
  */
-export function AgentContextMenu({ menu, onClose, replySession, inPane, onGoTo, onRename, onLaunch }: {
+export function AgentContextMenu({ menu, onClose, replySession, inPane, onGoTo, onRename, onLaunch, paneFull }: {
   menu: MenuState
   onClose: () => void
   /** The embedded terminal session this agent runs in, when it has one —
@@ -54,7 +54,10 @@ export function AgentContextMenu({ menu, onClose, replySession, inPane, onGoTo, 
   onGoTo: (id: string) => void
   /** Name this session so the row says what it is for, not just what it is doing. */
   onRename: (id: string) => void
+  /** Claude Code and Codex start as chat panes, a shell as a terminal pane. */
   onLaunch: (launch: Launch, cwd: string) => void
+  /** Every pane slot is taken: a chat has nowhere to go. */
+  paneFull: boolean
 }) {
   const [reply, setReply] = useState('')
   const [copied, setCopied] = useState<string | null>(null)
@@ -119,8 +122,8 @@ export function AgentContextMenu({ menu, onClose, replySession, inPane, onGoTo, 
       icon: <SquareTerminal strokeWidth={2} />,
       disabled: !hasCwd, hint: hasCwd ? `A new pane in ${menu.cwd}` : noCwd,
       entries: [
-        { kind: 'item', id: 'launch-claude', label: 'Claude Code terminal', icon: <ProviderBadge provider="claude" />, onSelect: () => onLaunch('claude', menu.cwd) },
-        { kind: 'item', id: 'launch-codex', label: 'Codex terminal', icon: <ProviderBadge provider="codex" />, onSelect: () => onLaunch('codex', menu.cwd) },
+        { kind: 'item', id: 'launch-claude', label: 'Claude Code chat', icon: <ProviderBadge provider="claude" />, disabled: paneFull, hint: paneFull ? 'All six panes are open' : undefined, onSelect: () => onLaunch('claude', menu.cwd) },
+        { kind: 'item', id: 'launch-codex', label: 'Codex chat', icon: <ProviderBadge provider="codex" />, disabled: paneFull, hint: paneFull ? 'All six panes are open' : undefined, onSelect: () => onLaunch('codex', menu.cwd) },
         { kind: 'item', id: 'launch-shell', label: 'Terminal', icon: <SquareTerminal strokeWidth={2} />, onSelect: () => onLaunch('shell', menu.cwd) },
       ],
     },

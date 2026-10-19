@@ -120,6 +120,11 @@ export function TopBar(props: Props) {
           {menuButton('file', 'File')}
           {openMenu === 'file' && (
             <MenuPop {...away}>
+              {/* New: Claude Code and Codex start as chat panes, a terminal is a plain shell (type `claude` there for a CLI session). */}
+              <MenuItem icon={<ProviderBadge provider="claude" />} label="New Claude Code chat" hint={paneFull ? 'All six panes are open' : `A Claude Code chat pane in ${where} — pick up any earlier session from its history`} onClick={run(() => onNewChat('claude'))} disabled={paneFull} />
+              <MenuItem icon={<ProviderBadge provider="codex" />} label="New Codex chat" hint={paneFull ? 'All six panes are open' : `A Codex chat pane in ${where} — pick up any earlier thread from its history`} onClick={run(() => onNewChat('codex'))} disabled={paneFull} />
+              <MenuItem icon={<Terminal strokeWidth={2} />} label="New terminal" hint={paneFull ? 'All six panes are open — opens a window instead' : `Open a PowerShell terminal in a pane in ${where} (Ctrl+Shift+\`)`} onClick={run(() => onNewTerminal('shell'))} />
+              <div className="menu-sep" />
               <MenuItem icon={<FolderPlus strokeWidth={2} />} label="New project…" hint="Create a project folder and open it in Cursor" onClick={run(onNewProject)} />
               <MenuItem icon={<Folder strokeWidth={2} />} label="Open Projects folder" hint="Open the Projects folder in File Explorer" onClick={run(() => window.watch.openProjectsDir())} />
               <div className="menu-sep" />
@@ -147,15 +152,7 @@ export function TopBar(props: Props) {
           {menuButton('terminal', 'Terminal')}
           {openMenu === 'terminal' && (
             <MenuPop {...away}>
-              {/* Agents first: starting one is the reason the workspace exists. */}
-              <MenuItem icon={<ProviderBadge provider="claude" />} label="New Claude Code terminal" hint={`Start Claude Code in a terminal pane in ${where}`} onClick={run(() => onNewTerminal('claude'))} />
-              <MenuItem icon={<ProviderBadge provider="codex" />} label="New Codex terminal" hint={`Start Codex in a terminal pane in ${where}`} onClick={run(() => onNewTerminal('codex'))} />
               <MenuItem icon={<Terminal strokeWidth={2} />} label="New terminal" hint={paneFull ? 'All six panes are open — opens a window instead' : `Open a PowerShell terminal in a pane in ${where} (Ctrl+Shift+\`)`} onClick={run(() => onNewTerminal('shell'))} />
-              <div className="menu-sep" />
-              {/* Chat panes: the VS Code extensions' conversation UI over the same CLIs, with their own history. */}
-              <MenuItem icon={<ProviderBadge provider="claude" />} label="New Claude Code chat" hint={paneFull ? 'All six panes are open' : `A Claude Code chat pane in ${where} — pick up any earlier session from its history`} onClick={run(() => onNewChat('claude'))} disabled={paneFull} />
-              <MenuItem icon={<ProviderBadge provider="codex" />} label="New Codex chat" hint={paneFull ? 'All six panes are open' : `A Codex chat pane in ${where} — pick up any earlier thread from its history`} onClick={run(() => onNewChat('codex'))} disabled={paneFull} />
-              <div className="menu-sep" />
               <MenuItem icon={<SquareTerminal strokeWidth={2} />} label="Open external terminal" hint={`Open Windows Terminal in ${where}, outside the app`} onClick={run(() => window.watch.openTerminal(context.cwd, 'shell'))} />
               {commands.length > 0 && (
                 <>
@@ -211,10 +208,10 @@ export function TopBar(props: Props) {
       </nav>
 
       {/* The command center: the palette's front door, where an IDE keeps its
-          search box. Ctrl+K opens it (Ctrl+P too) unless a terminal pane has
+          search box. Ctrl+K opens it everywhere (Ctrl+P too, unless a terminal pane has
           focus and the key belongs to the CLI; Alt+K and Ctrl+Shift+P work
           everywhere (@shared/keymap.mjs). */}
-      <button className="cmdcenter" onClick={onPalette} title="Search commands, agents, and open windows (Ctrl+K — Alt+K inside a terminal)" data-testid="cmdcenter">
+      <button className="cmdcenter" onClick={onPalette} title="Search commands, agents, and open windows (Ctrl+K)" data-testid="cmdcenter">
         <Search className="cmdcenter-ic" strokeWidth={2} />
         <span className="cmdcenter-label">Search commands, agents, windows</span>
         <span className="cmdcenter-keys"><kbd>Ctrl</kbd><kbd>K</kbd></span>

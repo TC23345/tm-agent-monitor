@@ -42,9 +42,10 @@ export const WEB_LINKS: { label: string; url: string }[] = [
   { label: 'TaylorMade Content', url: 'https://taylormade-content-production.up.railway.app/' }
 ]
 
+/** What a badge starts: Claude Code and Codex as chat panes, a shell as a terminal pane (no CLI terminal launches since 0.4.63). */
 const LAUNCHES: { kind: TerminalLaunch; label: string; icon: ReactNode; what: string; keys?: string }[] = [
-  { kind: 'claude', label: 'New Claude Code terminal', icon: <ProviderBadge provider="claude" />, what: 'Claude Code' },
-  { kind: 'codex', label: 'New Codex terminal', icon: <ProviderBadge provider="codex" />, what: 'Codex' },
+  { kind: 'claude', label: 'New Claude Code chat', icon: <ProviderBadge provider="claude" />, what: 'a Claude Code chat' },
+  { kind: 'codex', label: 'New Codex chat', icon: <ProviderBadge provider="codex" />, what: 'a Codex chat' },
   { kind: 'shell', label: 'New terminal', icon: <SquareTerminal strokeWidth={2} />, what: 'a PowerShell terminal', keys: 'Ctrl+Shift+`' }
 ]
 
@@ -59,7 +60,9 @@ interface Props {
   /** A badge made that folder the launch target: by left-click (`click` — the head shows its files; the same badge again goes back to the stream) or by right-click (`menu`, which also opens its menu). */
   onSelect: (target: LaunchTarget, via: 'click' | 'menu') => void
   onLaunch: (launch: TerminalLaunch, target: LaunchTarget, external: boolean) => void
-  /** The folder's usual launch (tm.launch.v2) — checked in its menu. */
+  /** Every pane slot is taken: a chat has nowhere to go (a terminal opens a window). */
+  paneFull: boolean
+  /** The folder's usual start (tm.launch.v2) — checked in its menu. */
   launchKindFor: (cwd: string) => TerminalLaunch
   onNewProject: () => void
   /** A `WEB_LINKS` site: a web pane, or the browser on Shift-click. */
@@ -83,7 +86,7 @@ interface Props {
  * (the path comes from `webUtils.getPathForFile` in the preload — `File.path`
  * was removed in Electron 32).
  */
-export function ProjectStrip({ projects, selected, treeFor, openMenu, onOpenMenu, onSelect, onLaunch, launchKindFor, onNewProject, onOpenWeb, onDropFolder }: Props) {
+export function ProjectStrip({ projects, selected, treeFor, openMenu, onOpenMenu, onSelect, onLaunch, paneFull, launchKindFor, onNewProject, onOpenWeb, onDropFolder }: Props) {
   const now = useNow()
   const [dropHot, setDropHot] = useState(false)
   const [hover, setHover] = useState(false)
@@ -213,14 +216,14 @@ export function ProjectStrip({ projects, selected, treeFor, openMenu, onOpenMenu
         aria-pressed={isSelected}
         aria-haspopup="menu"
         aria-expanded={isSelected && menuOpen}
-        title={`${p.cwd}\n${status} · ${when}\n${showsTree ? 'Click to go back to the activity stream' : 'Click for its files'} · right-click to start Claude Code, Codex, or a terminal here`}
+        title={`${p.cwd}\n${status} · ${when}\n${showsTree ? 'Click to go back to the activity stream' : 'Click for its files'} · right-click to start a Claude Code or Codex chat, or a terminal, here`}
         data-testid={tid('project', p.label)}
         // Left-click: the launch target, and the head shows this project's files (the same badge again: the stream).
         onClick={() => {
           if (menuOpen) onOpenMenu(null)
           onSelect({ cwd: p.cwd, label: p.label }, 'click')
         }}
-        // Right-click: the launch target, and its menu — Claude Code, Codex, a terminal here.
+        // Right-click: the launch target, and its menu — a Claude Code or Codex chat, or a terminal, here.
         onContextMenu={(event) => {
           event.preventDefault()
           if (isSelected && menuOpen) { onOpenMenu(null); return }
@@ -275,7 +278,7 @@ export function ProjectStrip({ projects, selected, treeFor, openMenu, onOpenMenu
           onScroll={() => { syncEdges(); if (menuOpen) onOpenMenu(null) }}
         >
           {shown.length === 0 ? (
-            <div className="projstrip-empty">No project activity in the last 4 hours. Start a session from the Terminal menu, or drop a folder here.</div>
+            <div className="projstrip-empty">No project activity in the last 4 hours. Start a chat from the File menu, or drop a folder here.</div>
           ) : (
             <div className="projrows">
               {rows.map((row, i) => (
@@ -309,17 +312,23 @@ export function ProjectStrip({ projects, selected, treeFor, openMenu, onOpenMenu
                 </span>
               </div>
               <div className="menu-sep" />
-              {LAUNCHES.map((l) => (
-                <MenuCheckItem
-                  key={l.kind}
-                  icon={l.icon}
-                  label={l.label}
-                  hint={`Start ${l.what} in ${current.label}${l.keys ? ` (${l.keys})` : ''}\nShift-click for a separate window`}
-                  checked={l.kind === launchKindFor(current.cwd)}
-                  testId={tid('menu', l.label)}
-                  onClick={start(l.kind)}
-                />
-              ))}
+              {LAUNCHES.map((l) => {
+                const chat = l.kind !== 'shell'
+                return (
+                  <MenuCheckItem
+                    key={l.kind}
+                    icon={l.icon}
+                    label={l.label}
+                    hint={chat
+                      ? paneFull ? 'All six panes are open' : `Start ${l.what} in ${current.label}`
+                      : `Start ${l.what} in ${current.label}${l.keys ? ` (${l.keys})` : ''}\nShift-click for a separate window`}
+                    checked={l.kind === launchKindFor(current.cwd)}
+                    disabled={chat && paneFull}
+                    testId={tid('menu', l.label)}
+                    onClick={start(l.kind)}
+                  />
+                )
+              })}
               <div className="menu-sep" />
               {WEB_LINKS.map((w) => (
                 <MenuItem

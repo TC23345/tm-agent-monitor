@@ -2,6 +2,18 @@
 
 Releases are GitHub Releases on `TC23345/tm-agent-monitor`; installed apps update from `latest.yml` there. Local builds land in `dist/` as `tm-agent-monitor-<version>-x64.exe`.
 
+## 0.4.64 — 2026-10-18
+
+- **Fixed: a permission prompt in a chat was red in uneven patches.** The card had a red wash behind it that showed through some parts (the command box, the *No* row's field) and not others (the options), and the primary option's terracotta border sat next to the red one. Now the only red is the card's border; everything inside is the same neutral grey, and the primary option is marked with a brighter grey edge.
+- **The context ring shows from the start of a Claude Code chat.** It used to show only a raw token count (*66.6k*) until the first turn finished, because the model's context window arrived with that turn's result. The pane now asks the CLI for the window as soon as the session starts, and again after a model change, so a new chat reads *3%* before you type anything.
+
+## 0.4.63 — 2026-10-18
+
+- **Claude Code and Codex start as chats; the terminal launches are gone.** A project badge's right-click menu, the agent row's *Start in ▸*, the palette's pinned starts and the taskbar Jump List now offer *New Claude Code chat*, *New Codex chat* and *New terminal*. *New Claude Code terminal* and *New Codex terminal* are removed everywhere. To run a CLI in a terminal, open one (Ctrl+Shift+`) and type `claude` or `codex`. The pane still names itself and resumes after a restart, as before.
+- **The File menu opens new panes:** *New Claude Code chat*, *New Codex chat* and *New terminal* sit at its top. The Terminal menu keeps *New terminal*, the external terminal and *Run*.
+- **Ctrl+K opens the palette everywhere, inside a terminal too.** It no longer passes through to the shell's delete-to-end-of-line. A web pane still gives Ctrl+K to the page, because sites use it for search.
+- **Fixed: a Codex chat's MCP servers could outlive the app.** Quitting raced the Codex app-server's own shutdown, and the loser left a server running (a `railway mcp` was found after quitting). Closing now ends the app-server's whole process tree at once.
+
 ## 0.4.62 — 2026-10-18
 
 - **Codex chats read like the Codex extension.** Reverse-engineered from the extension's own strings (`tc-rea/chat-panes/docs/rea-findings.md`, *Codex pass*):

@@ -281,6 +281,8 @@ export class ClaudeSession extends EventEmitter {
     })
     this.log(`[claude] started via ${claude?.how ?? 'sdk-bundled'} in ${o.cwd}${o.resume ? ` resuming ${o.resume}` : ''}`)
     this.done = this.consume(this.q)
+    // The window now, not at init: with a streaming prompt the CLI sends its init only with the first message.
+    void this.readWindow()
   }
 
   private async consume(q: Query): Promise<void> {
@@ -299,7 +301,10 @@ export class ClaudeSession extends EventEmitter {
   }
 
   private handle(msg: SDKMessage): void {
-    if (msg.type === 'system' && msg.subtype === 'init') this.terminalCommands = new Set(msg.terminal_slash_commands ?? [])
+    if (msg.type === 'system' && msg.subtype === 'init') {
+      this.terminalCommands = new Set(msg.terminal_slash_commands ?? [])
+      void this.readWindow()
+    }
     const next = foldSdkMessage(this.fold, msg, { interrupted: this.interrupting })
     if (msg.type === 'result') this.interrupting = false
     if (next !== this.fold) {
@@ -468,6 +473,28 @@ export class ClaudeSession extends EventEmitter {
     return r?.response ?? null
   }
 
+  /**
+   * The model's context window as soon as the session starts (again at init
+   * and after a model change), from the CLI's local estimate — no token-count
+   * call; it answers before the CLI's init, which a streaming prompt only gets
+   * with the first message. The
+   * window used to arrive only with the first result's `modelUsage`, so during
+   * a session's first turn the composer could show nothing but a raw count
+   * ("66.6k"). A transcript that already has a context figure keeps it; one
+   * with none shows what the system prompt and tools already take.
+   */
+  private async readWindow(): Promise<void> {
+    try {
+      const r = await this.live().getContextUsage({ detail: 'summary' })
+      if (typeof r?.maxTokens !== 'number' || r.maxTokens <= 0) return
+      const u = this.transcript.usage
+      const fill = u.contextTokens === undefined && typeof r.totalTokens === 'number' && r.totalTokens > 0
+      this.update({ ...this.transcript, usage: { ...u, contextWindow: r.maxTokens, ...(fill ? { contextTokens: r.totalTokens } : {}) } })
+    } catch {
+      /* an older CLI without the call, or the session already ended */
+    }
+  }
+
   /** The context window by category, from local estimates (no token-count calls). */
   async contextUsage(): Promise<ContextUsage> {
     const r = await this.live().getContextUsage({ detail: 'summary' })
@@ -553,6 +580,8 @@ export class ClaudeSession extends EventEmitter {
       t = { ...t, outputStyle: patch.outputStyle }
     }
     this.update(t)
+    // Another model can have another window.
+    if (patch.model !== undefined) void this.readWindow()
   }
 
   /** What the composer's menus offer: the CLI's models (with their effort levels and fast mode), the modes, the slash commands and the output styles. */
