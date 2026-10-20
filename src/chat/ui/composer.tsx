@@ -12,15 +12,19 @@
 // Menus open inside the pane and close on Escape; in claude-watch they carry
 // `data-escape-close`, so the host hands them its Escape (`tm-escape`)
 // instead of hiding the workspace.
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react'
 import {
-  ArrowDownToLine, AtSign, Bot, Check, ChevronDown, CircleStop, Clock, FileCode, Hand, Layers, ListChecks, Lock, MessageCircleQuestion, Paperclip, PencilLine, Plug, Plus, Send, ShieldCheck, ShieldOff, Slash, Sparkles, Square, TextQuote, X, Zap
+  AtSign, Bot, Check, ChevronDown, ChevronRight, CircleStop, Clock, FileCode, Hand, Layers, ListChecks, Lock, MessageCircleQuestion, Paperclip, PencilLine, Plug, Plus, ScanText, Send, ShieldCheck, ShieldOff, Slash, Sparkles, Square, TextQuote, Undo2, X, Zap
 } from 'lucide-react'
-import { effortLabel, fmtTokens, formatElapsed, latestModels, matchFiles, modelLabel } from '../shared/present.mjs'
+import { MAX_DESCRIPTION, MAX_LABEL, defaultFor, labelFor, withDefault, withLabel, type ChatPrefs, type PrefKind } from '../shared/chatPrefs.mjs'
+import { savePrefs, useChatPrefs } from './prefs'
+import { cardInsertion, cardTitle, composeMessage, effortLabel, fmtTokens, formatElapsed, isLongPaste, latestModels, matchFiles, modelLabel } from '../shared/present.mjs'
 import type { Attachment, ChatConfigPatch, ChatOptions, CommandOption, ContextUsage, ModeOption, ModelOption, Provider, Transcript } from '../shared/chatModel.mjs'
 import { runningLabel, type AgentCard } from '../shared/agents.mjs'
 import { ContextBreakdown } from './extras'
 import { EffortSlider } from './EffortSlider'
+import type { ImageEdit } from './markup'
+import { pngName, type Mark } from '../shared/markup.mjs'
 
 const PROVIDER_LABEL: Record<Provider, string> = { claude: 'Claude Code', codex: 'Codex' }
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -29,7 +33,7 @@ const EFFORT_SCALE = ['low', 'medium', 'high', 'xhigh', 'max']
 
 export interface ComposerHandle {
   focus(): void
-  /** A selection's Quote: staged as a chip above the text (its ↓ moves it into the text as `> ` lines). */
+  /** A selection's Quote: a card above the text (its *Show in text field* puts it in as `> ` lines). */
   quote(text: string): void
   /** Replace the box's text (a fork puts its prompt back). */
   setText(text: string): void
@@ -54,7 +58,8 @@ interface Props {
   loadContext?: () => Promise<ContextUsage>
   onCompact?: () => void
   onStopTask?: (taskId: string) => void
-  onPreview: (src: string, name: string) => void
+  /** Open an image in the viewer; a composer image comes with its markup (`edit`). */
+  onPreview: (src: string, name: string, edit?: ImageEdit) => void
   /** Codex plan mode (composer.planModeIndicator): the chip turns it off. */
   onPlanMode?: (on: boolean) => void
   /** The session's agents and background tasks (`agentCards`); the chip counts the running ones. */
@@ -79,9 +84,21 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
   const [text, setText] = useState('')
   const [caret, setCaret] = useState(0)
   const [attachments, setAttachments] = useState<Attachment[]>([])
-  /** Quotes staged as chips; they lead the message as `> ` blocks when it is sent. */
-  const [quotes, setQuotes] = useState<{ id: number; text: string }[]>([])
-  const quoteId = useRef(0)
+  /**
+   * Text waiting above the box as cards (the user's call, 2026-10-20): a selection's Quote, and a paste of ten
+   * lines or 1,000 characters (`isLongPaste`). Sent as they stand, by `composeMessage`.
+   */
+  const [cards, setCards] = useState<Card[]>([])
+  const cardId = useRef(0)
+  /**
+   * Cards put into the text by *Show in text field*, newest last. The move goes through the box's own editing, so
+   * Ctrl+Z takes it out of the text again, and once the text is back to how it was the card returns to its place;
+   * Ctrl+Y moves it in again.
+   */
+  const moved = useRef<{ card: Card; index: number; before: string; after: string }[]>([])
+  const unmoved = useRef<typeof moved.current>([])
+  /** A marked-up image's attachment → the image as attached and its marks, so the viewer reopens it with the marks editable. */
+  const edits = useRef(new WeakMap<Attachment, { orig: Attachment & { kind: 'image' }; marks: Mark[] }>())
   const [refField, setRefField] = useState(false)
   const [menu, setMenu] = useState<Menu>(null)
   const [slashIndex, setSlashIndex] = useState(0)
@@ -186,7 +203,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
     quote: (quoted: string) => {
       const q = quoted.replace(/^\s*\n/, '').trimEnd()
       if (!q.trim()) return
-      setQuotes((list) => (list.some((x) => x.text === q) ? list : [...list, { id: ++quoteId.current, text: q }]))
+      stageCard('quote', q)
       area.current?.focus()
     },
     setText: (value: string) => {
@@ -202,25 +219,78 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
     }
   }), [addImages, addReference])
 
-  /** A quote chip's ↓: out of the chips and into the text as `> ` lines, ahead of what is typed, the caret after it. */
-  const editQuote = (id: number) => {
-    const q = quotes.find((x) => x.id === id)
-    if (!q) return
-    setQuotes((list) => list.filter((x) => x.id !== id))
-    const block = `${quoteBlock(q.text)}\n\n`
-    const rest = text.replace(/^\s+/, '')
-    setText(`${block}${rest}`)
-    placeCaret(block.length)
+  /** A card waits above the box; the same text twice is one card. */
+  function stageCard(kind: Card['kind'], value: string) {
+    setCards((list) => (list.some((x) => x.kind === kind && x.text === value) ? list : [...list, { id: ++cardId.current, kind, text: value }]))
+  }
+
+  /**
+   * A card's *Show in text field*: a quote goes ahead of what is typed as `> ` lines, a paste where the caret is
+   * (`cardInsertion`), the caret after it.
+   */
+  const showCard = (id: number) => {
+    const index = cards.findIndex((x) => x.id === id)
+    const c = cards[index]
+    if (!c) return
+    setCards((list) => list.filter((x) => x.id !== id))
+    // The box keeps its selection while the card's link has focus: that, not the last caret seen, is where it goes.
+    const el = area.current
+    const ins = cardInsertion(c, text, el?.selectionStart ?? caret)
+    moved.current.push({ card: c, index, before: text, after: ins.after })
+    unmoved.current = []
+    // insertText is the box's own editing, so the move lands in its undo history; a value set from React would not.
+    el?.focus()
+    el?.setSelectionRange(ins.start, ins.end)
+    if (!el || !document.execCommand('insertText', false, ins.insert) || el.value !== ins.after) setText(ins.after)
+    placeCaret(ins.caret)
+  }
+
+  /** Ctrl+Z / Ctrl+Y in the box: once the text is back to how it was before a card's move (or after it), the card follows. */
+  const followHistory = (inputType: string | undefined, value: string) => {
+    if (inputType === 'historyUndo') {
+      const last = moved.current[moved.current.length - 1]
+      if (!last || value !== last.before) return
+      moved.current.pop()
+      unmoved.current.push(last)
+      setCards((list) => (list.some((x) => x.id === last.card.id) ? list : [...list.slice(0, last.index), last.card, ...list.slice(last.index)]))
+    } else if (inputType === 'historyRedo') {
+      const last = unmoved.current[unmoved.current.length - 1]
+      if (!last || value !== last.after) return
+      unmoved.current.pop()
+      moved.current.push(last)
+      setCards((list) => list.filter((x) => x.id !== last.card.id))
+    }
+  }
+
+  /** An image chip's click: the viewer, with the image as attached and its marks; closing it puts the marked-up PNG in the chip's place. */
+  const openImage = (a: Attachment & { kind: 'image' }) => {
+    const rec = edits.current.get(a)
+    const orig = rec?.orig ?? a
+    onPreview(`data:${a.mime};base64,${a.data}`, a.name, {
+      base: `data:${orig.mime};base64,${orig.data}`,
+      marks: rec?.marks ?? [],
+      onDone: (result) => {
+        if (!result) return
+        let next: Attachment = orig
+        if (result.marks.length) {
+          next = { ...orig, name: pngName(orig.name), mime: 'image/png', data: result.src.slice(result.src.indexOf(',') + 1) }
+          edits.current.set(next, { orig, marks: result.marks })
+        }
+        setAttachments((list) => list.map((x) => (x === a ? next : x)))
+      }
+    })
   }
 
   const send = () => {
-    // Staged quotes lead the message, each a `> ` block, as Quote used to write them into the box.
-    const body = [...quotes.map((q) => quoteBlock(q.text)), text.trim()].filter(Boolean).join('\n\n')
+    // Waiting cards go with it: quotes first as `> ` blocks (as Quote used to write them into the box), then pastes.
+    const body = composeMessage(cards, text)
     if (!chatId || (!body && attachments.length === 0)) return
     onSend(body, attachments)
     setText('')
     setAttachments([])
-    setQuotes([])
+    setCards([])
+    moved.current = []
+    unmoved.current = []
     setMenu(null)
     setRecall(-1)
   }
@@ -264,6 +334,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
     setMenu(null)
   }
   useEffect(() => { if (menu !== 'mode') setConfirming(null) }, [menu])
+  // The user's names and defaults for the models and modes (right-click a row in either menu).
+  const prefs = useChatPrefs()
+  const modeEdits = useOptionEdits()
+  const named = (kind: PrefKind, id: string, row: { label: string; description?: string }) => labelFor(prefs, provider, kind, id, row).label
+  const shownModel = transcript ? currentModel(transcript, options) : undefined
+  const modelChoices = latestModels(options?.models ?? [], shownModel?.id)
+  const chipEfforts: (string | null)[] = shownModel?.efforts?.length ? [null, ...shownModel.efforts] : []
+  const modeRow = modes.find((m) => m.id === transcript?.permissionMode)
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     const pickFrom = (len: number, set: (f: (i: number) => number) => void) => {
@@ -367,9 +445,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
 
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const pasted = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'))
-    if (!pasted.length) return
+    if (pasted.length) {
+      e.preventDefault()
+      addImages(pasted)
+      return
+    }
+    // A long paste waits as a card instead of filling the box; *Show in text field* puts it where the caret is.
+    const pastedText = e.clipboardData?.getData('text/plain') ?? ''
+    if (!isLongPaste(pastedText)) return
     e.preventDefault()
-    addImages(pasted)
+    stageCard('paste', pastedText.replace(/\r\n/g, '\n'))
   }
 
   const onPickFiles = (e: ChangeEvent<HTMLInputElement>) => {
@@ -439,9 +524,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
           ))}
         </Popover>
       ) : null}
-      {menu === 'model' ? <ModelMenu provider={provider} transcript={transcript} options={options} onConfigure={onConfigure} onClose={() => setMenu(null)} /> : null}
+      {menu === 'model' ? <ModelMenu provider={provider} transcript={transcript} options={options} prefs={prefs} onConfigure={onConfigure} onClose={() => setMenu(null)} /> : null}
       {menu === 'mode' ? (
-        <Popover onClose={() => setMenu(null)} className="is-mode" testid="chat-menu:mode">
+        <Popover onClose={() => setMenu(null)} onEscape={modeEdits.escape} className="is-mode" testid="chat-menu:mode">
           {confirming?.confirm ? (
             <div className="chat-confirm" data-testid="chat-mode-confirm">
               <div className="chat-pop-title">{confirming.confirm.title}</div>
@@ -455,14 +540,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
             <>
               <div className="chat-pop-title" title={provider === 'codex' ? 'How should Codex actions be approved?' : undefined}>{provider === 'codex' ? 'Approvals' : 'Mode'} <kbd className="chat-kbd">Shift+Tab</kbd></div>
               {options === null ? <div className="chat-pop-empty">Loading…</div> : modes.map((m) => (
-                <button key={m.id} className={`chat-pop-item ${m.id === transcript?.permissionMode ? 'is-on' : ''}`} onClick={() => pickMode(m)} data-testid={`chat-mode:${m.id}`}>
-                  <span className="chat-pop-label"><ModeIcon id={m.id} /> {m.label}</span>
-                  <span className="chat-pop-desc">{m.description}</span>
-                  {m.id === transcript?.permissionMode ? <Check className="chat-ic chat-pop-check" /> : null}
-                </button>
+                <OptionRow
+                  key={m.id} provider={provider} prefs={prefs} kind="mode" id={m.id} row={m} on={m.id === transcript?.permissionMode}
+                  icon={<ModeIcon id={m.id} />} edits={modeEdits} onPick={() => pickMode(m)} testid={`chat-mode:${m.id}`}
+                />
               ))}
             </>
           )}
+          <RowMenu provider={provider} prefs={prefs} edits={modeEdits} rows={modes} />
         </Popover>
       ) : null}
       {menu === 'background' && live.length ? (
@@ -487,16 +572,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
         onMouseDown={(e) => { if (e.target === e.currentTarget) { e.preventDefault(); area.current?.focus() } }}
         {...(focused && (running || mentionOpen) ? { 'data-escape-close': '' } : {})}
       >
-        {attachments.length || quotes.length || refField ? (
+        {attachments.length || cards.length || refField ? (
           <div className="chat-attachments" data-testid="chat-attachments">
-            {quotes.map((q) => (
-              <QuoteChip key={`quote:${q.id}`} text={q.text} onEdit={() => editQuote(q.id)} onRemove={() => setQuotes((list) => list.filter((x) => x.id !== q.id))} />
+            {cards.map((c) => (
+              <TextCardChip key={`card:${c.id}`} card={c} onShow={() => showCard(c.id)} onRemove={() => setCards((list) => list.filter((x) => x.id !== c.id))} />
             ))}
             {attachments.map((a, i) => {
               const remove = () => setAttachments((list) => list.filter((_, j) => j !== i))
               if (a.kind === 'image') {
                 const src = `data:${a.mime};base64,${a.data}`
-                return <ImageChip key={`image:${a.name}${i}`} name={a.name} src={src} width={a.width} height={a.height} onOpen={() => onPreview(src, a.name)} onRemove={remove} />
+                return <ImageChip key={`image:${a.name}${i}`} name={a.name} src={src} width={a.width} height={a.height} onOpen={() => openImage(a)} onRemove={remove} />
               }
               return (
                 <span key={`file:${a.path}`} className="chat-chip is-file" title={a.path}>
@@ -525,7 +610,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
             value={text}
             placeholder={placeholder}
             className={suggestion ? 'is-suggesting' : undefined}
-            onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length) }}
+            onChange={(e) => {
+              setText(e.target.value)
+              setCaret(e.target.selectionStart ?? e.target.value.length)
+              followHistory((e.nativeEvent as InputEvent).inputType, e.target.value)
+            }}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
             onKeyDown={onKey}
             onPaste={onPaste}
@@ -554,8 +643,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
           {transcript ? (
             <button className={`chat-footchip ${menu === 'model' ? 'is-on' : ''}`} onClick={() => { setMenu((m) => (m === 'model' ? null : 'model')); onRefreshOptions() }} disabled={!chatId} title="Model, effort and output style" data-testid="chat-chip:model">
               {transcript.fastMode === 'on' ? <Zap className="chat-ic chat-fast-ic" aria-label="Fast mode" /> : null}
-              <span>{currentModelLabel(transcript, options)}</span>
-              {transcript.effort ? <span className="chat-footchip-sub">{effortLabel(transcript.effort, provider)}</span> : null}
+              {/* Each word is as wide as the widest it can be, so picking another never moves the chips (the user's call, 2026-10-20). */}
+              <StableText value={shownModel ? named('model', shownModel.id, shownModel) : currentModelLabel(transcript, options)} options={modelChoices.map((m) => named('model', m.id, m))} />
+              {chipEfforts.length ? (
+                <span className="chat-footchip-sub"><StableText value={effortLabel(transcript.effort ?? null, provider)} options={chipEfforts.map((e) => effortLabel(e, provider))} /></span>
+              ) : transcript.effort ? <span className="chat-footchip-sub">{effortLabel(transcript.effort, provider)}</span> : null}
               <ChevronDown className="chat-ic chat-footchip-chev" />
             </button>
           ) : null}
@@ -578,15 +670,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
           ) : null}
           {transcript ? <ContextPie transcript={transcript} onCompact={!running && chatId ? onCompact : undefined} loadContext={loadContext} /> : null}
           {transcript ? (
-            <button className={`chat-footchip ${menu === 'mode' ? 'is-on' : ''}`} onClick={() => { setMenu((m) => (m === 'mode' ? null : 'mode')); onRefreshOptions() }} disabled={!chatId} title="Permission mode (Shift+Tab)" data-testid="chat-chip:mode">
+            <button className={`chat-footchip is-fixed ${menu === 'mode' ? 'is-on' : ''}`} onClick={() => { setMenu((m) => (m === 'mode' ? null : 'mode')); onRefreshOptions() }} disabled={!chatId} title="Permission mode (Shift+Tab)" data-testid="chat-chip:mode">
               <ModeIcon id={transcript.permissionMode} />
-              <span>{transcript.permissionMode === 'custom' ? 'Custom' : modeLabel(transcript.permissionMode, options)}</span>
+              <StableText
+                value={transcript.permissionMode === 'custom' ? 'Custom' : modeRow ? named('mode', modeRow.id, modeRow) : modeLabel(transcript.permissionMode, options)}
+                options={modes.map((m) => named('mode', m.id, m))}
+              />
             </button>
           ) : null}
           {running ? (
             <button className="chat-iconbtn is-stop" title="Stop (Esc)" aria-label="Stop" onClick={onInterrupt} data-testid="chat-tool:stop"><CircleStop className="chat-ic" /></button>
           ) : (
-            <button className="chat-iconbtn is-send" title="Send (Enter)" aria-label="Send" onClick={send} disabled={!chatId || (!text.trim() && !attachments.length && !quotes.length)} data-testid="chat-tool:send"><Send className="chat-ic" /></button>
+            <button className="chat-iconbtn is-send" title="Send (Enter)" aria-label="Send" onClick={send} disabled={!chatId || (!text.trim() && !attachments.length && !cards.length)} data-testid="chat-tool:send"><Send className="chat-ic" /></button>
           )}
         </div>
       </div>
@@ -600,7 +695,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
  * it, and the top of a menu is where it starts): its height is capped at the
  * room between the pane's top and the composer, and it scrolls inside that.
  */
-function Popover({ onClose, className, testid, children }: { onClose: () => void; className: string; testid: string; children: ReactNode }) {
+function Popover({ onClose, onEscape, className, testid, children }: {
+  onClose: () => void
+  /** Escape goes here first; true means it was used (a rename being typed, a row's menu), and the menu stays. */
+  onEscape?: () => boolean
+  className: string
+  testid: string
+  children: ReactNode
+}) {
   const el = useRef<HTMLDivElement | null>(null)
   useOutside(el, onClose)
   useLayoutEffect(() => {
@@ -613,15 +715,15 @@ function Popover({ onClose, className, testid, children }: { onClose: () => void
   useEffect(() => {
     const node = el.current
     if (!node) return
-    const onEscape = () => onClose()
-    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); onClose() } }
-    node.addEventListener('tm-escape', onEscape)
+    const escape = () => { if (!onEscape?.()) onClose() }
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); escape() } }
+    node.addEventListener('tm-escape', escape)
     node.addEventListener('keydown', onKey)
     return () => {
-      node.removeEventListener('tm-escape', onEscape)
+      node.removeEventListener('tm-escape', escape)
       node.removeEventListener('keydown', onKey)
     }
-  }, [onClose])
+  }, [onClose, onEscape])
   return <div ref={el} className={`chat-pop ${className}`} data-escape-close="" data-testid={testid} role="menu">{children}</div>
 }
 
@@ -638,13 +740,15 @@ function useOutside(ref: RefObject<HTMLElement | null>, onOut: () => void) {
 }
 
 /**
- * Effort first (it changes per turn; the model rarely does), then the models
- * of the newest generation only (`latestModels`; the session's own model
- * stays listed if it is older), then fast mode on a model that offers it, then
- * the output style. Picking an effort, fast mode or a style keeps the menu
- * open; picking a model closes it.
+ * Effort first (it changes per turn; the model rarely does), then Speed (fast
+ * mode, on a model that offers it), then the models of the newest generation
+ * only (`latestModels`; the session's own model stays listed if it is older),
+ * then the output style. Picking an effort, fast mode or a style keeps the
+ * menu open; picking a model closes it. A model's right-click renames it or
+ * makes it the one new chats start on.
  */
-function ModelMenu({ provider, transcript, options, onConfigure, onClose }: { provider: Provider; transcript: Transcript | null; options: ChatOptions | null; onConfigure: (p: ChatConfigPatch) => void; onClose: () => void }) {
+function ModelMenu({ provider, transcript, options, prefs, onConfigure, onClose }: { provider: Provider; transcript: Transcript | null; options: ChatOptions | null; prefs: ChatPrefs; onConfigure: (p: ChatConfigPatch) => void; onClose: () => void }) {
+  const edits = useOptionEdits()
   const current = currentModel(transcript, options)
   const models = latestModels(options?.models ?? [], current?.id)
   const efforts = current?.efforts ?? []
@@ -658,7 +762,7 @@ function ModelMenu({ provider, transcript, options, onConfigure, onClose }: { pr
   useEffect(() => { setPreview(null) }, [effort])
   const shownEffort = preview ? preview.level : effort
   return (
-    <Popover onClose={onClose} className="is-model" testid="chat-menu:model">
+    <Popover onClose={onClose} onEscape={edits.escape} className="is-model" testid="chat-menu:model">
       {efforts.length ? (
         <>
           <div className="chat-pop-title">Effort <EffortDots effort={shownEffort} /> <span className="chat-pop-hint">{effortLabel(shownEffort, provider)}</span></div>
@@ -671,26 +775,34 @@ function ModelMenu({ provider, transcript, options, onConfigure, onClose }: { pr
               format={(i) => effortLabel(levels[i] ?? null, provider)}
               onPreview={(i) => setPreview({ level: levels[i] ?? null })}
               onCommit={(i) => { setPreview({ level: levels[i] ?? null }); onConfigure({ effort: levels[i] ?? null }) }}
+              autoFirst
               testid="chat-effort-slider"
             />
           </div>
           <div className="chat-pop-sep" />
         </>
       ) : null}
+      {options?.fastMode || fast ? (
+        <>
+          {/* Speed, under Effort with its own dots (the user's call, 2026-10-20): they and the word run a yellow-to-blue charge while Fast is on. */}
+          <div className={`chat-pop-title chat-speed-title ${fast ? 'is-on' : ''}`} data-testid="chat-speed-title">
+            <span className="chat-speed-word">Speed</span> <SpeedDots on={fast} /> <span className="chat-pop-hint">{fast ? 'Fast' : 'Normal'}</span>
+          </div>
+          <button className="chat-pop-item is-row" role="switch" aria-checked={fast} onClick={() => onConfigure({ fastMode: !fast })} data-testid="chat-fast-mode">
+            <span className="chat-pop-label"><Zap className="chat-ic" aria-hidden /> {provider === 'codex' ? 'Fast' : 'Fast mode'}<span className="chat-pop-hint">{currentModel(transcript, options)?.fastLabel ?? options?.fastLabel ?? 'Faster replies, billed at fast-mode rates'}</span></span>
+            <span className={`chat-switch ${fast ? 'is-on' : ''}`} aria-hidden><span className="chat-switch-thumb" /></span>
+          </button>
+          <div className="chat-pop-sep" />
+        </>
+      ) : null}
       <div className="chat-pop-title">Model</div>
       {options === null ? <div className="chat-pop-empty">Loading…</div> : models.length === 0 ? <div className="chat-pop-empty">No models listed</div> : models.map((m) => (
-        <button key={m.id} className={`chat-pop-item ${m === current ? 'is-on' : ''}`} onClick={() => { onConfigure({ model: m.id }); onClose() }} data-testid={`chat-model:${m.id}`}>
-          <span className="chat-pop-label">{m.label}</span>
-          {m.description ? <span className="chat-pop-desc">{m.description}</span> : null}
-          {m === current ? <Check className="chat-ic chat-pop-check" /> : null}
-        </button>
+        <OptionRow
+          key={m.id} provider={provider} prefs={prefs} kind="model" id={m.id} row={m} on={m === current}
+          edits={edits} onPick={() => { onConfigure({ model: m.id }); onClose() }} testid={`chat-model:${m.id}`}
+        />
       ))}
-      {options?.fastMode || fast ? (
-        <button className="chat-pop-item is-row" role="switch" aria-checked={fast} onClick={() => onConfigure({ fastMode: !fast })} data-testid="chat-fast-mode">
-          <span className="chat-pop-label"><Zap className="chat-ic" aria-hidden /> {provider === 'codex' ? 'Fast' : 'Fast mode'}<span className="chat-pop-hint">{currentModel(transcript, options)?.fastLabel ?? options?.fastLabel ?? 'Faster replies, billed at fast-mode rates'}</span></span>
-          <span className={`chat-switch ${fast ? 'is-on' : ''}`} aria-hidden><span className="chat-switch-thumb" /></span>
-        </button>
-      ) : null}
+      <RowMenu provider={provider} prefs={prefs} edits={edits} rows={models} />
       {styles.length ? (
         <>
           <div className="chat-pop-sep" />
@@ -836,14 +948,199 @@ function EffortDots({ effort }: { effort: string | null }) {
   )
 }
 
+/** Where Speed's sparks leave the dots: across them (px), the angle they fly at, when, and how long a streak. */
+const SPARKS = [
+  { x: 3, a: -150, d: 0, l: 8 }, { x: 9, a: -200, d: 260, l: 6 }, { x: 15, a: -165, d: 520, l: 9 }, { x: 21, a: -130, d: 130, l: 7 },
+  { x: 27, a: -210, d: 390, l: 8 }, { x: 12, a: -20, d: 650, l: 5 }, { x: 24, a: 20, d: 780, l: 5 }
+]
+
+/**
+ * Speed's five dots, the effort meter's size: grey while Fast is off; while it is on they charge yellow to blue
+ * one after another and sparks fly off them (chat.css `.chat-speed-*`; still under reduced motion).
+ */
+function SpeedDots({ on }: { on: boolean }) {
+  return (
+    <span className={`chat-speed-dots ${on ? 'is-on' : ''}`} aria-hidden data-testid="chat-speed-dots">
+      {EFFORT_SCALE.map((_, i) => <span key={i} className="chat-speed-dot" style={{ '--i': i } as CSSProperties} />)}
+      {on ? SPARKS.map((s, i) => (
+        <span key={`spark${i}`} className="chat-spark" style={{ '--x': `${s.x}px`, '--a': `${s.a}deg`, '--d': `${s.d}ms`, '--l': `${s.l}px` } as CSSProperties} />
+      )) : null}
+    </span>
+  )
+}
+
+/**
+ * A chip's word, as wide as the widest of the words it can show: the others sit in the same grid cell unseen,
+ * so picking another model, effort or mode never resizes the chip or moves the chips beside it.
+ */
+function StableText({ value, options }: { value: string; options: string[] }) {
+  const others = [...new Set(options)].filter((o) => o !== value)
+  return (
+    <span className="chat-stable">
+      <span>{value}</span>
+      {others.map((o) => <span key={o} className="is-ghost" aria-hidden>{o}</span>)}
+    </span>
+  )
+}
+
+/** A model's or a mode's right-click menu and the row being renamed, for one menu. */
+interface OptionEdits {
+  menu: { kind: PrefKind; id: string; x: number; y: number } | null
+  editing: { kind: PrefKind; id: string } | null
+  openMenu: (kind: PrefKind, id: string, e: ReactMouseEvent) => void
+  closeMenu: () => void
+  startEdit: (kind: PrefKind, id: string) => void
+  stopEdit: () => void
+  /** Escape: closes the row's menu, else stops a rename; false when neither is open. */
+  escape: () => boolean
+}
+
+function useOptionEdits(): OptionEdits {
+  const [menu, setMenu] = useState<OptionEdits['menu']>(null)
+  const [editing, setEditing] = useState<OptionEdits['editing']>(null)
+  const escape = useCallback(() => {
+    if (menu) { setMenu(null); return true }
+    if (editing) { setEditing(null); return true }
+    return false
+  }, [menu, editing])
+  return {
+    menu,
+    editing,
+    openMenu: (kind, id, e) => {
+      e.preventDefault()
+      // Placed in the menu's own box, which scrolls: the row menu scrolls with the row it belongs to.
+      const pop = (e.currentTarget as HTMLElement).closest('.chat-pop') as HTMLElement | null
+      if (!pop) return
+      const r = pop.getBoundingClientRect()
+      const x = Math.max(4, Math.min(e.clientX - r.left, pop.clientWidth - ROW_MENU_WIDTH - 4))
+      let y = e.clientY - r.top + pop.scrollTop
+      if (e.clientY - r.top + ROW_MENU_HEIGHT > pop.clientHeight) y -= ROW_MENU_HEIGHT
+      setEditing(null)
+      setMenu({ kind, id, x, y: Math.max(pop.scrollTop + 4, y) })
+    },
+    closeMenu: () => setMenu(null),
+    startEdit: (kind, id) => { setMenu(null); setEditing({ kind, id }) },
+    stopEdit: () => setEditing(null),
+    escape
+  }
+}
+
+const ROW_MENU_WIDTH = 210
+const ROW_MENU_HEIGHT = 104
+
+/**
+ * A model or a mode in its menu, with the user's own name and description over the CLI's, and *new chats*
+ * beside the one a new chat starts on. Right-click opens its menu (RowMenu); while it is being renamed it is
+ * two fields, Enter saves and Escape leaves it as it was.
+ */
+function OptionRow({ provider, prefs, kind, id, row, on, icon, edits, onPick, testid }: {
+  provider: Provider
+  prefs: ChatPrefs
+  kind: PrefKind
+  id: string
+  row: { label: string; description?: string }
+  on: boolean
+  icon?: ReactNode
+  edits: OptionEdits
+  onPick: () => void
+  testid: string
+}) {
+  const shown = labelFor(prefs, provider, kind, id, row)
+  const isDefault = defaultFor(prefs, provider, kind) === id
+  if (edits.editing?.kind === kind && edits.editing.id === id) {
+    return (
+      <OptionEditor
+        row={row} shown={shown} testid={`${testid}:edit`} onCancel={edits.stopEdit}
+        onSave={(next) => { savePrefs(withLabel(prefs, provider, kind, id, next, row)); edits.stopEdit() }}
+      />
+    )
+  }
+  return (
+    <button className={`chat-pop-item ${on ? 'is-on' : ''}`} onClick={onPick} onContextMenu={(e) => edits.openMenu(kind, id, e)} data-testid={testid}>
+      <span className="chat-pop-label">
+        {icon}{shown.label}
+        {isDefault ? <span className="chat-pop-tag" title="New chats start on this" data-testid={`${testid}:default`}>new chats</span> : null}
+      </span>
+      {shown.description ? <span className="chat-pop-desc">{shown.description}</span> : null}
+      {on ? <Check className="chat-ic chat-pop-check" /> : null}
+    </button>
+  )
+}
+
+function OptionEditor({ row, shown, testid, onSave, onCancel }: {
+  row: { label: string; description?: string }
+  shown: { label: string; description?: string }
+  testid: string
+  onSave: (next: { label: string; description: string }) => void
+  onCancel: () => void
+}) {
+  const [label, setLabel] = useState(shown.label)
+  const [description, setDescription] = useState(shown.description ?? '')
+  const save = () => onSave({ label, description })
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') { e.preventDefault(); save() }
+    else if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); e.stopPropagation(); onCancel() }
+  }
+  // An emptied field goes back to the CLI's words, which it shows as its placeholder.
+  return (
+    <div className="chat-pop-item is-editing" data-testid={testid}>
+      <input
+        className="chat-pop-input is-title" value={label} maxLength={MAX_LABEL} placeholder={row.label} aria-label="Title" autoFocus
+        onChange={(e) => setLabel(e.target.value)} onKeyDown={onKey} data-testid={`${testid}:title`}
+      />
+      <input
+        className="chat-pop-input" value={description} maxLength={MAX_DESCRIPTION} placeholder={row.description || 'Description'} aria-label="Description"
+        onChange={(e) => setDescription(e.target.value)} onKeyDown={onKey} data-testid={`${testid}:description`}
+      />
+      <div className="chat-pop-edit-actions">
+        <button className="chat-textbtn" onClick={onCancel}>Cancel</button>
+        <button className="chat-textbtn is-save" onClick={save} data-testid={`${testid}:save`}>Save</button>
+      </div>
+    </div>
+  )
+}
+
+/** A row's right-click menu: rename it, make it (or stop it being) what new chats start on, or put its own words back. */
+function RowMenu({ provider, prefs, edits, rows }: { provider: Provider; prefs: ChatPrefs; edits: OptionEdits; rows: { id: string; label: string; description?: string }[] }) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const menu = edits.menu
+  const { closeMenu } = edits
+  useEffect(() => {
+    if (!menu) return
+    const down = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) closeMenu() }
+    document.addEventListener('mousedown', down, true)
+    return () => document.removeEventListener('mousedown', down, true)
+  }, [menu, closeMenu])
+  const row = menu ? rows.find((r) => r.id === menu.id) : undefined
+  if (!menu || !row) return null
+  const isDefault = defaultFor(prefs, provider, menu.kind) === menu.id
+  const renamed = labelFor(prefs, provider, menu.kind, menu.id, row).renamed
+  const act = (f: () => void) => () => { f(); closeMenu() }
+  return (
+    <div ref={ref} className="chat-rowmenu" style={{ left: menu.x, top: menu.y, width: ROW_MENU_WIDTH }} role="menu" data-testid="chat-rowmenu">
+      <button className="chat-pop-item is-compact" role="menuitem" onClick={() => edits.startEdit(menu.kind, menu.id)} data-testid="chat-rowmenu:edit">
+        <span className="chat-pop-label"><PencilLine className="chat-ic" aria-hidden /> Edit title and description</span>
+      </button>
+      <button className="chat-pop-item is-compact" role="menuitem" onClick={act(() => savePrefs(withDefault(prefs, provider, menu.kind, isDefault ? null : menu.id)))} data-testid="chat-rowmenu:default">
+        <span className="chat-pop-label">{isDefault ? <><X className="chat-ic" aria-hidden /> Remove as default</> : <><Check className="chat-ic" aria-hidden /> Set as default</>}</span>
+      </button>
+      {renamed ? (
+        <button className="chat-pop-item is-compact" role="menuitem" onClick={act(() => savePrefs(withLabel(prefs, provider, menu.kind, menu.id, {}, row)))} data-testid="chat-rowmenu:reset">
+          <span className="chat-pop-label"><Undo2 className="chat-ic" aria-hidden /> Reset title and description</span>
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
 /** While a turn runs, how long it has been running; otherwise how long the session has been going. */
 function ElapsedChip({ transcript }: { transcript: Transcript }) {
   const running = (transcript.status === 'running' || transcript.status === 'waiting') && transcript.turnStartedAt
   const first = transcript.items[0]?.at
   const now = useTicker(running ? 1000 : 30_000)
-  if (running) return <span className="chat-foot-clock is-live" title="This turn so far" data-testid="chat-clock"><Clock className="chat-ic" />{formatElapsed(now - (transcript.turnStartedAt ?? now))}</span>
+  if (running) return <span className="chat-foot-clock is-live" title="This turn so far" data-testid="chat-clock"><Clock className="chat-ic" /><span className="chat-foot-clock-text">{formatElapsed(now - (transcript.turnStartedAt ?? now))}</span></span>
   if (!first) return null
-  return <span className="chat-foot-clock" title="Since this session's first message" data-testid="chat-clock"><Clock className="chat-ic" />{formatElapsed(now - first)}</span>
+  return <span className="chat-foot-clock" title="Since this session's first message" data-testid="chat-clock"><Clock className="chat-ic" /><span className="chat-foot-clock-text">{formatElapsed(now - first)}</span></span>
 }
 
 export function useTicker(ms: number): number {
@@ -951,7 +1248,8 @@ function usePeek() {
 /**
  * A pasted or attached image in the composer: its thumbnail, name and size (the user's call, 2026-10-20).
  * Resting the pointer on it (or focusing it) opens a larger preview above it; a click on the chip or on the
- * preview opens the image full size in the viewer, which its X, a click outside or Escape closes.
+ * preview opens the image full size in the viewer, with the markup toolbar under it (ui/markup.tsx); its X,
+ * Done, a click outside or Escape closes it, and the marked-up image takes the chip's place.
  * The chip's own X removes the image.
  */
 function ImageChip({ name, src, width, height, onOpen, onRemove }: { name: string; src: string; width?: number; height?: number; onOpen: () => void; onRemove: () => void }) {
@@ -976,29 +1274,31 @@ function ImageChip({ name, src, width, height, onOpen, onRemove }: { name: strin
   )
 }
 
-/** A quote as the message will carry it: each line behind `> `. */
-function quoteBlock(text: string): string {
-  return text.split(/\r?\n/).map((l) => `> ${l}`).join('\n')
-}
+/** A card waiting above the box: a selection's Quote or a long paste. */
+interface Card { id: number; kind: 'quote' | 'paste'; text: string }
 
 /**
- * A selection's Quote, staged as a chip (the user's call, 2026-10-20): a quote mark, the quote on one line,
- * a ↓ that moves it into the text as `> ` lines to edit (as Quote used to), and an X. Resting on it opens the
- * whole quote above it, as an image chip does. Sent as it stands, it leads the message as a `> ` block.
+ * A quote or a long paste as a card (the user's call, 2026-10-20, after a concept they liked): an icon tile, the
+ * first line in bold, *Show in text field ›* under it, and a round × on the corner. Resting on it opens its whole
+ * text above it, as an image chip does. Sent as it stands, a quote leads the message as a `> ` block and a paste
+ * follows as written.
  */
-function QuoteChip({ text, onEdit, onRemove }: { text: string; onEdit: () => void; onRemove: () => void }) {
+function TextCardChip({ card, onShow, onRemove }: { card: Card; onShow: () => void; onRemove: () => void }) {
   const p = usePeek()
-  const lines = text.split(/\r?\n/).length
+  const quote = card.kind === 'quote'
+  const what = quote ? 'quote' : 'pasted text'
+  const lines = card.text.split('\n').length
   return (
-    <span className="chat-chip is-quote" onMouseEnter={p.enter} onMouseLeave={p.leave} data-testid="chat-chip-quote">
-      <TextQuote className="chat-ic" aria-hidden />
-      <span className="chat-chip-label" tabIndex={0} onFocus={p.enter} onBlur={p.leave} aria-label={`Quote: ${text}`}>{text.replace(/\s+/g, ' ')}</span>
-      <button className="chat-chip-btn" title="Edit it in the message" aria-label="Edit the quote in the message" onClick={() => { p.close(); onEdit() }} data-testid="chat-chip-quote-edit"><ArrowDownToLine className="chat-ic" /></button>
-      <button className="chat-chip-x" aria-label="Remove the quote" onClick={onRemove}><X className="chat-ic" /></button>
+    <span className={`chat-card-chip is-${card.kind}`} onMouseEnter={p.enter} onMouseLeave={p.leave} data-testid={`chat-chip-${card.kind}`}>
+      <span className="chat-card-chip-tile" aria-hidden>{quote ? <TextQuote className="chat-ic" /> : <ScanText className="chat-ic" />}</span>
+      <span className="chat-card-chip-body">
+        <span className="chat-card-chip-title" tabIndex={0} onFocus={p.enter} onBlur={p.leave} aria-label={`${quote ? 'Quote' : `Pasted text, ${lines} lines`}: ${card.text}`}>{cardTitle(card.text) || (quote ? 'Quote' : 'Pasted text')}</span>
+        <button className="chat-card-chip-show" onClick={() => { p.close(); onShow() }} data-testid="chat-chip-show">Show in text field<ChevronRight className="chat-ic" aria-hidden /></button>
+      </span>
+      <button className="chat-card-chip-x" aria-label={`Remove the ${what}`} title="Remove" onClick={onRemove} data-testid="chat-chip-remove"><X className="chat-ic" /></button>
       {p.peek ? (
-        <div ref={p.peekRef} className="chat-peek is-quote" style={p.style} data-testid="chat-chip-quote-peek">
-          <blockquote className="chat-peek-quote">{text}</blockquote>
-          <span className="chat-peek-cap">{lines > 1 ? `Quote · ${lines} lines` : 'Quote'} · ↓ edits it in the message</span>
+        <div ref={p.peekRef} className="chat-peek is-quote" style={p.style} data-testid={`chat-chip-${card.kind}-peek`}>
+          {quote ? <blockquote className="chat-peek-quote">{card.text}</blockquote> : <pre className="chat-peek-paste">{card.text}</pre>}
         </div>
       ) : null}
     </span>
@@ -1021,8 +1321,8 @@ function ModeIcon({ id }: { id: string | null | undefined }) {
 }
 
 const MODE_FALLBACK: Record<string, string> = {
-  default: 'Manual', acceptEdits: 'Edit automatically', plan: 'Plan', auto: 'Auto', dontAsk: "Don't ask", bypassPermissions: 'Bypass permissions',
-  'read-only': 'Read only', 'full-access': 'Full access', ask: 'Ask for approval', 'auto-review': 'Approve for me', custom: 'Custom (config.toml)'
+  default: 'Manual', acceptEdits: 'Bypass', plan: 'Plan', auto: 'Auto', dontAsk: 'Deny', bypassPermissions: 'Unrestricted',
+  'read-only': 'Read only', 'full-access': 'Full', ask: 'Ask', 'auto-review': 'Auto', custom: 'Custom (config.toml)'
 }
 
 function modeLabel(id: string | null, options: ChatOptions | null): string {

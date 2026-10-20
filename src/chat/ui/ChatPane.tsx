@@ -27,6 +27,9 @@ import type { ChatBridge } from './bridge'
 import { QueuedRow, Row, StepFold, plain, type PlanComment, type PromptAction, type RowActions } from './rows'
 import { Composer, type ComposerHandle } from './composer'
 import { FindBar, ImagePreview, JumpToLatest, McpPanel, PinnedPrompt, RewindCard, SelectionBar, SidePanel, WorkingLine, type SelectionInfo } from './extras'
+import { MarkupViewer, type ImageEdit } from './markup'
+import { readPrefs } from './prefs'
+import { defaultFor } from '../shared/chatPrefs.mjs'
 import { AgentsPanel } from './agents'
 import { CODEX_INIT_PROMPT, cardSteps, transcriptMarkdown } from '../shared/present.mjs'
 import { agentCards } from '../shared/agents.mjs'
@@ -125,7 +128,7 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
   const [finding, setFinding] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
-  const [preview, setPreview] = useState<{ src: string; name: string } | null>(null)
+  const [preview, setPreview] = useState<{ src: string; name: string; edit?: ImageEdit } | null>(null)
   const [rewind, setRewind] = useState<{ itemId: string; fork: boolean } | null>(null)
   const [comments, setComments] = useState<Record<string, PlanComment[]>>({})
   const [sel, setSel] = useState<SelectionInfo | null>(null)
@@ -156,8 +159,13 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
         return
       }
     }
+    // A new session starts on the model and mode the user set as default (right-click in either menu); a
+    // resumed one keeps its own, and the pane's own model (`tm chat --model`) or a fork's mode wins.
+    const prefs = resume ? null : readPrefs()
+    const model = config.model ?? (prefs ? defaultFor(prefs, config.provider, 'model') : null)
+    const mode = permissionMode ?? (prefs ? defaultFor(prefs, config.provider, 'mode') : null)
     try {
-      const { id, transcript: t } = await bridge.create({ provider: config.provider, cwd: config.cwd, resume: resume ?? null, model: config.model ?? null, permissionMode: permissionMode ?? null })
+      const { id, transcript: t } = await bridge.create({ provider: config.provider, cwd: config.cwd, resume: resume ?? null, model: model === 'default' ? null : model, permissionMode: mode })
       setChatId(id)
       setTranscript(t)
       onConfig({ chatId: id, resumeId: t.sessionId ?? resume ?? undefined })
@@ -709,14 +717,16 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
         onPlanMode={chatId && config.provider === 'codex' ? (on: boolean) => configure({ planMode: on }) : undefined}
         onCompact={chatId ? () => { void bridge.compact(chatId).catch((err) => setNotice((err as Error).message)) } : undefined}
         onStopTask={chatId ? stopTask : undefined}
-        onPreview={(src, name) => setPreview({ src, name })}
+        onPreview={(src, name, edit) => setPreview({ src, name, edit })}
         agents={cards}
         onAgents={wide && cards.length ? toggleAgents : undefined}
         agentsOpen={agentsShown}
         onShowRow={showRow}
       />
       {dragging ? <div className="chat-drop" data-testid="chat-drop"><span>Drop to attach as context</span></div> : null}
-      {preview ? <ImagePreview src={preview.src} name={preview.name} onClose={() => setPreview(null)} /> : null}
+      {preview?.edit ? (
+        <MarkupViewer src={preview.edit.base} name={preview.name} marks={preview.edit.marks} onDone={(result) => { preview.edit?.onDone(result); setPreview(null); composer.current?.focus() }} />
+      ) : preview ? <ImagePreview src={preview.src} name={preview.name} onClose={() => { setPreview(null); composer.current?.focus() }} /> : null}
     </div>
   )
 })

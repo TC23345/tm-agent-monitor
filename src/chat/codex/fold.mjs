@@ -27,22 +27,23 @@ export const DECISIONS = { allow: 'accept', 'allow-session': 'acceptForSession',
 export const LEGACY_DECISIONS = { allow: 'approved', 'allow-session': 'approved_for_session', 'allow-rule': 'approved_for_session', 'allow-host': 'approved_for_session', deny: 'denied', cancel: 'abort' }
 
 /**
- * The Codex extension's permission menu (composer.permissionsDropdown.*),
- * spelled as the `turn/start` overrides `approvalPolicy`, `sandboxPolicy` and
+ * The Codex extension's permission menu (composer.permissionsDropdown.*), in
+ * one word each (the user's call, 2026-10-20: *Ask for approval*, *Approve for
+ * me* and *Full access* are Ask, Auto and Full), spelled as the `turn/start` overrides `approvalPolicy`, `sandboxPolicy` and
  * `approvalsReviewer`. `custom` is never sent: it names a thread whose
  * settings came from the user's config.toml and match none of the three.
  */
 export const CODEX_MODES = [
   {
-    id: 'ask', label: 'Ask for approval', description: 'Always ask to edit external files and use the internet',
+    id: 'ask', label: 'Ask', description: 'Always ask to edit external files and use the internet',
     approvalPolicy: 'on-request', approvalsReviewer: 'user', sandboxPolicy: { type: 'workspaceWrite', writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false }
   },
   {
-    id: 'auto-review', label: 'Approve for me', description: 'Only ask for actions detected as potentially unsafe',
+    id: 'auto-review', label: 'Auto', description: 'Only ask for actions detected as potentially unsafe',
     approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandboxPolicy: { type: 'workspaceWrite', writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false }
   },
   {
-    id: 'full-access', label: 'Full access', description: 'Unrestricted access to the internet and any file on your computer',
+    id: 'full-access', label: 'Full', description: 'Unrestricted access to the internet and any file on your computer',
     approvalPolicy: 'never', approvalsReviewer: 'user', sandboxPolicy: { type: 'dangerFullAccess' },
     confirm: {
       title: 'Turn on Full Access?',

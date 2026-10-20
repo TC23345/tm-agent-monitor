@@ -2,6 +2,25 @@
 
 Releases are GitHub Releases on `TC23345/tm-agent-monitor`; installed apps update from `latest.yml` there. Local builds land in `dist/` as `tm-agent-monitor-<version>-x64.exe`.
 
+## 0.4.66 — 2026-10-20
+
+- **Mark up an image before you send it.** Click an image in the chat box and the viewer has a toolbar under it, like the Snipping Tool's: pen, highlighter, box, arrow, text and eraser, six colours, undo, redo, clear and Done. The keys are P, H, B, A, T and E, plus Ctrl+Z and Ctrl+Y.
+  - Closing the viewer keeps your marks, whether you use Done, X, Escape or a click outside. The chip then holds the marked-up picture as a PNG.
+  - Open it again and the marks are still marks: you can undo them one at a time or erase one. Clear them all and the original picture is back.
+- **Quotes and long pastes wait as cards.** A quote, or a paste of ten lines or 1,000 characters, sits above the box as a small card instead of filling it. The card shows an icon, the first line in bold, *Show in text field ›* and a round × on its corner. Shorter pastes go into the box as before.
+  - Rest on a card to see its whole text, with no caption under it.
+  - *Show in text field* puts a quote ahead of what you typed, as `> ` lines, and a paste where your cursor is. Ctrl+Z takes it out again and the card returns. Ctrl+Y puts it back in. Anything you typed afterwards is undone first.
+  - Cards you leave are sent with the message: quotes first as `> ` blocks, then pastes as written, then what you typed.
+- **Effort on *Auto* looks like *Max*, in blue.** The whole track is filled and sparkling. Every other level keeps the orange it had.
+- ***Speed* under *Effort*.** Fast mode moved out from under the model list into its own section, with five dots by its heading like Effort's. While Fast is on, the word and the dots charge yellow to blue and throw sparks. Off, it is a plain heading.
+- **One-word modes.** *Manual*, *Bypass* (what was *Edit automatically*), *Plan*, *Auto*. *Don't ask* is gone. Codex's are *Ask*, *Auto* and *Full*. The model list says *Default*, without *(recommended)*.
+- **Rename a model or a mode, or make it the default.** Right-click one in its menu:
+  - *Edit title and description* turns the row into two fields, and the menu and the chip show your words. Enter saves and Escape leaves it as it was.
+  - *Set as default* makes new chats start on it, and the row says *new chats*.
+  - *Reset title and description* puts the original words back.
+  - These are kept per provider on this computer.
+- **The footer chips keep one width.** The model chip and the mode chip are each as wide as their longest choice, so switching never moves them. In a narrow pane the clock shows just its icon, with the time in its tooltip.
+
 ## 0.4.65 — 2026-10-18
 
 - **An agents panel beside the chat.** When a Claude Code chat starts an agent, a column opens on the right of a wide chat pane (820 px or more). It has a card per agent and per background command: what it's doing, *Running 1m 20s* / *Finished in 8s* / *Failed* / *Stopped*, its type, its step count, its latest step, and *Stop* while it runs in the background. Click a card to see its prompt, its steps and its result, with *Show in conversation*. The panel stays with the finished agents until your next message, so you can read what they did. Close it with its ×, or with Escape while your focus is in it.

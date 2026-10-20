@@ -7,7 +7,9 @@
  * the one dependency it brings). Changes from upstream: discrete steps only (`count` positions, step 1),
  * a value is committed on release or key press (`onCommit`) while a drag only previews it
  * (`onPreview`), the sparkle's density and speed follow the position rather than a fixed effort table
- * (Codex lists other levels), and the track's radius is the pane's 6px.
+ * (Codex lists other levels), and the track's radius is the pane's 6px. With `autoFirst`, the first position
+ * (Auto: the model decides) wears Max's look in blue (the user's call, 2026-10-20): the whole track filled and
+ * sparkling at Max's density and speed, so Auto never reads as "no effort".
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { animate, domAnimation, LazyMotion, m, useMotionValue, useReducedMotion, useTransform } from 'motion/react'
@@ -34,11 +36,15 @@ function hashNoise(cell: number, tick: number) {
   return raw - Math.floor(raw)
 }
 
+/** Upstream's `max` sparkle, which Auto shares. */
+const MAX_SPARKLE = { density: 0.2, speed: 48 }
+
 /**
- * How lively the fill's sparkle is at a position: none at the first (Auto: the model decides), then
- * from upstream's `low` (density 0.04, speed 8) to its `max` (0.2, 48) across the levels after it.
+ * How lively the fill's sparkle is at a position: from upstream's `low` (density 0.04, speed 8) to its `max`
+ * (0.2, 48) across the levels after the first; the first (Auto) has Max's with `autoFirst`, else none.
  */
-function sparkleAt(index: number, count: number) {
+function sparkleAt(index: number, count: number, autoFirst: boolean) {
+  if (index <= 0 && autoFirst) return MAX_SPARKLE
   if (index <= 0 || count < 2) return { density: 0, speed: 0 }
   const t = count > 2 ? (index - 1) / (count - 2) : 1
   return { density: 0.04 + 0.16 * t, speed: 8 + 40 * t }
@@ -47,12 +53,12 @@ function sparkleAt(index: number, count: number) {
 /**
  * Pixel sparkle confined to the fill (upstream's GrainFill). Reads the fill's live width each frame, so
  * the glints stretch with the elastic drag and spring with the snap; skips its work while hidden and
- * draws nothing under reduced motion. Its colour is the canvas's CSS `color` (the accent).
+ * draws nothing under reduced motion. Its colour is the canvas's CSS `color` (the accent; Auto's blue).
  */
-function GrainFill({ index, count }: { index: number; count: number }) {
+function GrainFill({ index, count, autoFirst }: { index: number; count: number; autoFirst: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const level = useRef({ index, count })
-  level.current = { index, count }
+  const level = useRef({ index, count, autoFirst })
+  level.current = { index, count, autoFirst }
   useEffect(() => {
     const canvas = canvasRef.current
     const context = canvas?.getContext('2d')
@@ -63,7 +69,8 @@ function GrainFill({ index, count }: { index: number; count: number }) {
       frame = requestAnimationFrame(draw)
       if (!(canvas.checkVisibility?.() ?? true)) return
       const host = canvas.parentElement
-      const fill = host?.querySelector<HTMLElement>('.chat-slider-fill')
+      const auto = level.current.autoFirst && level.current.index <= 0
+      const fill = host?.querySelector<HTMLElement>(auto ? '.chat-slider-autofill' : '.chat-slider-fill')
       if (!host || !fill) return
       const hostRect = host.getBoundingClientRect()
       const fillRect = fill.getBoundingClientRect()
@@ -74,7 +81,7 @@ function GrainFill({ index, count }: { index: number; count: number }) {
         canvas.height = height
       }
       context.clearRect(0, 0, width, height)
-      const { density, speed } = sparkleAt(level.current.index, level.current.count)
+      const { density, speed } = sparkleAt(level.current.index, level.current.count, level.current.autoFirst)
       if (density === 0) return
       const fillLeft = (fillRect.left - hostRect.left) * dpr
       const cell = GRAIN_CELL * dpr
@@ -112,12 +119,14 @@ export interface EffortSliderProps {
   onPreview?: (index: number) => void
   /** A click, a release after a drag, or a key: the position to apply. */
   onCommit: (index: number) => void
+  /** The first position is Auto, drawn as Max in blue. */
+  autoFirst?: boolean
   'aria-label'?: string
   testid?: string
 }
 
 /** The elastic slider, wrapped as upstream's ThinkingSelect: the sparkle canvas over the track. */
-export function EffortSlider({ label, count, value, format, onPreview, onCommit, 'aria-label': ariaLabel, testid }: EffortSliderProps) {
+export function EffortSlider({ label, count, value, format, onPreview, onCommit, autoFirst = false, 'aria-label': ariaLabel, testid }: EffortSliderProps) {
   const max = Math.max(1, count - 1)
   const [draft, setDraft] = useState(value)
   const reduceMotion = useReducedMotion()
@@ -275,8 +284,8 @@ export function EffortSlider({ label, count, value, format, onPreview, onCommit,
   const handleOpacity = !isActive ? 0 : dodging ? 0.1 : isDragging ? 0.8 : 0.5
 
   return (
-    <div className="chat-slider-host" data-effort-index={shown} data-testid={testid}>
-      <GrainFill index={shown} count={count} />
+    <div className="chat-slider-host" data-effort-index={shown} data-auto={autoFirst && shown === 0 ? 'true' : undefined} data-testid={testid}>
+      <GrainFill index={shown} count={count} autoFirst={autoFirst} />
       <LazyMotion features={domAnimation} strict>
         <div ref={wrapperRef} className="chat-slider">
           <m.div
@@ -305,6 +314,7 @@ export function EffortSlider({ label, count, value, format, onPreview, onCommit,
             <div className="chat-slider-marks" aria-hidden>
               {Array.from({ length: max - 1 }, (_, i) => <div key={i} className="chat-slider-mark" style={{ left: `${((i + 1) / max) * 100}%` }} />)}
             </div>
+            <div className="chat-slider-autofill" aria-hidden />
             <m.div className="chat-slider-fill" aria-hidden style={{ width: fillWidth }} />
             <m.div
               className="chat-slider-handle"

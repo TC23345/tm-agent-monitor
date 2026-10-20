@@ -265,12 +265,13 @@ export function verbDelay(swaps) {
 }
 
 const DESTINATIONS = { localSettings: 'in this project', projectSettings: 'in this project, for everyone', userSettings: 'in all your projects', session: 'for this session', cliArg: 'for this session' }
-const MODE_WORDS = { acceptEdits: 'Edit automatically', default: 'Manual', plan: 'Plan', auto: 'Auto', dontAsk: "Don't ask", bypassPermissions: 'Bypass permissions' }
+// The composer's one-word mode names (CLAUDE_MODES); the two it never offers keep one word too.
+const MODE_WORDS = { acceptEdits: 'Bypass', default: 'Manual', plan: 'Plan', auto: 'Auto', dontAsk: 'Deny', bypassPermissions: 'Unrestricted' }
 
 /**
  * What "don't ask again" will save, from the CLI's permission suggestions
- * (`PermissionUpdate[]`): "Bash(npm test:*) in this project", "Edit
- * automatically for this session". Undefined when there is nothing to name.
+ * (`PermissionUpdate[]`): "Bash(npm test:*) in this project", "Bypass for
+ * this session". Undefined when there is nothing to name.
  * @param {unknown} suggestions
  * @returns {string | undefined}
  */
@@ -489,4 +490,60 @@ export function transcriptMarkdown(t) {
     }
   }
   return `${out.join('\n').replace(/\n{3,}/g, '\n\n').trim()}\n`
+}
+
+// ---- Text cards in the composer (the user's call, 2026-10-20) ----
+// A selection's Quote and a long paste wait above the box as cards (an icon tile, the first line in bold,
+// "Show in text field ›", a corner ×) instead of filling it. Sent as they stand, quotes lead the message as
+// `> ` blocks, then pastes as written, then what was typed. "Show in text field" puts one into the text.
+
+/** A paste this long becomes a card: ten lines or more, or 1,000 characters or more. */
+export const PASTE_CARD_LINES = 10
+export const PASTE_CARD_CHARS = 1000
+
+/** Whether pasted text is long enough to wait as a card. @param {string} text */
+export function isLongPaste(text) {
+  if (typeof text !== 'string' || !text.trim()) return false
+  return text.length >= PASTE_CARD_CHARS || text.split(/\r?\n/).length >= PASTE_CARD_LINES
+}
+
+/** A card's title: its first line with words on it, trimmed. @param {string} text */
+export function cardTitle(text) {
+  const line = String(text ?? '').split(/\r?\n/).find((l) => l.trim()) ?? ''
+  return line.trim().replace(/\s+/g, ' ')
+}
+
+/** A quote as the message carries it: each line behind `> `. @param {string} text */
+export function quoteBlock(text) {
+  return String(text).split(/\r?\n/).map((l) => `> ${l}`).join('\n')
+}
+
+/**
+ * The message a send carries: the quote cards as `> ` blocks, then the paste cards as written, then the
+ * typed text, blank lines between.
+ * @param {{ kind: 'quote' | 'paste', text: string }[]} cards
+ * @param {string} text
+ */
+export function composeMessage(cards, text) {
+  const quotes = cards.filter((c) => c.kind === 'quote').map((c) => quoteBlock(c.text))
+  const pastes = cards.filter((c) => c.kind === 'paste').map((c) => c.text.replace(/\s+$/, ''))
+  return [...quotes, ...pastes, text.trim()].filter(Boolean).join('\n\n')
+}
+
+/**
+ * Where "Show in text field" puts a card: a quote goes ahead of what is typed, as `> ` lines and a blank line
+ * (over any leading whitespace); a paste goes where the caret is, as a paste would have. `start`–`end` is
+ * the range it replaces, `after` the whole text then, `caret` where the caret lands.
+ * @param {{ kind: 'quote' | 'paste', text: string }} card
+ * @param {string} text
+ * @param {number} caret
+ */
+export function cardInsertion(card, text, caret) {
+  if (card.kind === 'quote') {
+    const insert = `${quoteBlock(card.text)}\n\n`
+    const end = text.length - text.replace(/^\s+/, '').length
+    return { start: 0, end, insert, after: insert + text.slice(end), caret: insert.length }
+  }
+  const at = Math.max(0, Math.min(text.length, caret))
+  return { start: at, end: at, insert: card.text, after: text.slice(0, at) + card.text + text.slice(at), caret: at + card.text.length }
 }

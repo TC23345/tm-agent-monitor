@@ -4,6 +4,7 @@ import {
   argDetail, cardSteps, clockTime, previewMarkdown, streamParts, effortLabel, fmtTokens, formatElapsed, imageSize, latestModels, mcpTitle, modelLabel, serverTitle, splitMcpName,
   WORKING_VERBS, activitySummary, describePermissionUpdates, limitLines, limitName, matchFiles, relPath, resetPhrase, transcriptMarkdown, verbDelay
 } from './present.mjs'
+import { cardInsertion, cardTitle, composeMessage, isLongPaste, quoteBlock } from './present.mjs'
 import { emptyTranscript } from './chatModel.mjs'
 
 test('previewMarkdown keeps a code preview’s lines in a fence and leaves Markdown as written', () => {
@@ -68,7 +69,7 @@ test('the working line uses the extension’s 82 verbs on its 2 s, 3 s, 5 s sche
 
 test('describePermissionUpdates names what "don’t ask again" saves', () => {
   assert.equal(describePermissionUpdates([{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], behavior: 'allow', destination: 'localSettings' }]), 'Bash(npm test:*) in this project')
-  assert.equal(describePermissionUpdates([{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }]), 'Edit automatically for this session')
+  assert.equal(describePermissionUpdates([{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }]), 'Bypass for this session')
   assert.equal(describePermissionUpdates([{ type: 'addDirectories', directories: ['C:\\tmp'], destination: 'session' }]), 'access to C:\\tmp for this session')
   assert.equal(describePermissionUpdates([{ type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'deny', destination: 'session' }]), undefined)
   assert.equal(describePermissionUpdates(undefined), undefined)
@@ -203,4 +204,33 @@ test('rate limits read as the extension writes them', () => {
   assert.equal(resetPhrase(null), 'reset time unavailable')
   assert.deepEqual(limitLines({ primary: { usedPercent: 12.4, windowMins: 10080, resetsAt: null }, secondary: null }), ['Weekly limit: 88% left (reset time unavailable)'])
   assert.deepEqual(limitLines(null), [])
+})
+
+test('isLongPaste: ten lines or 1,000 characters make a card', () => {
+  assert.equal(isLongPaste('one line'), false)
+  assert.equal(isLongPaste('a\n'.repeat(8) + 'a'), false)
+  assert.equal(isLongPaste('a\n'.repeat(9) + 'a'), true)
+  assert.equal(isLongPaste('x'.repeat(999)), false)
+  assert.equal(isLongPaste('x'.repeat(1000)), true)
+  assert.equal(isLongPaste('\n'.repeat(20)), false)
+})
+
+test('cardTitle is the first line with words on it', () => {
+  assert.equal(cardTitle('\n\n  Real security.   Zero  trust\nmore'), 'Real security. Zero trust')
+  assert.equal(cardTitle(''), '')
+})
+
+test('composeMessage: quotes, then pastes as written, then the typed text', () => {
+  const cards = [{ kind: 'paste', text: 'log line 1\nlog line 2\n\n' }, { kind: 'quote', text: 'said this\nand this' }]
+  assert.equal(composeMessage(cards, '  Why?  '), '> said this\n> and this\n\nlog line 1\nlog line 2\n\nWhy?')
+  assert.equal(composeMessage([], '  '), '')
+  assert.equal(quoteBlock('a\r\nb'), '> a\n> b')
+})
+
+test('cardInsertion: a quote leads the text, a paste lands at the caret', () => {
+  const q = cardInsertion({ kind: 'quote', text: 'q' }, '  My reply', 4)
+  assert.deepEqual(q, { start: 0, end: 2, insert: '> q\n\n', after: '> q\n\nMy reply', caret: 5 })
+  const p = cardInsertion({ kind: 'paste', text: 'PASTE' }, 'see  here', 4)
+  assert.deepEqual(p, { start: 4, end: 4, insert: 'PASTE', after: 'see PASTE here', caret: 9 })
+  assert.equal(cardInsertion({ kind: 'paste', text: 'x' }, 'ab', 99).after, 'abx')
 })

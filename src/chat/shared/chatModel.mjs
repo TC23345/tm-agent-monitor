@@ -116,7 +116,7 @@ import { changeLines, countChanges, splitLines } from './diff.mjs'
  */
 /**
  * `plan-auto` / `plan-manual` approve a plan and leave plan mode for
- * *Edit automatically* or *Manual*.
+ * *Bypass* (`acceptEdits`) or *Manual*.
  * @typedef {'allow' | 'allow-session' | 'deny' | 'cancel' | 'plan-auto' | 'plan-manual'} ApprovalChoice
  */
 /**

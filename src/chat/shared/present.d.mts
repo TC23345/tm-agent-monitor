@@ -26,3 +26,11 @@ export function cardSteps(items: import('./chatModel.mjs').ChatItem[]): Set<stri
 /** A streaming reply split for drawing: finished blocks (Markdown), the block being written (plain), and a table's header while its rows arrive. */
 export function streamParts(text: string): { settled: string; live: string; table: string | null }
 export function transcriptMarkdown(t: Transcript): string
+export interface TextCard { kind: 'quote' | 'paste'; text: string }
+export const PASTE_CARD_LINES: number
+export const PASTE_CARD_CHARS: number
+export function isLongPaste(text: string): boolean
+export function cardTitle(text: string): string
+export function quoteBlock(text: string): string
+export function composeMessage(cards: TextCard[], text: string): string
+export function cardInsertion(card: TextCard, text: string, caret: number): { start: number; end: number; insert: string; after: string; caret: number }

@@ -455,7 +455,7 @@ export function IoRow({ label, text, muted, kind }: { label?: string; text?: str
 
 const DECIDED: Record<ApprovalChoice, string> = {
   allow: 'Allowed', 'allow-session': 'Allowed, and not asked again', deny: 'Declined', cancel: 'Cancelled',
-  'plan-auto': 'Plan approved · Edit automatically', 'plan-manual': 'Plan approved · Manual',
+  'plan-auto': 'Plan approved · Bypass', 'plan-manual': 'Plan approved · Manual',
   'allow-rule': 'Allowed similar commands', 'allow-host': 'Always allowed'
 }
 
@@ -578,7 +578,7 @@ function ToolApproval({ item, actions }: { item: ChatItemApproval; actions: RowA
 
 /**
  * The plan prompt (ExitPlanMode): the plan, comments made on a selection of
- * it, then approve it — leaving plan mode for *Edit automatically* or
+ * it, then approve it — leaving plan mode for *Bypass* or
  * *Manual* — or keep planning with what should change. With comments, keeping
  * planning sends them as the feedback.
  */

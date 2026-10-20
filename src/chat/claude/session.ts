@@ -142,19 +142,19 @@ export function askUserQuestionInput(input: Record<string, unknown>, answers: Re
 }
 
 /**
- * The permission modes the composer offers, in the Claude Code extension's
- * own words (its mode table in webview/index.js, docs/rea-findings.md) —
- * except *Edit automatically*, whose "your selected text" is an editor's idea.
- * `bypassPermissions` is left out: switching to it mid-session needs the
- * session started with `allowDangerouslySkipPermissions`, which this host
+ * The permission modes the composer offers, with the Claude Code extension's
+ * descriptions (its mode table in webview/index.js, docs/rea-findings.md) and
+ * one-word names (the user's call, 2026-10-20: `acceptEdits`, the extension's
+ * *Edit automatically*, is *Bypass*). `dontAsk` is left out (the user never
+ * uses it), and so is `bypassPermissions`: switching to it mid-session needs
+ * the session started with `allowDangerouslySkipPermissions`, which this host
  * never sets. `auto` is offered only on a model that supports it.
  */
 export const CLAUDE_MODES: ModeOption[] = [
   { id: 'default', label: 'Manual', description: 'Claude will ask for approval before making each edit' },
-  { id: 'acceptEdits', label: 'Edit automatically', description: 'Claude will make edits without asking first' },
+  { id: 'acceptEdits', label: 'Bypass', description: 'Claude will make edits without asking first' },
   { id: 'plan', label: 'Plan', description: 'Claude will explore the code and present a plan before editing' },
-  { id: 'auto', label: 'Auto', description: 'Claude will approve actions that pass a safety check and pause for anything risky' },
-  { id: 'dontAsk', label: "Don't ask", description: 'Claude will deny actions that need approval instead of asking' }
+  { id: 'auto', label: 'Auto', description: 'Claude will approve actions that pass a safety check and pause for anything risky' }
 ]
 
 export const CLAUDE_EFFORTS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -165,7 +165,7 @@ const QUESTIONS: Record<string, string> = { WebFetch: 'Allow fetching this url?'
  * A permission prompt as the extension draws it (docs/rea-findings.md, feature
  * pass): the tool's own body — the command, the diff, the URL — its question,
  * and what "don't ask again" would save. ExitPlanMode is the plan prompt: the
- * plan, then approve it (leaving plan mode for *Edit automatically* or
+ * plan, then approve it (leaving plan mode for *Bypass* (`acceptEdits`) or
  * *Manual*) or keep planning.
  */
 export function approvalItem(id: string, toolName: string, input: Record<string, unknown>, ctx: { title?: string; decisionReason?: string; blockedPath?: string; suggestions?: PermissionUpdate[]; toolUseID?: string }, at: number): ChatItemApproval {
@@ -357,7 +357,7 @@ export class ClaudeSession extends EventEmitter {
   /**
    * Answer an approval. `deny` carries what the user told Claude to do
    * instead, when they typed it. A plan approved leaves plan mode for
-   * *Edit automatically* (`plan-auto`) or *Manual* (`plan-manual`), the way the
+   * *Bypass* (`plan-auto`) or *Manual* (`plan-manual`), the way the
    * CLI's own plan prompt does, through a session `setMode` update.
    */
   answer(approvalId: string, choice: ApprovalChoice, message?: string): void {
@@ -600,7 +600,8 @@ export class ClaudeSession extends EventEmitter {
     const current = models.find((m) => m.value === id) ?? models.find((m) => m.resolvedModel === id)
     return {
       models: models.map((m) => ({
-        id: m.value, label: m.displayName, description: m.description || undefined, model: m.resolvedModel,
+        // "Default (recommended)" is just "Default" here (the user's call, 2026-10-20).
+        id: m.value, label: m.displayName.replace(/\s*\(recommended\)\s*$/i, ''), description: m.description || undefined, model: m.resolvedModel,
         efforts: m.supportsEffort === false ? [] : [...(m.supportedEffortLevels ?? [])],
         ...(m.supportsFastMode ? { fastMode: true } : {})
       })),
