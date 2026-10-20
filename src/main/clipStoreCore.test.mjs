@@ -111,7 +111,7 @@ test('pause, settings and meta survive a reload; unreadable lines are skipped', 
     assert.equal(store.isPaused(), false, 'a timed pause lapses')
     store.pause(undefined)
     assert.equal(store.isPaused(), true, 'an open pause holds')
-    store.updateSettings({ blockedExes: ['Slack.exe'], blockedDomains: ['.Mail.Google.com', 'bank.example', 'BANK.example', ''], redactSecrets: false, maxItems: 5, maxAgeDays: 0, junk: 1 })
+    store.updateSettings({ blockedExes: ['Slack.exe'], blockedDomains: ['.Mail.Google.com', 'bank.example', 'BANK.example', ''], captureImages: false, redactSecrets: false, maxItems: 5, maxAgeDays: 0, junk: 1 })
     await store.flush()
     assert.ok(existsSync(join(dir, 'meta.json')))
     const reload = makeStore(dir, clock)
@@ -120,7 +120,8 @@ test('pause, settings and meta survive a reload; unreadable lines are skipped', 
     assert.equal(meta.pausedUntil, -1)
     assert.deepEqual(meta.blockedExes, ['slack.exe'])
     assert.deepEqual(meta.blockedDomains, ['mail.google.com', 'bank.example'], 'lowercased, leading dots dropped, deduped, blanks gone')
-    assert.equal(meta.redactSecrets, false)
+    assert.equal(meta.captureImages, false)
+    assert.ok(!('redactSecrets' in meta), 'the old Skip secrets switch is gone: keys are kept and shown masked')
     assert.equal(meta.maxItems, 2000, 'below the floor → default')
     assert.equal(meta.maxAgeDays, 30, 'out of range → default')
     reload.store.pause(null)
@@ -188,9 +189,9 @@ test('importClips adds new text, skips content already in history without touchi
 })
 
 test('sanitizeMeta bounds everything and defaults the rest', () => {
-  assert.deepEqual(sanitizeMeta(null), { groups: [], groupInfo: {}, favoritesOrder: [], pausedUntil: 0, blockedExes: [], blockedDomains: [], redactSecrets: true, captureImages: true, maxItems: 2000, maxAgeDays: 30 })
+  assert.deepEqual(sanitizeMeta(null), { groups: [], groupInfo: {}, favoritesOrder: [], pausedUntil: 0, blockedExes: [], blockedDomains: [], captureImages: true, maxItems: 2000, maxAgeDays: 30 })
   const m = sanitizeMeta({ groups: ['A', 'A', 'favorites'], groupInfo: { A: { description: ' alpha ' }, B: { description: 'gone' } }, favoritesOrder: ['x', 3], pausedUntil: -1, blockedExes: ['ONE.exe'], blockedDomains: ['..Example.COM', 7, 'example.com'], captureImages: false, maxItems: 99999, maxAgeDays: 7 })
-  assert.deepEqual(m, { groups: ['A'], groupInfo: { A: { description: 'alpha' } }, favoritesOrder: ['x'], pausedUntil: -1, blockedExes: ['one.exe'], blockedDomains: ['example.com'], redactSecrets: true, captureImages: false, maxItems: 2000, maxAgeDays: 7 })
+  assert.deepEqual(m, { groups: ['A'], groupInfo: { A: { description: 'alpha' } }, favoritesOrder: ['x'], pausedUntil: -1, blockedExes: ['one.exe'], blockedDomains: ['example.com'], captureImages: false, maxItems: 2000, maxAgeDays: 7 })
   assert.equal(sanitizeMeta({ blockedDomains: Array.from({ length: 150 }, (_, i) => `h${i}.test`) }).blockedDomains.length, 100, 'bounded')
 })
 

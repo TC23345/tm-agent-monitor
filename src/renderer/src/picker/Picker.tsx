@@ -10,6 +10,7 @@ import { FilterChips, type FilterChip } from '../clipboard/FilterChips'
 import { SourceCell } from '../clipboard/SourceCell'
 import { ClipEditCard } from '../clipboard/ClipEditCard'
 import { GroupManager, type GroupRequest } from '../clipboard/GroupManager'
+import { ClipNav, clipSources, groupDot, useNavSections } from '../clipboard/ClipNav'
 import { gripAt, useClipColumns } from '../clipboard/ClipColumns'
 import { tid } from '../testid'
 import mark from '../assets/icon.png'
@@ -40,11 +41,6 @@ function Glyph({ clip }: { clip: ClipSummary }) {
     case 'manual': return <Pencil className={cls} strokeWidth={2} />
     default: return <AppWindow className={cls} strokeWidth={2} />
   }
-}
-
-/** A group's dot colour, the same hue the Clipboard pane gives it. */
-function groupDot(name: string): string {
-  return `hsl(${[...name].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 0) % 7 * 51 + 18} 60% 62%)`
 }
 
 type Chip = { id: string; label: string; count: number; dot?: string; star?: boolean; icon?: React.ReactNode; hint?: string }
@@ -206,23 +202,31 @@ export function Picker() {
   const favorites = useMemo(() => orderFavorites(clips, listing?.favoritesOrder ?? []), [clips, listing?.favoritesOrder])
   const byId = useMemo(() => new Map(clips.map((c) => [c.id, c])), [clips])
 
-  const chips = useMemo<Chip[]>(() => {
-    const out: Chip[] = [{ id: 'all', label: 'All', count: clips.length }]
-    if (favorites.length) out.push({ id: 'favorites', label: 'Favorites', count: favorites.length, star: true })
-    // The pane's built-in order: All · Favorites · Images, then groups and sources.
-    const images = clips.filter((c) => c.kind === 'image').length
-    if (images) out.push({ id: 'images', label: 'Images', count: images, icon: <Image strokeWidth={2} /> })
-    for (const g of groups) {
-      const n = clips.filter((c) => c.groups.includes(g)).length
-      // A group's description is its chip's hover text (Settings → Groups sets it).
-      if (n) out.push({ id: g, label: g, count: n, dot: groupDot(g), hint: groupInfo[g]?.description })
-    }
-    for (const [id, label] of [['src:terminal', 'Panes'], ['src:chrome', 'Browser'], ['src:agent', 'Agents']] as const) {
-      const n = clips.filter((c) => c.source.kind === id.slice(4)).length
-      if (n) out.push({ id, label, count: n })
-    }
+  const counts = useMemo(() => ({
+    all: clips.length,
+    favorites: favorites.length,
+    images: clips.filter((c) => c.kind === 'image').length,
+    group: (name: string) => clips.filter((c) => c.groups.includes(name)).length
+  }), [clips, favorites])
+  const sources = useMemo(() => clipSources(clips), [clips])
+  /** Every filter in the left column's order — what Tab walks: All · Favorites · Images, the groups, the sources. */
+  const filters = useMemo<Chip[]>(() => {
+    const out: Chip[] = [{ id: 'all', label: 'All', count: counts.all }]
+    if (counts.favorites) out.push({ id: 'favorites', label: 'Favorites', count: counts.favorites, star: true })
+    if (counts.images) out.push({ id: 'images', label: 'Images', count: counts.images, icon: <Image strokeWidth={2} /> })
+    for (const g of groups) if (counts.group(g)) out.push({ id: g, label: g, count: counts.group(g), dot: groupDot(g), hint: groupInfo[g]?.description })
+    for (const s of sources) out.push({ id: `src:${s.id}`, label: s.label, count: s.count, icon: s.icon })
     return out
-  }, [clips, favorites, groups, groupInfo])
+  }, [counts, groups, groupInfo, sources])
+  /** The chip row: the filters less the groups, which the left column lists (the user's call). */
+  const chips = useMemo(() => filters.filter((c) => !groups.includes(c.id)), [filters, groups])
+  const nav = useNavSections()
+  /** A click in the left column: the list with that filter (out of the settings view), the search keeping the keys. */
+  const pickFilter = (id: string) => {
+    setFilter(id)
+    if (settings) { setSettings(null); setGroupRequest(null) }
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }
 
   // Settings → Keybinds reads the chords from main when it opens, and again when the list changes (a clip's keybind may have moved).
   useEffect(() => {
@@ -491,8 +495,8 @@ export function Picker() {
     else if (e.key === 'F2') startRename(rows[active])
     else if (favoriteKey(e)) pick(favorites[favoriteKey(e) - 1], 'paste')
     else if (e.key === 'Tab') {
-      const at = chips.findIndex((c) => c.id === filter)
-      const next = chips[(at + (e.shiftKey ? chips.length - 1 : 1)) % chips.length]
+      const at = filters.findIndex((c) => c.id === filter)
+      const next = filters[(at + (e.shiftKey ? filters.length - 1 : 1)) % filters.length]
       if (next) setFilter(next.id)
     } else return
     e.preventDefault()
@@ -657,11 +661,12 @@ export function Picker() {
         data-menu-host=""
         data-testid="picker"
       >
-        {/* The menu bar: the workspace title bar's brand mark and menu-button look, with two icon buttons at the right
+        {/* The menu bar: the workspace title bar's brand mark and the window's name, with two icon buttons at the right
             — export, and the in-card settings — instead of text menus. */}
         <header className="titlebar picker-titlebar">
           <nav className="menubar picker-menubar" data-testid="picker-menubar">
             <img className="brand-mark" src={mark} alt="" draggable={false} title="TaylorMade Agent Monitor" />
+            <span className="picker-brand" data-testid="picker-brand">TaylorMade Clipboard</span>
             <div className="picker-menubar-tools">
               <button
                 className="menu-btn menu-btn--icon"
@@ -687,6 +692,26 @@ export function Picker() {
             </div>
           </nav>
         </header>
+        {/* The left column (the pane's: All · Favorites · Images, the groups open, the sources), then the chips and the list. */}
+        <div className="picker-body">
+        <aside className="picker-side" aria-label="Views, groups and sources">
+          <ClipNav
+            counts={counts}
+            groups={groups}
+            groupInfo={groupInfo}
+            sources={sources}
+            group={filter.startsWith('src:') ? '' : filter}
+            source={filter.startsWith('src:') ? filter.slice(4) : ''}
+            onGroup={pickFilter}
+            onSource={(id) => pickFilter(filter === `src:${id}` ? 'all' : `src:${id}`)}
+            open={nav.open}
+            onSection={nav.toggle}
+            emptyHint="No groups — right-click a clip"
+            holdFocus
+            testIds={{ list: 'picker-nav', row: 'picker-nav', source: 'picker-nav-source', section: 'picker-nav-section' }}
+          />
+        </aside>
+        <div className="picker-main">
         <div className="picker-top">
           {settings ? (
             <>
@@ -850,10 +875,12 @@ export function Picker() {
             )
           })}
           {rows.length === 0 && (
-            <div className="picker-empty">{clips.length === 0 ? 'Nothing copied yet.' : `No clips match “${query.trim()}”`}</div>
+            <div className="picker-empty">{clips.length === 0 ? 'Nothing copied yet.' : query.trim() ? `No clips match “${query.trim()}”` : 'Nothing here yet.'}</div>
           )}
         </div>
         )}
+        </div>
+        </div>
         <ResizeGrip edge="right" onEnd={() => setCustomSize(true)} />
         <ResizeGrip edge="bottom" onEnd={() => setCustomSize(true)} />
         <ResizeGrip edge="corner" onEnd={() => setCustomSize(true)} />

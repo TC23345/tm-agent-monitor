@@ -10,8 +10,9 @@ export type Attachment =
 export interface AttachmentSummary { kind: 'image' | 'file'; name: string; width?: number; height?: number; path?: string }
 
 export interface ChatItemUser { kind: 'user'; id: string; text: string; attachments?: AttachmentSummary[]; at: number; uuid?: string; turnId?: string; steered?: boolean; shell?: boolean }
-export interface ChatItemAssistant { kind: 'assistant'; id: string; text: string; streaming: boolean; at: number; phase?: 'commentary' | 'final'; plan?: boolean }
-export interface ChatItemThinking { kind: 'thinking'; id: string; text: string; streaming: boolean; at: number; durationMs?: number; tokens?: number }
+/** `parent`: a subagent's text or thinking, nested under its Agent row (Claude's `parent_tool_use_id`). */
+export interface ChatItemAssistant { kind: 'assistant'; id: string; text: string; streaming: boolean; at: number; phase?: 'commentary' | 'final'; plan?: boolean; parent?: string }
+export interface ChatItemThinking { kind: 'thinking'; id: string; text: string; streaming: boolean; at: number; durationMs?: number; tokens?: number; parent?: string }
 export type ToolView = 'command' | 'edit' | 'write' | 'read' | 'search' | 'todo' | 'agent' | 'other'
 export interface FileChange { path: string; before?: string; after?: string; diff?: string; kind?: 'add' | 'delete' | 'update' }
 export interface TodoEntry { content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm?: string }
@@ -38,7 +39,17 @@ export interface ChatItemTool {
   background?: boolean
   /** How long the step ran (Codex reports it), shown as "in 2s". */
   elapsedMs?: number
+  /** An Agent row: the subagent's type (Explore, general-purpose). */
+  agentType?: string
+  /** A background task's end (`task_notification`): its row closed when it was launched. */
+  outcome?: 'completed' | 'failed' | 'stopped'
+  endedAt?: number
+  /** What the finished background task reported. */
+  summary?: string
+  /** Codex: a multi-agent call — the tool, the agent threads it named, each one's last state. */
+  collab?: CollabCall
 }
+export interface CollabCall { tool: string; receivers: string[]; states: Record<string, { status: string; message?: string }>; model?: string }
 export interface ChatItemApproval {
   kind: 'approval'
   id: string
@@ -59,6 +70,8 @@ export interface ChatItemApproval {
   options?: ApprovalOption[]
   /** The model's reason for asking, shown under the prompt. */
   reason?: string
+  /** The tool call it asks about, when the card stands in for that step (ExitPlanMode). */
+  toolUseId?: string
 }
 export interface Question {
   id: string
@@ -78,6 +91,8 @@ export interface ChatItemQuestion {
   answers?: Record<string, string[]>
   cancelled?: boolean
   at: number
+  /** The AskUserQuestion call it stands in for. */
+  toolUseId?: string
 }
 export interface ChatItemSystem {
   kind: 'system'
@@ -89,6 +104,8 @@ export interface ChatItemSystem {
   running?: boolean
   detail?: string
   tokens?: number
+  /** Codex: a subagent's activity (subAgentActivity) — its thread, its name, what happened. */
+  agent?: { id: string; name: string; kind: string }
 }
 export interface TurnFile { path: string; added: number; removed: number }
 export interface ChatItemTurn { kind: 'turn'; id: string; at: number; durationMs?: number; outputTokens?: number; files: TurnFile[]; turnId?: string; undone?: boolean; interrupted?: boolean }
@@ -169,7 +186,7 @@ export function dequeue(t: Transcript, id: string, at: number): Transcript
 export function unqueue(t: Transcript, id: string): Transcript
 export function turnFiles(items: ChatItem[]): TurnFile[]
 export function closeTurn(t: Transcript, info: { at: number; durationMs?: number; outputTokens?: number; id?: string; turnId?: string; interrupted?: boolean }): Transcript
-export function appendDelta(t: Transcript, id: string, kind: 'assistant' | 'thinking', delta: string | undefined, at: number): Transcript
+export function appendDelta(t: Transcript, id: string, kind: 'assistant' | 'thinking', delta: string | undefined, at: number, parent?: string): Transcript
 export function settleStreams(t: Transcript): Transcript
 export function pendingApprovals(t: Transcript): ChatItemApproval[]
 export function pendingQuestions(t: Transcript): ChatItemQuestion[]

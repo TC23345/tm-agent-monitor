@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { SquarePen } from 'lucide-react'
 import type { ClipSummary } from '@shared/types'
-import { hotkeyProblem, shortcutProblem, MAX_NOTE, MAX_TITLE, SHORTCUT_MAX } from '@shared/clips.mjs'
+import { hotkeyProblem, maskSecrets, shortcutProblem, MAX_NOTE, MAX_TITLE, SHORTCUT_MAX } from '@shared/clips.mjs'
 import { ShortcutRecorder } from '../ShortcutRecorder'
 
 export type ClipEditPatch = { title?: string | null; text?: string; note?: string | null; shortcut?: string | null; hotkey?: string | null }
@@ -35,6 +35,9 @@ export function ClipEditCard({ clip, clips, loadText, save, suspend, onDone, var
   const [title, setTitle] = useState(clip.custom ? clip.title : '')
   const [text, setText] = useState<string | null>(isText ? null : '')
   const original = useRef<string | null>(null)
+  /** The loaded body with its keys masked; while it differs and Show was not pressed, the Text field shows it, read-only. */
+  const [masked, setMasked] = useState<string | null>(null)
+  const [showKeys, setShowKeys] = useState(false)
   const [note, setNote] = useState(clip.note ?? '')
   const [shortcut, setShortcut] = useState(clip.shortcut ?? '')
   const [hotkey, setHotkey] = useState<string | null>(clip.hotkey ?? null)
@@ -49,6 +52,7 @@ export function ClipEditCard({ clip, clips, loadText, save, suspend, onDone, var
       if (!live) return
       if (!res) { setError('That clip is gone'); return }
       original.current = res.text
+      setMasked(maskSecrets(res.text))
       setText(res.text)
     })
     return () => { live = false }
@@ -65,6 +69,9 @@ export function ClipEditCard({ clip, clips, loadText, save, suspend, onDone, var
     return () => el.removeEventListener('tm-escape', esc)
   }, [])
 
+  // A clip holding a key opens with it masked: an Edit… to give it a title must not put the key on screen.
+  // Untouched, the field is never saved (Save sends only what changed), so the mask is never written back.
+  const keysHidden = !showKeys && masked !== null && masked !== original.current
   const code = shortcut.trim()
   const codeProblem = code ? shortcutProblem(code, clips, [], clip.id) : null
   const keyProblem = hotkey ? hotkeyProblem(hotkey, clips, [], clip.id) : null
@@ -130,15 +137,22 @@ export function ClipEditCard({ clip, clips, loadText, save, suspend, onDone, var
           <label className="clip-field clip-field--grow">
             <span className="clip-field-label">Text{text !== null && <span className="clip-field-aside">{text.length.toLocaleString()} chars</span>}</span>
             <textarea
-              className="clip-field-input clip-field-text"
-              value={text ?? ''}
+              className={`clip-field-input clip-field-text ${keysHidden ? 'is-masked' : ''}`}
+              value={keysHidden ? masked ?? '' : text ?? ''}
               placeholder={text === null ? 'Loading…' : undefined}
               disabled={text === null}
+              readOnly={keysHidden}
               spellCheck={false}
               onChange={(e) => setText(e.target.value)}
               data-testid="clip-edit:text"
             />
           </label>
+        )}
+        {keysHidden && (
+          <span className="clip-field-hint clip-field-keys" data-testid="clip-edit:keys">
+            Keys are masked here; copying and pasting use them whole.
+            <button type="button" className="picker-btn is-small" onClick={() => setShowKeys(true)} data-testid="clip-edit:show-keys">Show to edit</button>
+          </span>
         )}
         <label className="clip-field">
           <span className="clip-field-label">Note<span className="clip-field-aside">{note.length ? `${note.length}/${MAX_NOTE}` : 'searchable'}</span></span>

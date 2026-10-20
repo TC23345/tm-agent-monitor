@@ -9,7 +9,9 @@ const shadow = 28
 test('the card opens at the pointer with the window sized to card plus shadow', () => {
   const p = placePicker({ cursor: { x: 300, y: 200 }, workArea, card, shadow })
   assert.deepEqual(p, { x: 306 - shadow, y: 206 - shadow, width: 560 + 2 * shadow, height: 420 + 2 * shadow, origin: 'top left' })
-  assert.equal(PICKER_CARD.width, 560)
+  // 560 until the left column of views and groups (0.4.65) took 176 px of it.
+  assert.equal(PICKER_CARD.width, 720)
+  assert.equal(PICKER_MIN.width, 560)
   // The menu bar (the workspace title bar's height) sits on top of the old 420 px card; the list keeps its room.
   assert.equal(PICKER_MENUBAR, 41)
   assert.equal(PICKER_CARD.height, 420 + PICKER_MENUBAR)
@@ -51,7 +53,7 @@ test('a resize drag grows from the top-left corner, clamped to the minimum and t
   assert.deepEqual(r.bounds, { x: 100 - shadow, y: 100 - shadow, width: 700 + 2 * shadow, height: 521 + 2 * shadow })
   assert.deepEqual(resizePicker({ start, dw: -900, dh: -900, cardX: 100, cardY: 100, workArea, shadow }).card, { width: PICKER_MIN.width, height: PICKER_MIN.height })
   // Past the display's right/bottom edge the card stops there.
-  assert.deepEqual(resizePicker({ start, dw: 5000, dh: 5000, cardX: 1500, cardY: 700, workArea, shadow }).card, { width: 1920 - 1500, height: 1040 - 700 })
+  assert.deepEqual(resizePicker({ start, dw: 5000, dh: 5000, cardX: 1300, cardY: 700, workArea, shadow }).card, { width: 1920 - 1300, height: 1040 - 700 })
   // A card already near the edge keeps at least the minimum; a junk delta is no move.
   assert.deepEqual(resizePicker({ start, dw: 10, dh: 10, cardX: 1800, cardY: 1000, workArea, shadow }).card, { width: PICKER_MIN.width, height: PICKER_MIN.height })
   assert.deepEqual(resizePicker({ start, dw: NaN, dh: Infinity, cardX: 100, cardY: 100, workArea, shadow }).card, start)

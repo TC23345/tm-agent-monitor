@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   applyRetention, blockedExe, blocklistEntry, clipPreview, clipTitle, dedupeKey, describeSource, domainBlocked, filterClips, groupNameOk, inGroup,
-  looksLikeCode, looksSecret, mergeText, orderFavorites, parseDropFiles, parseSnippetNote, sanitizeClip, sanitizeGroups, shouldCapture, sizeLabel,
+  looksLikeCode, maskSecrets, SECRET_FAMILIES, SECRET_MASK, mergeText, orderFavorites, parseDropFiles, parseSnippetNote, sanitizeClip, sanitizeGroups, shouldCapture, sizeLabel,
   appDisplayName, sanitizeSource, sourceLabel, summarize, upsertClip, searchText, cleanNote, shortcutProblem, shortcutShapeProblem, hotkeyProblem, chordLabel, MAX_NOTE, SHORTCUT_MAX, CF_HDROP, EXCLUSION_FORMATS, MAX_CLIP_BYTES, MAX_IMAGE_BYTES, INTERNAL_COPY_WINDOW_MS, BURST_MS,
   cleanGroupDescription, sanitizeGroupInfo, groupProblem, MAX_GROUP_DESCRIPTION
 } from './clips.mjs'
@@ -49,20 +49,45 @@ test('parseDropFiles refuses garbage', () => {
   assert.deepEqual(parseDropFiles(dropFiles([])), [])
 })
 
-test('looksSecret catches the fix-evals families and nothing ordinary', () => {
-  assert.equal(looksSecret('Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U'), 'jwt')
-  assert.equal(looksSecret('ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123'), 'anthropic/openai key')
-  assert.equal(looksSecret('token ghp_abcdefghijklmnopqrstuvwxyz0123456789'), 'github token')
-  assert.equal(looksSecret('xoxb-1234567890-abcdef'), 'slack token')
-  assert.equal(looksSecret('AKIAIOSFODNN7EXAMPLE'), 'aws access key')
-  assert.equal(looksSecret('-----BEGIN RSA PRIVATE KEY-----\nMIIE'), 'private key')
-  assert.equal(looksSecret('sk_live_abcdefghijklmnopqrstu'), 'clerk/stripe secret')
-  assert.equal(looksSecret('mongodb+srv://user:hunter22@cluster0.example.net/db'), 'connection string with password')
-  assert.equal(looksSecret('line one\nDB_PASSWORD=supersecretvalue\nline three'), '.env assignment')
-  assert.equal(looksSecret('npm run dist && git tag --no-sign v0.4.20'), null)
-  assert.equal(looksSecret('The password field is empty.'), null)
-  assert.equal(looksSecret(''), null)
-  assert.equal(looksSecret(null), null)
+test('maskSecrets keeps a key\'s prefix and last four, hides a password whole, and leaves the rest of the text alone', () => {
+  assert.equal(maskSecrets('Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U'), `Bearer eyJ${SECRET_MASK}sR8U`)
+  assert.equal(maskSecrets('ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123'), `ANTHROPIC_API_KEY=sk-ant-api03-${SECRET_MASK}0123`)
+  assert.equal(maskSecrets('use sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX1234 here'), `use sk-proj-${SECRET_MASK}1234 here`)
+  assert.equal(maskSecrets('token ghp_abcdefghijklmnopqrstuvwxyz0123456789'), `token ghp_${SECRET_MASK}6789`)
+  assert.equal(maskSecrets('xoxb-1234567890-abcdef'), `xoxb-${SECRET_MASK}cdef`)
+  assert.equal(maskSecrets('xoxp-1234567890'), `xoxp-${SECRET_MASK}`, 'fewer than 12 hidden: no tail')
+  assert.equal(maskSecrets('AKIAIOSFODNN7EXAMPLE'), `AKIA${SECRET_MASK}MPLE`)
+  assert.equal(maskSecrets('sk_live_abcdefghijklmnopqrstu'), `sk_live_${SECRET_MASK}rstu`)
+  assert.equal(maskSecrets('whsec_abcdefghijklmnopqrstuvwx'), `whsec_${SECRET_MASK}uvwx`)
+  assert.equal(maskSecrets(`AIza${'b'.repeat(31)}wxyz`), `AIza${SECRET_MASK}wxyz`)
+  assert.equal(maskSecrets(`key pplx-${'a'.repeat(44)}9z9z`), `key pplx-${SECRET_MASK}9z9z`)
+  assert.equal(maskSecrets(`fc-${'0'.repeat(28)}beef`), `fc-${SECRET_MASK}beef`)
+  assert.equal(maskSecrets('curl -H "Authorization: Bearer abcdefghij0123456789xyz"'), `curl -H "Authorization: Bearer ${SECRET_MASK}9xyz"`)
+  assert.equal(maskSecrets('-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA1234567890abcdef\n-----END RSA PRIVATE KEY-----\nafter'),
+    `-----BEGIN RSA PRIVATE KEY-----\n${SECRET_MASK}cdef\n-----END RSA PRIVATE KEY-----\nafter`)
+  assert.equal(maskSecrets('-----BEGIN RSA PRIVATE KEY-----\nMIIE'), `-----BEGIN RSA PRIVATE KEY-----\n${SECRET_MASK}`, 'a cut-off block hides what there is')
+  assert.equal(maskSecrets('mongodb+srv://user:hunter22@cluster0.example.net/db'), `mongodb+srv://user:${SECRET_MASK}@cluster0.example.net/db`)
+  assert.equal(maskSecrets('line one\nDB_PASSWORD=supersecretvalue\nline three'), `line one\nDB_PASSWORD=${SECRET_MASK}\nline three`)
+  assert.equal(maskSecrets('export OPENAI_TOKEN="abcdefghijklmnop1234"'), `export OPENAI_TOKEN="${SECRET_MASK}1234"`)
+  assert.equal(maskSecrets('API_KEY=${OPENAI_KEY}'), 'API_KEY=${OPENAI_KEY}', 'a reference is not a secret')
+  assert.equal(maskSecrets('npm run dist && git tag --no-sign v0.4.20'), 'npm run dist && git tag --no-sign v0.4.20')
+  assert.equal(maskSecrets('The password field is empty.'), 'The password field is empty.')
+  assert.equal(maskSecrets('const token = getToken()'), 'const token = getToken()')
+  assert.equal(maskSecrets(''), '')
+  assert.equal(maskSecrets(null), '')
+})
+
+test('maskSecrets is idempotent and every family masks', () => {
+  const all = [
+    'Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U',
+    'ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123', 'ghp_abcdefghijklmnopqrstuvwxyz0123456789', 'xoxb-1234567890-abcdef',
+    'AKIAIOSFODNN7EXAMPLE', '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----', 'rk_test_abcdefghijklmnopqrstu',
+    `AIza${'c'.repeat(35)}`, `hf_${'d'.repeat(34)}`, 'Bearer abcdefghij0123456789xyz', 'postgres://me:pa55word@db.example:5432/app', 'SECRET_TOKEN=abcdefgh12345678'
+  ].join('\n')
+  const once = maskSecrets(all)
+  assert.equal(maskSecrets(once), once)
+  assert.equal(once.split(SECRET_MASK).length - 1, SECRET_FAMILIES.length)
+  assert.doesNotMatch(once, /dozjgNry|abcdefghijklmnopqrstu|1234567890-ab|IOSFODNN7|MIIEvQIBADAN|c{12}|d{12}|abcdefghij0123|pa55word|abcdefgh1234/)
 })
 
 test('blocklistEntry normalises what the user types into an exe name or a host name', () => {
@@ -92,7 +117,7 @@ test('blockedExe compares basenames case-insensitively; domainBlocked covers sub
   assert.ok(!domainBlocked('https://a.b/', []))
 })
 
-test('shouldCapture: files beat text beat image; blanks, secrets, sizes and exclusions are refused', () => {
+test('shouldCapture: files beat text beat image; blanks, sizes and exclusions are refused, keys are kept', () => {
   assert.deepEqual(shouldCapture({ text: 'hi', files: ['C:\\a'] }), { keep: true, kind: 'files' })
   assert.deepEqual(shouldCapture({ text: 'hi', hasImage: true }), { keep: true, kind: 'text' })
   assert.deepEqual(shouldCapture({ text: '   \n', hasImage: true, imageBytes: 1000 }), { keep: true, kind: 'image' })
@@ -101,8 +126,8 @@ test('shouldCapture: files beat text beat image; blanks, secrets, sizes and excl
   assert.deepEqual(shouldCapture({ text: 'x' }, { paused: true }), { keep: false, reason: 'paused' })
   assert.deepEqual(shouldCapture({ text: 'x' }, { ownerExe: '1Password.exe' }), { keep: false, reason: 'password-manager' })
   assert.deepEqual(shouldCapture({ text: 'x' }, { ownerExe: 'slack.exe', blockedExes: ['Slack.exe'] }), { keep: false, reason: 'blocked-app' })
-  assert.deepEqual(shouldCapture({ text: 'AKIAIOSFODNN7EXAMPLE' }), { keep: false, reason: 'secret:aws access key' })
-  assert.deepEqual(shouldCapture({ text: 'AKIAIOSFODNN7EXAMPLE' }, { redactSecrets: false }), { keep: true, kind: 'text' })
+  assert.deepEqual(shouldCapture({ text: 'AKIAIOSFODNN7EXAMPLE' }), { keep: true, kind: 'text' })
+  assert.deepEqual(shouldCapture({ text: 'DB_PASSWORD=supersecretvalue' }), { keep: true, kind: 'text' })
   assert.deepEqual(shouldCapture({ text: 'a'.repeat(MAX_CLIP_BYTES + 1) }), { keep: false, reason: 'too-large' })
   assert.deepEqual(shouldCapture({ text: '', hasImage: true, imageBytes: MAX_IMAGE_BYTES + 1 }), { keep: false, reason: 'too-large' })
   assert.deepEqual(shouldCapture(null), { keep: false, reason: 'excluded' })
@@ -218,6 +243,12 @@ test('titles, previews, sizes and code detection', () => {
   assert.equal(clipTitle({ kind: 'image', image: { width: 800, height: 600 } }), 'Image 800×600')
   assert.equal(clipPreview(textClip('a', 'one\n\n  two   three ')), 'one two three')
   assert.equal(clipPreview(textClip('a', 'z'.repeat(300)), 20).length, 20)
+  // A key is kept whole but titled and previewed masked; a title the user typed is theirs.
+  const key = textClip('k', '\n  OPENAI_API_KEY=sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX1234\nnext line')
+  assert.equal(clipTitle(key), `OPENAI_API_KEY=sk-proj-${SECRET_MASK}1234`)
+  assert.equal(clipPreview(key), `OPENAI_API_KEY=sk-proj-${SECRET_MASK}1234 next line`)
+  assert.equal(summarize(key).preview, clipPreview(key))
+  assert.equal(clipTitle({ ...key, title: 'OpenAI key' }), 'OpenAI key')
   assert.equal(sizeLabel(512), '512 B')
   assert.equal(sizeLabel(4300), '4.2 KB')
   assert.equal(sizeLabel(200 * 1024), '200 KB')

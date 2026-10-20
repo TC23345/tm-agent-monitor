@@ -6,7 +6,11 @@
 // a subagent's steps nest under its Agent row, focus view folds a reply's
 // steps, the turn's prompt pins to the top while its reply scrolls, a prompt
 // can fork the conversation or rewind its code, a prompt sent mid-turn waits
-// as Queued, and a side question is answered without interrupting.
+// as Queued, and a side question is answered without interrupting. On a wide
+// pane the session's agents and background tasks get a panel beside the
+// transcript (agents.tsx): it opens while one runs, the transcript keeps
+// each agent as one line that opens its card, and a narrow pane keeps the
+// composer chip's menu instead.
 // The transcript selects like a terminal pane copies: a selection is copied
 // on release, and raises a bar to quote it into the composer (or comment on
 // a plan). The host draws the pane header (claude-watch's `Pane`: the
@@ -22,8 +26,10 @@ import { Search, X } from 'lucide-react'
 import type { ChatBridge } from './bridge'
 import { QueuedRow, Row, StepFold, plain, type PlanComment, type PromptAction, type RowActions } from './rows'
 import { Composer, type ComposerHandle } from './composer'
-import { CodeCopy, FindBar, ImagePreview, JumpToLatest, McpPanel, PinnedPrompt, RewindCard, SelectionBar, SidePanel, WorkingLine, type SelectionInfo } from './extras'
-import { CODEX_INIT_PROMPT, transcriptMarkdown } from '../shared/present.mjs'
+import { FindBar, ImagePreview, JumpToLatest, McpPanel, PinnedPrompt, RewindCard, SelectionBar, SidePanel, WorkingLine, type SelectionInfo } from './extras'
+import { AgentsPanel } from './agents'
+import { CODEX_INIT_PROMPT, cardSteps, transcriptMarkdown } from '../shared/present.mjs'
+import { agentCards } from '../shared/agents.mjs'
 import {
   pendingRequests, sortSessions,
   type ApprovalChoice, type Attachment, type ChatConfigPatch, type ChatItem, type ChatItemTurn, type ChatOptions, type McpRequest, type Provider, type SessionSummary, type Transcript
@@ -79,6 +85,35 @@ const PROVIDER_LABEL: Record<Provider, string> = { claude: 'Claude Code', codex:
 
 type Block = { kind: 'item'; item: ChatItem; folded?: boolean } | { kind: 'fold'; id: string; items: ChatItem[]; turn?: ChatItemTurn }
 const FOLDS = new Set(['tool', 'thinking'])
+/** The pane width from which the agents panel sits beside the transcript: it takes 240-340 px and leaves the transcript about 560. */
+const AGENTS_MIN_WIDTH = 820
+
+/**
+ * The box of a selection's first (or last) visible character. A range's own rects are no anchor: they include
+ * empty fragments, such as an inline code chip's start at the end of the line before its text wraps, and the
+ * selection bar went to that fragment, far from the highlight.
+ */
+function edgeChar(range: Range, last: boolean): DOMRect | null {
+  const root = range.commonAncestorContainer
+  const walker = document.createTreeWalker(root.nodeType === Node.TEXT_NODE ? root.parentNode ?? root : root, NodeFilter.SHOW_TEXT)
+  const nodes: Text[] = []
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) if (range.intersectsNode(n)) nodes.push(n as Text)
+  if (last) nodes.reverse()
+  const one = document.createRange()
+  for (const n of nodes) {
+    const from = n === range.startContainer ? range.startOffset : 0
+    const to = n === range.endContainer ? range.endOffset : n.length
+    for (let k = 0; k < to - from; k++) {
+      const i = last ? to - 1 - k : from + k
+      if (!n.data[i]?.trim()) continue
+      one.setStart(n, i)
+      one.setEnd(n, i + 1)
+      const rect = one.getBoundingClientRect()
+      if (rect.width > 0) return rect
+    }
+  }
+  return null
+}
 
 export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(props, ref) {
   const { bridge, config, onConfig, renderText, copyText, openFile, listFiles, saveText, pathForFile, onFocus, onAttention } = props
@@ -101,6 +136,10 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
   const [pinned, setPinned] = useState<{ id: string; text: string } | null>(null)
   const [root, setRoot] = useState<HTMLDivElement | null>(null)
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null)
+  const [wide, setWide] = useState(false)
+  // The agents panel: the user's own open / close (null: follow the agents), and the card open in it.
+  const [agentsPref, setAgentsPref] = useState<'open' | 'closed' | null>(null)
+  const [agentSel, setAgentSel] = useState<string | null>(null)
   const composer = useRef<ComposerHandle | null>(null)
   const scroller = useRef<HTMLDivElement | null>(null)
   const stickToBottom = useRef(true)
@@ -202,6 +241,8 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
     setComments({})
     setRewind(null)
     setPanel(null)
+    setAgentsPref(null)
+    setAgentSel(null)
   }, [bridge, chatId])
 
   const newSession = useCallback(() => {
@@ -300,6 +341,36 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
   const provider = config.provider
   const canRewind = provider === 'claude' && !!transcript?.checkpoints
   const pendingPlan = transcript?.pendingPlan ?? null
+
+  // The agents panel's cards, and which transcript row opens which card (a Codex agent's every call does).
+  const background = transcript?.background
+  const cards = useMemo(() => (transcript ? agentCards(transcript) : []),
+    // The cards are read off the items and the live tasks; nothing else in the transcript moves them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, background, provider])
+  const cardRows = useRef(new Map<string, string>())
+  cardRows.current = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const c of cards) {
+      if (c.rowId && !map.has(c.rowId)) map.set(c.rowId, c.id)
+      if (provider === 'codex') for (const x of c.items) if (!map.has(x.id)) map.set(x.id, c.id)
+    }
+    return map
+  }, [cards, provider])
+  // Stable, so a new card never re-renders every row: a row asks when it renders.
+  const openAgent = useMemo<NonNullable<RowActions['openAgent']>>(() => ({
+    has: (rowId) => cardRows.current.has(rowId),
+    open: (rowId) => {
+      const id = cardRows.current.get(rowId)
+      if (!id) return
+      setAgentSel(id)
+      setAgentsPref('open')
+    }
+  }), [])
+  const stopTask = useCallback((taskId: string) => {
+    if (chatId) void bridge.stopTask(chatId, taskId).catch((err) => setNotice((err as Error).message))
+  }, [bridge, chatId])
+
   const actions = useMemo<RowActions>(() => ({
     renderText: (text) => (renderRef.current ? renderRef.current(text) : plain(text)),
     onAnswer: (approvalId: string, choice: ApprovalChoice, message?: string) => { if (chatId) void bridge.answer(chatId, approvalId, choice, message) },
@@ -317,7 +388,7 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
             .catch((err) => setNotice((err as Error).message))
         }
       : undefined,
-    onStopTask: chatId ? (taskId: string) => { void bridge.stopTask(chatId, taskId).catch((err) => setNotice((err as Error).message)) } : undefined,
+    onStopTask: chatId ? stopTask : undefined,
     onUndoTurn: provider === 'codex' && chatId
       ? (turnItemId: string, reapply: boolean) => { void bridge.undoTurn(chatId, turnItemId, reapply).then((r) => setNotice(r.message)).catch((err) => setNotice((err as Error).message)) }
       : undefined,
@@ -330,17 +401,20 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
       : undefined,
     onKeepPlanning: () => composer.current?.focus(),
     onRetry: lastPrompt?.kind === 'user' && lastPrompt.text ? () => send(lastPrompt.text, []) : undefined,
-    onRemoveComment: (approvalId: string, commentId: string) => setComments((c) => ({ ...c, [approvalId]: (c[approvalId] ?? []).filter((x) => x.id !== commentId) }))
-  }), [bridge, chatId, copy, provider, config.cwd, openFile, promptAction, canRewind, lastPrompt, send, pendingPlan])
+    onRemoveComment: (approvalId: string, commentId: string) => setComments((c) => ({ ...c, [approvalId]: (c[approvalId] ?? []).filter((x) => x.id !== commentId) })),
+    openAgent: wide ? openAgent : undefined
+  }), [bridge, chatId, copy, provider, config.cwd, openFile, promptAction, canRewind, lastPrompt, send, pendingPlan, stopTask, wide, openAgent])
 
   // The rows: a subagent's steps under its Agent row, and in focus view each run of steps folded to one line.
-  const { blocks, nested, finals } = useMemo(() => {
-    const list = items ?? []
+  const { blocks, nested } = useMemo(() => {
+    // A question or plan card is its step: the AskUserQuestion / ExitPlanMode row it stands in for is left out.
+    const covered = cardSteps(items ?? [])
+    const list = covered.size ? (items ?? []).filter((x) => !covered.has(x.id)) : items ?? []
     const ids = new Set(list.map((x) => x.id))
     const nestedMap = new Map<string, ChatItem[]>()
     const top: ChatItem[] = []
     for (const x of list) {
-      const parent = x.kind === 'tool' ? x.parent : undefined
+      const parent = x.kind === 'tool' || x.kind === 'assistant' || x.kind === 'thinking' ? x.parent : undefined
       if (parent && ids.has(parent)) {
         const kids = nestedMap.get(parent) ?? []
         kids.push(x)
@@ -390,9 +464,50 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
       }
     })
     flush()
-    return { blocks: out, nested: nestedMap, finals: finalSet }
+    return { blocks: out, nested: nestedMap }
   }, [items, config.focus, config.provider])
   const nestedFor = useCallback((id: string) => nested.get(id), [nested])
+  const itemFor = useCallback((id: string) => items?.find((x) => x.id === id), [items])
+
+  // The agents panel sits beside the transcript only on a wide pane (the root's width; the panel is inside it, so showing it never moves it).
+  useEffect(() => {
+    if (!root || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(([entry]) => setWide((entry?.contentRect.width ?? 0) >= AGENTS_MIN_WIDTH))
+    ro.observe(root)
+    return () => ro.disconnect()
+  }, [root])
+  // It follows the agents: open while one runs, and with the finished ones until the next prompt (a background
+  // agent often ends after its turn, and the CLI reports it in a turn of its own). A new run reopens it after
+  // the user closed it; opening it themselves (the chip, an agent's row) keeps it open.
+  const runningCards = cards.filter((c) => c.state === 'running').length
+  const promptAt = lastPrompt?.at ?? null
+  const autoAgents = runningCards > 0 || (promptAt !== null && cards.some((c) => (c.startedAt ?? 0) >= promptAt))
+  const lastAuto = useRef(false)
+  useEffect(() => {
+    if (autoAgents && !lastAuto.current) setAgentsPref((p) => (p === 'closed' ? null : p))
+    lastAuto.current = autoAgents
+  }, [autoAgents])
+  const selectedCard = agentSel && cards.some((c) => c.id === agentSel) ? agentSel : null
+  const agentsShown = wide && cards.length > 0 && (agentsPref === 'open' || (agentsPref === null && (autoAgents || selectedCard !== null)))
+  const closeAgents = useCallback(() => {
+    setAgentsPref('closed')
+    setAgentSel(null)
+  }, [])
+  const toggleAgents = useCallback(() => (agentsShown ? closeAgents() : setAgentsPref('open')), [agentsShown, closeAgents])
+
+  /** Scroll the transcript to a row, opening the fold it sits in (a card's *Show in conversation*, the chip menu's entries). */
+  const showRow = useCallback((rowId: string) => {
+    const fold = blocks.find((b): b is Extract<Block, { kind: 'fold' }> => b.kind === 'fold' && b.items.some((x) => x.id === rowId))
+    if (fold) setOpenFolds((s) => (s.has(fold.id) ? s : new Set(s).add(fold.id)))
+    stickToBottom.current = false
+    // Twice: once for the fold to open, once for its rows to lay out.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const el = scroller.current
+      const row = el?.querySelector<HTMLElement>(`[data-item="${CSS.escape(rowId)}"]`)
+      if (!el || !row) return
+      el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top - el.clientHeight / 3
+    }))
+  }, [blocks])
 
   // The prompt of the turn on screen pins to the top once its card has scrolled away.
   const trackScroll = useCallback(() => {
@@ -433,13 +548,17 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
       const text = s.toString()
       if (!text.trim()) return
       copy(text)
-      const rect = s.getRangeAt(0).getBoundingClientRect()
+      // The bar sits over the selection: centred on it when it is one line, on its first character when it runs
+      // over several, and under its last line when there is no room above.
+      const range = s.getRangeAt(0)
+      const first = edgeChar(range, false) ?? range.getBoundingClientRect()
+      const last = edgeChar(range, true) ?? first
       const box = pane.getBoundingClientRect()
       const at = (node: Node) => (node instanceof Element ? node : node.parentElement)?.closest<HTMLElement>('[data-plan]')?.dataset.plan
       const plan = at(s.anchorNode)
-      const x = Math.max(8, Math.min(rect.right - box.left - 150, box.width - 300))
-      const above = rect.top - box.top - 38
-      setSel({ text, x, y: above > 4 ? above : rect.bottom - box.top + 6, ...(plan && plan === at(s.focusNode) ? { planId: plan } : {}) })
+      const above = first.top - box.top - 38
+      const x = (Math.abs(first.top - last.top) < 4 ? (first.left + last.right) / 2 : first.left) - box.left
+      setSel({ text, x, y: above > 4 ? above : last.bottom - box.top + 6, ...(plan && plan === at(s.focusNode) ? { planId: plan } : {}) })
     }, 0)
   }
   const clearSel = () => setSel(null)
@@ -502,67 +621,74 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
       {transcript?.error && transcript.status === 'error' ? <div className="chat-notice is-error" role="alert">{transcript.error}</div> : null}
       {picker ? <SessionPicker bridge={bridge} provider={config.provider} cwd={config.cwd} onPick={pick} onClose={() => setPicker(false)} /> : null}
       {panel === 'mcp' && chatId ? <McpPanel load={(req: McpRequest) => bridge.mcp(chatId, req)} onClose={() => setPanel(null)} /> : null}
-      <div className="chat-scroll-wrap">
-        {finding ? <FindBar root={scrollEl} version={items} onClose={() => setFinding(false)} /> : null}
-        {pinned && !finding ? <PinnedPrompt text={pinned.text} onJump={() => jumpTo(pinned.id)} /> : null}
-        <div
-          className="chat-scroll"
-          ref={(el) => { scroller.current = el; setScrollEl(el) }}
-          onScroll={() => { trackScroll(); clearSel() }}
-          onMouseUp={onSelectEnd}
-          onMouseDown={clearSel}
-        >
-          {transcript ? blocks.map((b) => (b.kind === 'fold'
-            ? <StepFold key={b.id} items={b.items} turn={b.turn} actions={actions} open={openFolds.has(b.id)} nestedFor={nestedFor} onToggle={() => setOpenFolds((s) => { const n = new Set(s); if (n.has(b.id)) n.delete(b.id); else n.add(b.id); return n })} />
-            : (
-              <Row
-                key={b.item.id} item={b.item} actions={actions} nested={nested.get(b.item.id)} final={finals.has(b.item.id)} folded={b.folded}
-                comments={b.item.kind === 'approval' ? comments[b.item.id] : undefined}
-                below={rewind && rewind.itemId === b.item.id && chatId ? (
-                  <RewindCard
-                    fork={rewind.fork} cwd={config.cwd}
-                    load={() => bridge.rewind(chatId, rewind.itemId, true)}
-                    onCancel={() => setRewind(null)}
-                    onConfirm={() => {
-                      const r = rewind
-                      setRewind(null)
-                      if (r.fork) void fork(r.itemId, true)
-                      else void bridge.rewind(chatId, r.itemId, false).catch((err) => setNotice((err as Error).message))
-                    }}
-                  />
-                ) : undefined}
+      <div className="chat-main">
+        <div className="chat-scroll-wrap">
+          {finding ? <FindBar root={scrollEl} version={items} onClose={() => setFinding(false)} /> : null}
+          {pinned && !finding ? <PinnedPrompt text={pinned.text} onJump={() => jumpTo(pinned.id)} /> : null}
+          <div
+            className="chat-scroll"
+            ref={(el) => { scroller.current = el; setScrollEl(el) }}
+            onScroll={() => { trackScroll(); clearSel() }}
+            onMouseUp={onSelectEnd}
+            onMouseDown={clearSel}
+          >
+            {transcript ? blocks.map((b) => (b.kind === 'fold'
+              ? <StepFold key={b.id} items={b.items} turn={b.turn} actions={actions} open={openFolds.has(b.id)} nestedFor={nestedFor} onToggle={() => setOpenFolds((s) => { const n = new Set(s); if (n.has(b.id)) n.delete(b.id); else n.add(b.id); return n })} />
+              : (
+                <Row
+                  key={b.item.id} item={b.item} actions={actions} nested={nested.get(b.item.id)} folded={b.folded}
+                  comments={b.item.kind === 'approval' ? comments[b.item.id] : undefined}
+                  below={rewind && rewind.itemId === b.item.id && chatId ? (
+                    <RewindCard
+                      fork={rewind.fork} cwd={config.cwd}
+                      load={() => bridge.rewind(chatId, rewind.itemId, true)}
+                      onCancel={() => setRewind(null)}
+                      onConfirm={() => {
+                        const r = rewind
+                        setRewind(null)
+                        if (r.fork) void fork(r.itemId, true)
+                        else void bridge.rewind(chatId, r.itemId, false).catch((err) => setNotice((err as Error).message))
+                      }}
+                    />
+                  ) : undefined}
+                />
+              ))) : <div className="chat-empty">Starting {PROVIDER_LABEL[config.provider]}…</div>}
+            {transcript && transcript.items.length === 0 && !queue.length ? <div className="chat-empty" title={config.cwd}>Ask {PROVIDER_LABEL[config.provider]} something about this folder.</div> : null}
+            {transcript && running && !waiting ? <WorkingLine provider={config.provider} compacting={transcript.activity === 'compacting'} retry={transcript.retry} /> : null}
+            {queue.length && transcript?.queuePaused ? (
+              <div className="chat-queue-paused" data-testid="chat-queue-paused">
+                <span>Queue paused because you interrupted</span>
+                {chatId ? <button className="chat-textbtn" onClick={() => { void bridge.resumeQueue(chatId).catch((err) => setNotice((err as Error).message)) }} data-testid="chat-queue-resume">Resume</button> : null}
+              </div>
+            ) : null}
+            {queue.map((q) => (
+              <QueuedRow
+                key={q.id} item={q} provider={config.provider}
+                onRemove={chatId ? () => { void bridge.removeQueued(chatId, q.id).then((ok) => { if (!ok) setNotice(`${PROVIDER_LABEL[config.provider]} had already read that message.`) }) } : undefined}
+                onSteer={chatId && config.provider === 'codex' ? () => { void bridge.steer(chatId, q.id).catch((err) => setNotice((err as Error).message)) } : undefined}
               />
-            ))) : <div className="chat-empty">Starting {PROVIDER_LABEL[config.provider]}…</div>}
-          {transcript && transcript.items.length === 0 && !queue.length ? <div className="chat-empty" title={config.cwd}>Ask {PROVIDER_LABEL[config.provider]} something about this folder.</div> : null}
-          {transcript && running && !waiting ? <WorkingLine provider={config.provider} compacting={transcript.activity === 'compacting'} retry={transcript.retry} /> : null}
-          {queue.length && transcript?.queuePaused ? (
-            <div className="chat-queue-paused" data-testid="chat-queue-paused">
-              <span>Queue paused because you interrupted</span>
-              {chatId ? <button className="chat-textbtn" onClick={() => { void bridge.resumeQueue(chatId).catch((err) => setNotice((err as Error).message)) }} data-testid="chat-queue-resume">Resume</button> : null}
-            </div>
-          ) : null}
-          {queue.map((q) => (
-            <QueuedRow
-              key={q.id} item={q} provider={config.provider}
-              onRemove={chatId ? () => { void bridge.removeQueued(chatId, q.id).then((ok) => { if (!ok) setNotice(`${PROVIDER_LABEL[config.provider]} had already read that message.`) }) } : undefined}
-              onSteer={chatId && config.provider === 'codex' ? () => { void bridge.steer(chatId, q.id).catch((err) => setNotice((err as Error).message)) } : undefined}
+            ))}
+          </div>
+          {!atBottom ? <JumpToLatest count={newRows} onJump={jumpToLatest} /> : null}
+          {sel ? (
+            <SelectionBar
+              sel={sel} onClose={clearSel}
+              onQuote={() => { composer.current?.quote(sel.text); clearSel(); window.getSelection()?.removeAllRanges() }}
+              onComment={sel.planId ? (text) => {
+                const planId = sel.planId!
+                setComments((c) => ({ ...c, [planId]: [...(c[planId] ?? []), { id: `c${Date.now()}`, quote: sel.text.trim(), text }] }))
+                clearSel()
+                window.getSelection()?.removeAllRanges()
+              } : undefined}
             />
-          ))}
+          ) : null}
         </div>
-        {!atBottom ? <JumpToLatest count={newRows} onJump={jumpToLatest} /> : null}
-        {sel ? (
-          <SelectionBar
-            sel={sel} onClose={clearSel}
-            onQuote={() => { composer.current?.insert(sel.text); clearSel(); window.getSelection()?.removeAllRanges() }}
-            onComment={sel.planId ? (text) => {
-              const planId = sel.planId!
-              setComments((c) => ({ ...c, [planId]: [...(c[planId] ?? []), { id: `c${Date.now()}`, quote: sel.text.trim(), text }] }))
-              clearSel()
-              window.getSelection()?.removeAllRanges()
-            } : undefined}
+        {agentsShown ? (
+          <AgentsPanel
+            cards={cards} selected={selectedCard} onSelect={setAgentSel} onClose={closeAgents}
+            onStop={chatId ? stopTask : undefined} onShow={showRow} actions={actions} nestedFor={nestedFor} itemFor={itemFor}
           />
         ) : null}
-        <CodeCopy scroller={scrollEl} pane={root} copyText={copy} />
       </div>
       {panel === 'side' && chatId ? <SidePanel ask={(q) => bridge.sideQuestion(chatId, q)} renderText={actions.renderText} onClose={() => { setPanel(null); composer.current?.focus() }} /> : null}
       <Composer
@@ -582,8 +708,12 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
         loadContext={chatId ? () => bridge.contextUsage(chatId) : undefined}
         onPlanMode={chatId && config.provider === 'codex' ? (on: boolean) => configure({ planMode: on }) : undefined}
         onCompact={chatId ? () => { void bridge.compact(chatId).catch((err) => setNotice((err as Error).message)) } : undefined}
-        onStopTask={chatId ? (taskId) => { void bridge.stopTask(chatId, taskId).catch((err) => setNotice((err as Error).message)) } : undefined}
+        onStopTask={chatId ? stopTask : undefined}
         onPreview={(src, name) => setPreview({ src, name })}
+        agents={cards}
+        onAgents={wide && cards.length ? toggleAgents : undefined}
+        agentsOpen={agentsShown}
+        onShowRow={showRow}
       />
       {dragging ? <div className="chat-drop" data-testid="chat-drop"><span>Drop to attach as context</span></div> : null}
       {preview ? <ImagePreview src={preview.src} name={preview.name} onClose={() => setPreview(null)} /> : null}

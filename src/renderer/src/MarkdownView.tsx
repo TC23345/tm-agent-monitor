@@ -55,6 +55,18 @@ function Block({ node }: { node: BlockNode }): ReactNode {
       return <CodeBlock lang={node.lang} text={node.text} />
     case 'quote':
       return <blockquote>{node.children.map((child, i) => <Block key={i} node={child} />)}</blockquote>
+    case 'table': {
+      const align = (k: number) => (node.align[k] ? { textAlign: node.align[k]! } : undefined)
+      // The wrapper scrolls sideways when a table is wider than its pane, instead of clipping it.
+      return (
+        <div className="md-table">
+          <table>
+            <thead><tr>{node.head.map((cell, k) => <th key={k} style={align(k)}><Inline nodes={cell} /></th>)}</tr></thead>
+            {node.rows.length > 0 && <tbody>{node.rows.map((row, r) => <tr key={r}>{row.map((cell, k) => <td key={k} style={align(k)}><Inline nodes={cell} /></td>)}</tr>)}</tbody>}
+          </table>
+        </div>
+      )
+    }
     case 'list': {
       const Tag = node.ordered ? 'ol' : 'ul'
       return (

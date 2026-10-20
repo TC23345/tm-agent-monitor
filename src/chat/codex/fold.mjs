@@ -143,7 +143,10 @@ export function itemToChat(item, at, live = false) {
     case 'collabAgentToolCall':
       return collabItem(item, at)
     case 'subAgentActivity':
-      return { kind: 'system', id: item.id, text: `${agentName(item.agentPath)} ${SUBAGENT_KIND[item.kind] ?? 'updated'}`, level: 'info', at, variant: 'task' }
+      return {
+        kind: 'system', id: item.id, text: `${agentName(item.agentPath)} ${SUBAGENT_KIND[item.kind] ?? 'updated'}`, level: 'info', at, variant: 'task',
+        ...(item.agentThreadId ? { agent: { id: String(item.agentThreadId), name: agentName(item.agentPath), kind: String(item.kind ?? '') } } : {})
+      }
     case 'enteredReviewMode':
       return { kind: 'system', id: item.id, text: 'Code review started', level: 'info', at, variant: 'review', ...(item.review ? { detail: item.review } : {}) }
     case 'exitedReviewMode':
@@ -208,10 +211,17 @@ function collabItem(item, at) {
   const running = item.status === 'inProgress'
   const [doing, done] = COLLAB_LABELS[item.tool] ?? ['Using agents', 'Used agents']
   const states = Object.entries(item.agentsStates ?? {}).map(([id, s]) => `${id}: ${s?.status ?? 'unknown'}${s?.message ? ` — ${s.message}` : ''}`)
-  const n = (item.receiverThreadIds ?? []).length
+  const receivers = (item.receiverThreadIds ?? []).map(String)
+  const n = receivers.length
+  // Which agents the call touched and how each stood, for the agents panel's cards.
+  const collab = {
+    tool: String(item.tool ?? ''), receivers,
+    states: Object.fromEntries(Object.entries(item.agentsStates ?? {}).map(([id, s]) => [id, { status: String(s?.status ?? 'unknown'), ...(s?.message ? { message: String(s.message) } : {}) }])),
+    ...(item.model ? { model: String(item.model) } : {})
+  }
   return {
     kind: 'tool', id: item.id, name: 'collabAgentToolCall', title: done, status: item.status === 'failed' ? 'failed' : running ? 'running' : 'done', at,
-    label: running ? doing : done, detail: [item.model, n > 1 ? `${n} agents` : null].filter(Boolean).join(' · ') || undefined, view: 'agent',
+    label: running ? doing : done, detail: [item.model, n > 1 ? `${n} agents` : null].filter(Boolean).join(' · ') || undefined, view: 'agent', collab,
     ...(item.prompt ? { prompt: item.prompt } : {}), ...(states.length ? { output: states.join('\n') } : {})
   }
 }

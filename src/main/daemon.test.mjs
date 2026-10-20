@@ -22,7 +22,7 @@ for (const [source, target] of [
   writeFileSync(target, output)
 }
 copyFileSync('src/main/daemonCore.mjs', join(fixtureRoot, 'main', 'daemonCore.mjs'))
-for (const name of ['pricing', 'workspaceCommand', 'attention', 'terminalText', 'hotkeys', 'pickerPlace', 'activityFeed']) {
+for (const name of ['pricing', 'workspaceCommand', 'attention', 'terminalText', 'hotkeys', 'pickerPlace', 'activityFeed', 'clips', 'palette']) {
   copyFileSync(`src/shared/${name}.mjs`, join(fixtureRoot, 'shared', `${name}.mjs`))
 }
 
@@ -156,7 +156,8 @@ test('clipboard routes: list, get, add, paste and snippets are validated and ans
   const calls = []
   const clips = new Map([
     ['clip-1', { id: 'clip-1', kind: 'text', title: 'npm run dist', text: 'npm run dist', preview: 'npm run dist', copiedAt: 2, favorite: true, groups: [], bytes: 12, source: { kind: 'app', exe: 'pwsh.exe' } }],
-    ['img-1', { id: 'img-1', kind: 'image', title: 'Image 1×1', text: '', preview: '', copiedAt: 1, favorite: false, groups: [], bytes: 10, source: { kind: 'app' } }]
+    ['img-1', { id: 'img-1', kind: 'image', title: 'Image 1×1', text: '', preview: '', copiedAt: 1, favorite: false, groups: [], bytes: 10, source: { kind: 'app' } }],
+    ['key-1', { id: 'key-1', kind: 'text', title: 'OPENAI_API_KEY=sk-proj-********1234', text: 'OPENAI_API_KEY=sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX1234', preview: '', copiedAt: 0, favorite: false, groups: [], bytes: 50, source: { kind: 'app' } }]
   ])
   const adapter = {
     list: (opts) => { calls.push(['list', opts]); return [...clips.values()].map(({ text: _t, ...rest }) => rest) },
@@ -171,7 +172,7 @@ test('clipboard routes: list, get, add, paste and snippets are validated and ans
       if (!terminalId) return 'copied'
       return terminalId === MISSING ? 'no-terminal' : 'ok'
     },
-    snippets: async () => [{ name: 'Snippets/sig', shortcut: ';sig', text: 'Best,\nTaylor' }],
+    snippets: async () => [{ name: 'Snippets/sig', shortcut: ';sig', text: 'Best,\nTaylor' }, { name: 'OpenAI', shortcut: ';oai', text: 'sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX1234' }],
     addSnippet: async (input) => { calls.push(['snippet', input]); return input.name === 'taken' ? { error: 'exists' } : { path: `C:\\Notes\\Snippets\\${input.name}.md` } }
   }
   const d = new Daemon(0, { token: 'clip-token', clips: adapter })
@@ -186,10 +187,10 @@ test('clipboard routes: list, get, add, paste and snippets are validated and ans
     assert.equal(list.status, 200)
     const listed = await list.json()
     assert.equal(listed.schemaVersion, 1)
-    assert.equal(listed.clips.length, 2)
+    assert.equal(listed.clips.length, 3)
     assert.ok(!('text' in listed.clips[0]), 'summaries carry no body')
     assert.deepEqual(calls.at(-1), ['list', { q: 'dist', group: 'favorites', limit: 5 }])
-    assert.deepEqual((await (await get('/v1/clips')).json()).clips.length, 2)
+    assert.deepEqual((await (await get('/v1/clips')).json()).clips.length, 3)
     assert.deepEqual(calls.at(-1), ['list', { q: '', group: 'all', limit: 20 }], 'defaults')
     assert.equal((await get('/v1/clips?limit=0')).status, 400)
     assert.equal((await get('/v1/clips?limit=201')).status, 400)
@@ -201,7 +202,12 @@ test('clipboard routes: list, get, add, paste and snippets are validated and ans
     assert.deepEqual(await one.json(), { id: 'clip-1', kind: 'text', title: 'npm run dist', text: 'npm run dist', schemaVersion: 1 })
     assert.equal((await get('/v1/clips/nope')).status, 404)
     assert.equal((await get('/v1/clips/bad%20id')).status, 404)
-    assert.equal((await get('/v1/clips/clip-1?x=1')).status, 404, 'no query string on a clip')
+    assert.equal((await get('/v1/clips/clip-1?x=1')).status, 400, 'only ?full=1 on a clip')
+    assert.equal((await get('/v1/clips/clip-1?full=yes')).status, 400)
+    // A key reaches an agent masked; the Chrome host asks for it whole, to paste it into a page.
+    const masked = await (await get('/v1/clips/key-1')).json()
+    assert.equal(masked.text, 'OPENAI_API_KEY=sk-proj-********1234')
+    assert.equal((await (await get('/v1/clips/key-1?full=1')).json()).text, 'OPENAI_API_KEY=sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX1234')
 
     assert.equal((await post('/v1/clips', {})).status, 400)
     assert.equal((await post('/v1/clips', { text: '   ' })).status, 400)
@@ -255,7 +261,9 @@ test('clipboard routes: list, get, add, paste and snippets are validated and ans
 
     const snippets = await get('/v1/snippets')
     assert.equal(snippets.status, 200)
-    assert.deepEqual(await snippets.json(), { snippets: [{ name: 'Snippets/sig', shortcut: ';sig', text: 'Best,\nTaylor' }], schemaVersion: 1 })
+    assert.deepEqual(await snippets.json(), { snippets: [{ name: 'Snippets/sig', shortcut: ';sig', text: 'Best,\nTaylor' }, { name: 'OpenAI', shortcut: ';oai', text: 'sk-proj-********1234' }], schemaVersion: 1 })
+    assert.equal((await (await get('/v1/snippets?full=1')).json()).snippets[1].text, 'sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX1234', 'the expander gets it whole')
+    assert.equal((await get('/v1/snippets?full=0')).status, 400)
     assert.equal((await post('/v1/snippets', { name: 'a/b', text: 'x' })).status, 400)
     assert.equal((await post('/v1/snippets', { name: 'ok', text: 'x', shortcut: 'has space' })).status, 400)
     assert.equal((await post('/v1/snippets', { name: 'ok', text: '' })).status, 400)

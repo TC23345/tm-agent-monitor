@@ -6,7 +6,7 @@
 // that floats over a reply's code block. Each one that can be open carries
 // `data-escape-close` and closes on Escape and on the host's `tm-escape`.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
-import { Check, ChevronDown, ChevronUp, Copy, MessageSquareQuote, MessageSquarePlus, Plug, RotateCw, Send, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, MessageSquareQuote, MessageSquarePlus, Plug, RotateCw, Send, X } from 'lucide-react'
 import { WORKING_VERBS, fmtTokens, limitLines, relPath, verbDelay } from '../shared/present.mjs'
 import type { ContextUsage, McpServer, RewindResult } from '../shared/chatModel.mjs'
 
@@ -126,7 +126,7 @@ export function WorkingLine({ provider, compacting, retry }: { provider: 'claude
 
 export interface SelectionInfo {
   text: string
-  /** Where the bar goes, in the pane's coordinates. */
+  /** In the pane's coordinates: the middle of the selection's first line, and the bar's top. */
   x: number
   y: number
   /** The plan approval the selection lies in, when it is still waiting. */
@@ -143,7 +143,15 @@ export function SelectionBar({ sel, onQuote, onComment, onClose }: { sel: Select
   const [writing, setWriting] = useState(false)
   const [comment, setComment] = useState('')
   useEscape(ref, onClose)
-  const style: CSSProperties = { left: sel.x, top: sel.y }
+  // Centred on the selection, kept inside the pane; measured before paint, because the bar's width depends on its buttons.
+  const [left, setLeft] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    const host = el?.offsetParent as HTMLElement | null
+    if (!el || !host) return
+    setLeft(Math.max(8, Math.min(sel.x - el.offsetWidth / 2, host.clientWidth - el.offsetWidth - 8)))
+  }, [sel.x, writing])
+  const style: CSSProperties = { left: left ?? Math.max(8, sel.x - 120), top: sel.y }
   return (
     <div ref={ref} className="chat-selbar" style={style} data-escape-close="" data-testid="chat-selbar" onMouseDown={(e) => { if (!(e.target as HTMLElement).closest('input')) e.preventDefault() }}>
       <span className="chat-selbar-copied" data-testid="chat-selbar-copied"><Check className="chat-ic" aria-hidden /> Copied</span>
@@ -373,15 +381,21 @@ export function ContextBreakdown({ usage, error, cwd, onCompact }: { usage: Cont
   )
 }
 
-/** A pasted or attached image, full size over the pane. */
+/**
+ * The image viewer: a pasted or attached image as large as the workspace allows (fixed, so it covers the
+ * host's whole frame rather than one narrow pane), with its name and real size under it. The X, a click
+ * outside the image or Escape closes it.
+ */
 export function ImagePreview({ src, name, onClose }: { src: string; name: string; onClose: () => void }) {
   const ref = useRef<HTMLDivElement | null>(null)
+  const [size, setSize] = useState<string | null>(null)
   useEscape(ref, onClose)
   useEffect(() => ref.current?.focus(), [])
   return (
     <div ref={ref} className="chat-preview" tabIndex={-1} data-escape-close="" onClick={onClose} role="dialog" aria-label={name} data-testid="chat-image-preview">
-      <img src={src} alt={name} onClick={(e) => e.stopPropagation()} />
-      <button className="chat-iconbtn chat-preview-x" aria-label="Close preview (Esc)" title="Close preview (Esc)" onClick={onClose}><X className="chat-ic" /></button>
+      <img src={src} alt={name} onClick={(e) => e.stopPropagation()} onLoad={(e) => setSize(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)} />
+      <span className="chat-preview-cap">{size ? `${name} · ${size}` : name}</span>
+      <button className="chat-iconbtn chat-preview-x" aria-label="Close (Esc)" title="Close (Esc)" onClick={onClose}><X className="chat-ic" /></button>
     </div>
   )
 }
@@ -418,56 +432,6 @@ export function RewindCard({ fork, load, onConfirm, onCancel, cwd }: { fork: boo
   )
 }
 
-/**
- * The copy button over a reply's code block. The host renders the Markdown,
- * so the pane watches the pointer and floats one button over the block it is
- * on, instead of reaching into the host's markup.
- */
-export function CodeCopy({ scroller, pane, copyText }: { scroller: HTMLElement | null; pane: HTMLElement | null; copyText: (text: string) => void }) {
-  const [target, setTarget] = useState<{ pre: HTMLElement; top: number; right: number } | null>(null)
-  const [copied, setCopied] = useState(false)
-  useEffect(() => {
-    if (!scroller || !pane) return
-    const place = (pre: HTMLElement) => {
-      const a = pre.getBoundingClientRect()
-      const b = pane.getBoundingClientRect()
-      setTarget({ pre, top: a.top - b.top + 4, right: b.right - a.right + 4 })
-    }
-    const over = (e: PointerEvent) => {
-      const pre = (e.target as HTMLElement | null)?.closest?.('.chat-text pre') as HTMLElement | null
-      if (pre) place(pre)
-    }
-    const out = (e: PointerEvent) => {
-      const to = e.relatedTarget as HTMLElement | null
-      if (!to?.closest?.('.chat-text pre, .chat-codecopy')) setTarget(null)
-    }
-    const hide = () => setTarget(null)
-    scroller.addEventListener('pointerover', over)
-    scroller.addEventListener('pointerout', out)
-    scroller.addEventListener('scroll', hide, { passive: true })
-    return () => {
-      scroller.removeEventListener('pointerover', over)
-      scroller.removeEventListener('pointerout', out)
-      scroller.removeEventListener('scroll', hide)
-    }
-  }, [scroller, pane])
-  useEffect(() => setCopied(false), [target?.pre])
-  if (!target) return null
-  return (
-    <button
-      className="chat-codecopy" style={{ top: target.top, right: target.right }} aria-label="Copy code" title="Copy code"
-      onPointerLeave={(e) => { if (!(e.relatedTarget as HTMLElement | null)?.closest?.('.chat-text pre')) setTarget(null) }}
-      onClick={() => {
-        copyText(target.pre.innerText.replace(/\n$/, ''))
-        setCopied(true)
-        window.setTimeout(() => setCopied(false), 1200)
-      }}
-      data-testid="chat-codecopy"
-    >
-      {copied ? <Check className="chat-ic" /> : <Copy className="chat-ic" />}
-    </button>
-  )
-}
 
 /** "Jump to latest" while the transcript is scrolled up, with how many rows arrived since. */
 export function JumpToLatest({ count, onJump }: { count: number; onJump: () => void }) {

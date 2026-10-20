@@ -1311,7 +1311,7 @@ function captureClipboard(seq: number, via: 'listener' | 'poll'): void {
     }
     const decision = shouldCapture(
       { text: snap.text, files: snap.files, hasImage: !!snap.image, imageBytes: snap.image?.png.length, excluded: snap.excluded },
-      { ownerExe: owner?.exe || foreground?.exe, blockedExes: meta.blockedExes, redactSecrets: meta.redactSecrets, paused: store.isPaused() }
+      { ownerExe: owner?.exe || foreground?.exe, blockedExes: meta.blockedExes, paused: store.isPaused() }
     )
     const who = `${owner?.exe || '?'}${owner?.pid ? `#${owner.pid}` : ''}`
     if (!decision.keep) {
@@ -2787,7 +2787,7 @@ function registerIpc(): void {
   }
   ipcMain.handle('clips:list', async (): Promise<ClipsListing> => {
     const store = clipStore
-    if (!store) return { clips: [], groups: [], groupInfo: {}, favoritesOrder: [], paused: false, pausedUntil: 0, settings: { blockedExes: [], blockedDomains: [], redactSecrets: true, captureImages: true, maxItems: 0, maxAgeDays: 0 }, mode: 'off', unprotected: false, loaded: false }
+    if (!store) return { clips: [], groups: [], groupInfo: {}, favoritesOrder: [], paused: false, pausedUntil: 0, settings: { blockedExes: [], blockedDomains: [], captureImages: true, maxItems: 0, maxAgeDays: 0 }, mode: 'off', unprotected: false, loaded: false }
     const meta = store.settings()
     return {
       clips: store.list().slice(0, 2000).map((c) => summarize(c)),
@@ -2796,7 +2796,7 @@ function registerIpc(): void {
       favoritesOrder: meta.favoritesOrder,
       paused: store.isPaused(),
       pausedUntil: meta.pausedUntil,
-      settings: { blockedExes: meta.blockedExes, blockedDomains: meta.blockedDomains, redactSecrets: meta.redactSecrets, captureImages: meta.captureImages, maxItems: meta.maxItems, maxAgeDays: meta.maxAgeDays },
+      settings: { blockedExes: meta.blockedExes, blockedDomains: meta.blockedDomains, captureImages: meta.captureImages, maxItems: meta.maxItems, maxAgeDays: meta.maxAgeDays },
       mode: clipboardWatch?.mode ?? 'off',
       unprotected: store.unprotected,
       loaded: true
@@ -2922,7 +2922,6 @@ function registerIpc(): void {
       if (!Array.isArray(p.blockedDomains) || p.blockedDomains.length > 100 || !p.blockedDomains.every((d) => typeof d === 'string' && d.length <= 253)) return false
       clean.blockedDomains = p.blockedDomains as string[]
     }
-    if (typeof p.redactSecrets === 'boolean') clean.redactSecrets = p.redactSecrets
     if (typeof p.captureImages === 'boolean') clean.captureImages = p.captureImages
     if (typeof p.maxItems === 'number' && Number.isInteger(p.maxItems) && p.maxItems >= 50 && p.maxItems <= 10_000) clean.maxItems = p.maxItems
     if (typeof p.maxAgeDays === 'number' && Number.isInteger(p.maxAgeDays) && p.maxAgeDays >= 1 && p.maxAgeDays <= 3650) clean.maxAgeDays = p.maxAgeDays

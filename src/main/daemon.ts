@@ -4,6 +4,7 @@ import { AgentStore } from './store.js'
 import { validateAgentEventV1, validateLegacyReport } from './daemonCore.mjs'
 import { isWorkspaceCommand } from '../shared/workspaceCommand.mjs'
 import { agentForTerminal } from '../shared/attention.mjs'
+import { maskSecrets } from '../shared/clips.mjs'
 import type { AgentState, ProviderId, TerminalInfo, TerminalLaunch } from '../shared/types.js'
 
 export { validateAgentEventV1, validateLegacyReport } from './daemonCore.mjs'
@@ -92,13 +93,13 @@ function resolveRoute(pathname: string): Route | null {
     case '/v1/events': return { name: 'events', methods: ['POST'] }
     case '/v1/terminals': return { name: 'terminals', methods: ['GET', 'POST'] }
     case '/v1/clips': return { name: 'clips', methods: ['GET', 'POST'], query: true }
-    case '/v1/snippets': return { name: 'snippets', methods: ['GET', 'POST'] }
+    case '/v1/snippets': return { name: 'snippets', methods: ['GET', 'POST'], query: true }
   }
   const clip = CLIP_ROUTE.exec(pathname)
   if (clip) {
     return clip[2]
       ? { name: 'clipPaste', methods: ['POST'], id: clip[1] }
-      : { name: 'clip', methods: ['GET'], id: clip[1] }
+      : { name: 'clip', methods: ['GET'], query: true, id: clip[1] }
   }
   const terminal = TERMINAL_ROUTE.exec(pathname)
   if (terminal) {
@@ -166,9 +167,9 @@ const NOT_FOUND = { error: 'not found' }
  * GET  /v1/clips                    ?q=&group=&limit=1..200 → clipboard history summaries, newest first
  * POST /v1/clips                    {text, title?, groups?, favorite?, terminalId? | source?} → on the clipboard and in history (201);
  *                                   {source: {url, title?}} → the extension naming the last copy's page (200)
- * GET  /v1/clips/:id                one clip's full text
+ * GET  /v1/clips/:id                one clip's text, keys masked; ?full=1 → whole (the Chrome host, which pastes it)
  * POST /v1/clips/:id/paste          {terminalId?} → typed into that terminal; without one, copied only
- * GET  /v1/snippets                 the expander list from Notes\Snippets and Notes\Prompts
+ * GET  /v1/snippets                 the expander list from Notes\Snippets and Notes\Prompts, keys masked; ?full=1 → whole (the host)
  * POST /v1/snippets                 {name, text, shortcut?} → a new note in Notes\Snippets (201)
  */
 export class Daemon {
@@ -288,11 +289,11 @@ export class Daemon {
         if (req.method === 'GET') return this.listClips(res, parsed.searchParams)
         return this.withJson(req, res, (value) => { void this.addClip(res, value) })
       case 'clip':
-        return this.getClip(res, route.id as string)
+        return this.getClip(res, route.id as string, parsed.searchParams)
       case 'clipPaste':
         return this.withJson(req, res, (value) => { void this.pasteClip(res, route.id as string, value) })
       case 'snippets':
-        if (req.method === 'GET') return void this.listSnippets(res)
+        if (req.method === 'GET') return void this.listSnippets(res, parsed.searchParams)
         return this.withJson(req, res, (value) => { void this.addSnippet(res, value) })
       case 'report':
       case 'events':
@@ -388,11 +389,14 @@ export class Daemon {
     return this.json(res, 200, { clips: this.clips.list({ q, group, limit: limit as number }), schemaVersion: 1 })
   }
 
-  private getClip(res: http.ServerResponse, id: string): void {
+  private getClip(res: http.ServerResponse, id: string, query: URLSearchParams): void {
     if (!this.clips) return this.json(res, 404, NOT_FOUND)
+    if (!onlyKeys(query.keys(), ['full']) || (query.has('full') && query.get('full') !== '1')) return this.json(res, 400, { error: 'expected no query, or ?full=1' })
     const clip = this.clips.get(id)
     if (!clip) return this.json(res, 404, NOT_FOUND)
-    return this.json(res, 200, { ...clip, schemaVersion: 1 })
+    // An agent reads a key masked, as the user sees it: whatever it prints goes into its conversation.
+    // `?full=1` is the Chrome host's, which pastes the clip into a page; `paste` and `copy` never show the text at all.
+    return this.json(res, 200, { ...clip, text: query.get('full') === '1' ? clip.text : maskSecrets(clip.text), schemaVersion: 1 })
   }
 
   private async addClip(res: http.ServerResponse, value: unknown): Promise<void> {
@@ -449,9 +453,13 @@ export class Daemon {
     }
   }
 
-  private async listSnippets(res: http.ServerResponse): Promise<void> {
+  private async listSnippets(res: http.ServerResponse, query: URLSearchParams): Promise<void> {
     if (!this.clips) return this.json(res, 404, NOT_FOUND)
-    return this.json(res, 200, { snippets: await this.clips.snippets(), schemaVersion: 1 })
+    if (!onlyKeys(query.keys(), ['full']) || (query.has('full') && query.get('full') !== '1')) return this.json(res, 400, { error: 'expected no query, or ?full=1' })
+    // A clip with an expansion code is a snippet too, so a key is masked here as in GET /v1/clips/:id; the host's expander asks for it whole.
+    const full = query.get('full') === '1'
+    const snippets = await this.clips.snippets()
+    return this.json(res, 200, { snippets: full ? snippets : snippets.map((s) => ({ ...s, text: maskSecrets(s.text) })), schemaVersion: 1 })
   }
 
   private async addSnippet(res: http.ServerResponse, value: unknown): Promise<void> {

@@ -3,7 +3,8 @@
 // a footer of controls — the + menu (attach an image, reference a file, the
 // slash-command menu, a side question, the MCP servers; it opens on hover), a
 // clock, the model and effort chip (effort, models, fast mode, output style),
-// the background tasks while any run, the context pie (hover for the
+// the agents and background tasks while any run (on a wide pane the chip
+// opens the agents panel, else a menu of them), the context pie (hover for the
 // breakdown, click to compact), the permission mode chip (Shift+Tab cycles it,
 // as in the CLI) and send / stop. Typing `@` lists the project's files and
 // `/` the slash commands; ↑ in an empty box brings back the last prompt; the
@@ -13,11 +14,13 @@
 // instead of hiding the workspace.
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import {
-  AtSign, Check, ChevronDown, CircleStop, Clock, FileCode, Hand, Layers, ListChecks, Lock, MessageCircleQuestion, Paperclip, PencilLine, Plug, Plus, Send, ShieldCheck, ShieldOff, Slash, Sparkles, Square, X, Zap
+  ArrowDownToLine, AtSign, Bot, Check, ChevronDown, CircleStop, Clock, FileCode, Hand, Layers, ListChecks, Lock, MessageCircleQuestion, Paperclip, PencilLine, Plug, Plus, Send, ShieldCheck, ShieldOff, Slash, Sparkles, Square, TextQuote, X, Zap
 } from 'lucide-react'
 import { effortLabel, fmtTokens, formatElapsed, latestModels, matchFiles, modelLabel } from '../shared/present.mjs'
 import type { Attachment, ChatConfigPatch, ChatOptions, CommandOption, ContextUsage, ModeOption, ModelOption, Provider, Transcript } from '../shared/chatModel.mjs'
+import { runningLabel, type AgentCard } from '../shared/agents.mjs'
 import { ContextBreakdown } from './extras'
+import { EffortSlider } from './EffortSlider'
 
 const PROVIDER_LABEL: Record<Provider, string> = { claude: 'Claude Code', codex: 'Codex' }
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -26,8 +29,8 @@ const EFFORT_SCALE = ['low', 'medium', 'high', 'xhigh', 'max']
 
 export interface ComposerHandle {
   focus(): void
-  /** Quote text into the box (a selection's Quote). */
-  insert(text: string): void
+  /** A selection's Quote: staged as a chip above the text (its ↓ moves it into the text as `> ` lines). */
+  quote(text: string): void
   /** Replace the box's text (a fork puts its prompt back). */
   setText(text: string): void
   /** Files dropped on the pane: images attach, anything else becomes a reference. */
@@ -54,6 +57,13 @@ interface Props {
   onPreview: (src: string, name: string) => void
   /** Codex plan mode (composer.planModeIndicator): the chip turns it off. */
   onPlanMode?: (on: boolean) => void
+  /** The session's agents and background tasks (`agentCards`); the chip counts the running ones. */
+  agents?: AgentCard[]
+  /** A wide pane: the chip opens and closes the agents panel instead of its menu. */
+  onAgents?: () => void
+  agentsOpen?: boolean
+  /** Scroll the transcript to a row (the menu's entries). */
+  onShowRow?: (rowId: string) => void
 }
 
 type Menu = 'add' | 'model' | 'mode' | 'slash' | 'mention' | 'background' | null
@@ -65,10 +75,13 @@ function mentionAt(text: string, caret: number): { start: number; query: string 
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(props, ref) {
-  const { provider, transcript, chatId, options, onRefreshOptions, onSend, onInterrupt, onConfigure, onNotice, listFiles, onSideQuestion, onMcp, loadContext, onCompact, onStopTask, onPreview, onPlanMode } = props
+  const { provider, transcript, chatId, options, onRefreshOptions, onSend, onInterrupt, onConfigure, onNotice, listFiles, onSideQuestion, onMcp, loadContext, onCompact, onStopTask, onPreview, onPlanMode, agents, onAgents, agentsOpen, onShowRow } = props
   const [text, setText] = useState('')
   const [caret, setCaret] = useState(0)
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  /** Quotes staged as chips; they lead the message as `> ` blocks when it is sent. */
+  const [quotes, setQuotes] = useState<{ id: number; text: string }[]>([])
+  const quoteId = useRef(0)
   const [refField, setRefField] = useState(false)
   const [menu, setMenu] = useState<Menu>(null)
   const [slashIndex, setSlashIndex] = useState(0)
@@ -125,15 +138,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
   }, [])
   useEffect(fit, [text, fit])
 
-  const placeCaret = (at: number) => {
-    requestAnimationFrame(() => {
-      const el = area.current
-      if (!el) return
-      el.focus()
-      el.setSelectionRange(at, at)
-      setCaret(at)
-    })
-  }
+  // The caret goes where it is asked once the text set with it is in the box: a layout effect right after that
+  // commit, not the next frame, which a hidden or busy window may not draw for a while (and the button that asked,
+  // a quote chip's ↓, has unmounted and left focus on the body).
+  const [caretAt, setCaretAt] = useState<{ at: number } | null>(null)
+  useLayoutEffect(() => {
+    const el = area.current
+    if (!caretAt || !el) return
+    el.focus()
+    el.setSelectionRange(caretAt.at, caretAt.at)
+    setCaret(caretAt.at)
+  }, [caretAt])
+  const placeCaret = (at: number) => setCaretAt({ at })
 
   const addImages = useCallback((list: Iterable<File>) => {
     for (const file of list) {
@@ -167,13 +183,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
 
   useImperativeHandle(ref, () => ({
     focus: () => area.current?.focus(),
-    insert: (quoted: string) => {
-      const block = quoted.split(/\r?\n/).map((l) => `> ${l}`).join('\n')
-      setText((t) => {
-        const next = `${t.trimEnd()}${t.trim() ? '\n\n' : ''}${block}\n\n`
-        placeCaret(next.length)
-        return next
-      })
+    quote: (quoted: string) => {
+      const q = quoted.replace(/^\s*\n/, '').trimEnd()
+      if (!q.trim()) return
+      setQuotes((list) => (list.some((x) => x.text === q) ? list : [...list, { id: ++quoteId.current, text: q }]))
+      area.current?.focus()
     },
     setText: (value: string) => {
       setText(value)
@@ -188,12 +202,25 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
     }
   }), [addImages, addReference])
 
+  /** A quote chip's ↓: out of the chips and into the text as `> ` lines, ahead of what is typed, the caret after it. */
+  const editQuote = (id: number) => {
+    const q = quotes.find((x) => x.id === id)
+    if (!q) return
+    setQuotes((list) => list.filter((x) => x.id !== id))
+    const block = `${quoteBlock(q.text)}\n\n`
+    const rest = text.replace(/^\s+/, '')
+    setText(`${block}${rest}`)
+    placeCaret(block.length)
+  }
+
   const send = () => {
-    const body = text.trim()
+    // Staged quotes lead the message, each a `> ` block, as Quote used to write them into the box.
+    const body = [...quotes.map((q) => quoteBlock(q.text)), text.trim()].filter(Boolean).join('\n\n')
     if (!chatId || (!body && attachments.length === 0)) return
     onSend(body, attachments)
     setText('')
     setAttachments([])
+    setQuotes([])
     setMenu(null)
     setRecall(-1)
   }
@@ -374,7 +401,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
           ? 'Describe your task to generate a plan…'
           : 'Message Codex — Enter sends, @ for a file, / for commands, ! runs a shell command'
         : `Message ${PROVIDER_LABEL[provider]} — Enter sends, Shift+Enter is a newline, @ for a file, paste an image to attach it`)
-  const background = transcript?.background ?? []
+  const live = useMemo(() => (agents ?? []).filter((c) => c.state === 'running'), [agents])
+  const liveLabel = runningLabel(live)
 
   return (
     <div className="chat-composer">
@@ -437,13 +465,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
           )}
         </Popover>
       ) : null}
-      {menu === 'background' && background.length ? (
+      {menu === 'background' && live.length ? (
         <Popover onClose={() => setMenu(null)} className="is-mode is-background" testid="chat-menu:background">
-          <div className="chat-pop-title">Running in the background</div>
-          {background.map((b) => (
-            <div key={b.id} className="chat-pop-item is-row is-static">
-              <span className="chat-pop-label"><Layers className="chat-ic" aria-hidden /> <span className="chat-pop-ellipsis">{b.description || b.type}</span></span>
-              {onStopTask ? <button className="chat-textbtn" onClick={() => onStopTask(b.id)} data-testid={`chat-stop-task:${b.id}`}><Square className="chat-ic" aria-hidden /> Stop</button> : null}
+          <div className="chat-pop-title">Running now</div>
+          {live.map((c) => (
+            <div key={c.id} className="chat-pop-item is-row is-static">
+              <button className="chat-pop-label chat-pop-jump" onClick={() => { if (c.rowId) onShowRow?.(c.rowId); setMenu(null) }} disabled={!c.rowId || !onShowRow} title={c.rowId ? 'Show in conversation' : undefined} data-testid={`chat-running:${c.id}`}>
+                {c.kind === 'agent' ? <Bot className="chat-ic" aria-hidden /> : <Layers className="chat-ic" aria-hidden />}
+                <span className="chat-pop-ellipsis">{c.name}</span>
+                {c.type ? <span className="chat-pop-key">{c.type}</span> : null}
+              </button>
+              {onStopTask && c.stopId ? <button className="chat-textbtn" onClick={() => onStopTask(c.stopId!)} data-testid={`chat-stop-task:${c.stopId}`}><Square className="chat-ic" aria-hidden /> Stop</button> : null}
             </div>
           ))}
         </Popover>
@@ -455,18 +487,25 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
         onMouseDown={(e) => { if (e.target === e.currentTarget) { e.preventDefault(); area.current?.focus() } }}
         {...(focused && (running || mentionOpen) ? { 'data-escape-close': '' } : {})}
       >
-        {attachments.length || refField ? (
+        {attachments.length || quotes.length || refField ? (
           <div className="chat-attachments" data-testid="chat-attachments">
-            {attachments.map((a, i) => (
-              <span key={`${a.kind}:${a.kind === 'image' ? a.name + i : a.path}`} className={`chat-chip is-${a.kind}`} title={a.kind === 'file' ? a.path : a.name}>
-                {a.kind === 'image'
-                  ? <button className="chat-chip-thumbbtn" aria-label={`Preview ${a.name}`} onClick={() => onPreview(`data:${a.mime};base64,${a.data}`, a.name)} data-testid="chat-chip-preview"><img className="chat-chip-thumb" alt="" src={`data:${a.mime};base64,${a.data}`} /></button>
-                  : <FileCode className="chat-ic" aria-hidden />}
-                <span className="chat-chip-label">{a.kind === 'image' ? a.name : a.name ?? a.path}</span>
-                {a.kind === 'image' && a.width && a.height ? <span className="chat-chip-meta">{a.width}×{a.height}</span> : null}
-                <button className="chat-chip-x" aria-label={`Remove ${a.kind === 'image' ? a.name : a.path}`} onClick={() => setAttachments((list) => list.filter((_, j) => j !== i))}><X className="chat-ic" /></button>
-              </span>
+            {quotes.map((q) => (
+              <QuoteChip key={`quote:${q.id}`} text={q.text} onEdit={() => editQuote(q.id)} onRemove={() => setQuotes((list) => list.filter((x) => x.id !== q.id))} />
             ))}
+            {attachments.map((a, i) => {
+              const remove = () => setAttachments((list) => list.filter((_, j) => j !== i))
+              if (a.kind === 'image') {
+                const src = `data:${a.mime};base64,${a.data}`
+                return <ImageChip key={`image:${a.name}${i}`} name={a.name} src={src} width={a.width} height={a.height} onOpen={() => onPreview(src, a.name)} onRemove={remove} />
+              }
+              return (
+                <span key={`file:${a.path}`} className="chat-chip is-file" title={a.path}>
+                  <FileCode className="chat-ic" aria-hidden />
+                  <span className="chat-chip-label">{a.name ?? a.path}</span>
+                  <button className="chat-chip-x" aria-label={`Remove ${a.path}`} onClick={remove}><X className="chat-ic" /></button>
+                </span>
+              )
+            })}
             {refField ? (
               <input
                 className="chat-ref-input" autoFocus placeholder="Path to reference, then Enter" data-testid="chat-ref-input"
@@ -526,9 +565,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
             </button>
           ) : null}
           <span className="chat-foot-gap" />
-          {background.length ? (
-            <button className={`chat-footchip ${menu === 'background' ? 'is-on' : ''}`} onClick={() => setMenu((m) => (m === 'background' ? null : 'background'))} title="Running in the background" data-testid="chat-chip:background">
-              <Layers className="chat-ic" aria-hidden /><span>{background.length} in background</span>
+          {liveLabel ? (
+            <button
+              className={`chat-footchip is-fixed ${menu === 'background' || (onAgents && agentsOpen) ? 'is-on' : ''}`}
+              onClick={() => (onAgents ? onAgents() : setMenu((m) => (m === 'background' ? null : 'background')))}
+              title={onAgents ? (agentsOpen ? 'Hide the agents panel' : 'Show the agents panel') : 'Agents and background tasks'}
+              aria-pressed={onAgents ? !!agentsOpen : undefined}
+              data-testid="chat-chip:background"
+            >
+              {live.some((c) => c.kind === 'agent') ? <Bot className="chat-ic" aria-hidden /> : <Layers className="chat-ic" aria-hidden />}<span>{liveLabel}</span>
             </button>
           ) : null}
           {transcript ? <ContextPie transcript={transcript} onCompact={!running && chatId ? onCompact : undefined} loadContext={loadContext} /> : null}
@@ -541,7 +586,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
           {running ? (
             <button className="chat-iconbtn is-stop" title="Stop (Esc)" aria-label="Stop" onClick={onInterrupt} data-testid="chat-tool:stop"><CircleStop className="chat-ic" /></button>
           ) : (
-            <button className="chat-iconbtn is-send" title="Send (Enter)" aria-label="Send" onClick={send} disabled={!chatId || (!text.trim() && !attachments.length)} data-testid="chat-tool:send"><Send className="chat-ic" /></button>
+            <button className="chat-iconbtn is-send" title="Send (Enter)" aria-label="Send" onClick={send} disabled={!chatId || (!text.trim() && !attachments.length && !quotes.length)} data-testid="chat-tool:send"><Send className="chat-ic" /></button>
           )}
         </div>
       </div>
@@ -606,16 +651,28 @@ function ModelMenu({ provider, transcript, options, onConfigure, onClose }: { pr
   const effort = transcript?.effort ?? null
   const styles = options?.outputStyles ?? []
   const fast = transcript?.fastMode === 'on'
+  // The slider's positions: Auto (the model's default), then the session's levels.
+  const levels: (string | null)[] = [null, ...efforts]
+  // The level under a drag, or just applied: the heading's dots and word follow it until the session's effort catches up.
+  const [preview, setPreview] = useState<{ level: string | null } | null>(null)
+  useEffect(() => { setPreview(null) }, [effort])
+  const shownEffort = preview ? preview.level : effort
   return (
     <Popover onClose={onClose} className="is-model" testid="chat-menu:model">
       {efforts.length ? (
         <>
-          <div className="chat-pop-title">Effort <EffortDots effort={effort} /> <span className="chat-pop-hint">{effortLabel(effort, provider)}</span></div>
-          <div className="chat-effort" role="radiogroup" aria-label="Effort">
-            <button className={`chat-seg ${effort === null ? 'is-on' : ''}`} role="radio" aria-checked={effort === null} onClick={() => onConfigure({ effort: null })} title="The model's default" data-testid="chat-effort:auto">Auto</button>
-            {efforts.map((e) => (
-              <button key={e} className={`chat-seg ${e === effort ? 'is-on' : ''}`} role="radio" aria-checked={e === effort} onClick={() => onConfigure({ effort: e })} data-testid={`chat-effort:${e}`}>{effortLabel(e, provider)}</button>
-            ))}
+          <div className="chat-pop-title">Effort <EffortDots effort={shownEffort} /> <span className="chat-pop-hint">{effortLabel(shownEffort, provider)}</span></div>
+          <div className="chat-effort">
+            <EffortSlider
+              label="Thinking"
+              aria-label="Effort"
+              count={levels.length}
+              value={Math.max(0, levels.indexOf(effort))}
+              format={(i) => effortLabel(levels[i] ?? null, provider)}
+              onPreview={(i) => setPreview({ level: levels[i] ?? null })}
+              onCommit={(i) => { setPreview({ level: levels[i] ?? null }); onConfigure({ effort: levels[i] ?? null }) }}
+              testid="chat-effort-slider"
+            />
           </div>
           <div className="chat-pop-sep" />
         </>
@@ -789,7 +846,7 @@ function ElapsedChip({ transcript }: { transcript: Transcript }) {
   return <span className="chat-foot-clock" title="Since this session's first message" data-testid="chat-clock"><Clock className="chat-ic" />{formatElapsed(now - first)}</span>
 }
 
-function useTicker(ms: number): number {
+export function useTicker(ms: number): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     setNow(Date.now())
@@ -856,6 +913,92 @@ function ContextPie({ transcript, onCompact, loadContext }: { transcript: Transc
       {open ? (
         <div className="chat-pop is-context" role="dialog" aria-label="Context usage" onMouseEnter={clear} onMouseLeave={leave}>
           <ContextBreakdown usage={usage} error={error} cwd={transcript.cwd} onCompact={onCompact ? () => { setOpen(false); onCompact() } : undefined} />
+        </div>
+      ) : null}
+    </span>
+  )
+}
+
+/** How long the pointer rests on an image chip before its larger preview opens, and how long the preview lingers after it leaves. */
+const PEEK_OPEN_MS = 250
+const PEEK_CLOSE_MS = 150
+
+/**
+ * A chip's larger preview above it (an image's, a quote's): it opens once the pointer has rested on the chip
+ * (or the chip has focus), lingers a beat after the pointer leaves so the pointer can cross onto it, and moves
+ * left to stay inside the composer when the chip sits near the pane's right edge.
+ */
+function usePeek() {
+  const [peek, setPeek] = useState(false)
+  const [shift, setShift] = useState(0)
+  const peekRef = useRef<HTMLDivElement | null>(null)
+  const timer = useRef(0)
+  const clear = () => window.clearTimeout(timer.current)
+  useEffect(() => clear, [])
+  const enter = () => { clear(); if (!peek) timer.current = window.setTimeout(() => setPeek(true), PEEK_OPEN_MS) }
+  const leave = () => { clear(); timer.current = window.setTimeout(() => setPeek(false), PEEK_CLOSE_MS) }
+  const close = () => { clear(); setPeek(false) }
+  useLayoutEffect(() => {
+    const el = peekRef.current
+    if (!peek || !el) { setShift(0); return }
+    const box = el.closest('.chat-composer')?.getBoundingClientRect()
+    const r = el.getBoundingClientRect()
+    if (box && r.right > box.right - 8) setShift(Math.max(box.left + 8 - r.left, box.right - 8 - r.right))
+  }, [peek])
+  return { peek, peekRef, enter, leave, close, style: shift ? { marginLeft: shift } : undefined }
+}
+
+/**
+ * A pasted or attached image in the composer: its thumbnail, name and size (the user's call, 2026-10-20).
+ * Resting the pointer on it (or focusing it) opens a larger preview above it; a click on the chip or on the
+ * preview opens the image full size in the viewer, which its X, a click outside or Escape closes.
+ * The chip's own X removes the image.
+ */
+function ImageChip({ name, src, width, height, onOpen, onRemove }: { name: string; src: string; width?: number; height?: number; onOpen: () => void; onRemove: () => void }) {
+  const p = usePeek()
+  const open = () => { p.close(); onOpen() }
+  const size = width && height ? `${width}×${height}` : null
+  return (
+    <span className="chat-chip is-image" onMouseEnter={p.enter} onMouseLeave={p.leave}>
+      <button className="chat-chip-open" onClick={open} onFocus={p.enter} onBlur={p.leave} aria-label={`Open ${name}`} data-testid="chat-chip-preview">
+        <img className="chat-chip-thumb" alt="" src={src} />
+        <span className="chat-chip-label">{name}</span>
+        {size ? <span className="chat-chip-meta">{size}</span> : null}
+      </button>
+      <button className="chat-chip-x" aria-label={`Remove ${name}`} onClick={onRemove}><X className="chat-ic" /></button>
+      {p.peek ? (
+        <div ref={p.peekRef} className="chat-peek" style={p.style} onClick={open} title="Click to open" data-testid="chat-chip-peek">
+          <img src={src} alt={name} />
+          <span className="chat-peek-cap">{size ? `${name} · ${size}` : name}</span>
+        </div>
+      ) : null}
+    </span>
+  )
+}
+
+/** A quote as the message will carry it: each line behind `> `. */
+function quoteBlock(text: string): string {
+  return text.split(/\r?\n/).map((l) => `> ${l}`).join('\n')
+}
+
+/**
+ * A selection's Quote, staged as a chip (the user's call, 2026-10-20): a quote mark, the quote on one line,
+ * a ↓ that moves it into the text as `> ` lines to edit (as Quote used to), and an X. Resting on it opens the
+ * whole quote above it, as an image chip does. Sent as it stands, it leads the message as a `> ` block.
+ */
+function QuoteChip({ text, onEdit, onRemove }: { text: string; onEdit: () => void; onRemove: () => void }) {
+  const p = usePeek()
+  const lines = text.split(/\r?\n/).length
+  return (
+    <span className="chat-chip is-quote" onMouseEnter={p.enter} onMouseLeave={p.leave} data-testid="chat-chip-quote">
+      <TextQuote className="chat-ic" aria-hidden />
+      <span className="chat-chip-label" tabIndex={0} onFocus={p.enter} onBlur={p.leave} aria-label={`Quote: ${text}`}>{text.replace(/\s+/g, ' ')}</span>
+      <button className="chat-chip-btn" title="Edit it in the message" aria-label="Edit the quote in the message" onClick={() => { p.close(); onEdit() }} data-testid="chat-chip-quote-edit"><ArrowDownToLine className="chat-ic" /></button>
+      <button className="chat-chip-x" aria-label="Remove the quote" onClick={onRemove}><X className="chat-ic" /></button>
+      {p.peek ? (
+        <div ref={p.peekRef} className="chat-peek is-quote" style={p.style} data-testid="chat-chip-quote-peek">
+          <blockquote className="chat-peek-quote">{text}</blockquote>
+          <span className="chat-peek-cap">{lines > 1 ? `Quote · ${lines} lines` : 'Quote'} · ↓ edits it in the message</span>
         </div>
       ) : null}
     </span>

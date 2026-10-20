@@ -21,4 +21,8 @@ export function verbDelay(swaps: number): number
 export function describePermissionUpdates(suggestions: unknown): string | undefined
 export function relPath(path: string, cwd: string | null | undefined): string
 export function matchFiles(paths: string[], query: string, limit?: number): string[]
+export function previewMarkdown(text: string | null | undefined): string
+export function cardSteps(items: import('./chatModel.mjs').ChatItem[]): Set<string>
+/** A streaming reply split for drawing: finished blocks (Markdown), the block being written (plain), and a table's header while its rows arrive. */
+export function streamParts(text: string): { settled: string; live: string; table: string | null }
 export function transcriptMarkdown(t: Transcript): string

@@ -7,11 +7,13 @@
  */
 
 /**
- * The picker's menu bar (Clips · Keys), the workspace title bar's height: the
- * card grew by it (0.4.42) so the list keeps its room.
+ * The picker's menu bar (the tm mark and *TaylorMade Clipboard*), the
+ * workspace title bar's height: the card grew by it (0.4.42) so the list
+ * keeps its room.
  */
 export const PICKER_MENUBAR = 41
-export const PICKER_CARD = Object.freeze({ width: 560, height: 420 + PICKER_MENUBAR })
+/** The left column of views, groups and sources (176 px, 0.4.65) widened the card from 560 so the table keeps its room. */
+export const PICKER_CARD = Object.freeze({ width: 720, height: 420 + PICKER_MENUBAR })
 /** Transparent margin around the card, for the drop shadow. */
 export const PICKER_SHADOW = 28
 /** The card's corner sits this far from the pointer, so the pointer is not over a row already. */
@@ -43,8 +45,8 @@ export function placePicker({ cursor, workArea, card = PICKER_CARD, shadow = PIC
   return { x: Math.round(cardX - shadow), y: Math.round(cardY - shadow), width, height, origin: `${oy} ${ox}` }
 }
 
-/** The smallest card a resize may leave (the table and the menu bar still fit). */
-export const PICKER_MIN = Object.freeze({ width: 420, height: 300 })
+/** The smallest card a resize may leave (the left column, the table and the menu bar still fit). */
+export const PICKER_MIN = Object.freeze({ width: 560, height: 300 })
 const PICKER_MAX = 4000
 
 /**

@@ -73,7 +73,8 @@ async function handle(message) {
     case 'clips':
       return pushClips(true, message.limit)
     case 'clip': {
-      const res = await call('GET', `/v1/clips/${encodeURIComponent(message.id)}`)
+      // Whole: this pastes the clip into the page (the menu's titles stay masked).
+      const res = await call('GET', `/v1/clips/${encodeURIComponent(message.id)}?full=1`)
       reply(res.error ? { type: 'clip', req: message.req, error: res.error } : { type: 'clip', req: message.req, text: res.text })
       return
     }
@@ -102,7 +103,8 @@ async function pushClips(force = false, limit = MENU_LIMIT) {
 
 let lastSnippetsKey = ''
 async function pushSnippets(force = false) {
-  const res = await call('GET', '/v1/snippets')
+  // Whole: the expander types these into the page.
+  const res = await call('GET', '/v1/snippets?full=1')
   if (res.error) { if (force) reply({ type: 'error', error: `snippets: ${res.error}` }); return }
   const snippets = res.snippets ?? []
   const key = JSON.stringify(snippets)

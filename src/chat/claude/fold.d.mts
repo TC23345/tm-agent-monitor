@@ -2,14 +2,15 @@ import type { ChatItemTool, SessionSummary, Transcript } from '../shared/chatMod
 
 export interface ClaudeFold {
   transcript: Transcript
-  stream: { messageId: string | null; blocks: Record<number, string> }
+  /** A stream cursor per thread, keyed by `parent_tool_use_id` ('' for the session). */
+  streams: Record<string, { messageId: string | null; blocks: Record<number, string> }>
   /** The compaction row still waiting for its summary. */
   compactId?: string | null
 }
 
 export function startFold(transcript: Transcript): ClaudeFold
 export function toolTitle(name: string, input: unknown): string
-export function toolView(name: string, input: unknown): Pick<ChatItemTool, 'label' | 'detail' | 'detailMono' | 'view' | 'edits' | 'content' | 'path' | 'todos' | 'prompt'>
+export function toolView(name: string, input: unknown): Pick<ChatItemTool, 'label' | 'detail' | 'detailMono' | 'view' | 'edits' | 'content' | 'path' | 'todos' | 'prompt' | 'agentType'>
 export function resultText(content: unknown): string
 export function toolOutcome(text: string, isError: boolean): { status: 'done' | 'failed' | 'declined'; output: string }
 export function storedCommand(text: string): string | null

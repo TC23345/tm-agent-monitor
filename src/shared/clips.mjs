@@ -60,27 +60,73 @@ export const PASSWORD_MANAGER_EXES = Object.freeze([
   'keeper.exe', 'keeperpasswordmanager.exe', 'passwordmanager.exe', 'msedge_pwa_password.exe'
 ])
 
-/** Secret shapes that must never land in history — the same families
- * `fix-evals/lib/secrets.mjs` refuses to write into a case. Line-wise. */
-export const SECRET_PATTERNS = Object.freeze([
-  ['jwt', /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/],
-  ['anthropic/openai key', /\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b/],
-  ['github token', /\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b/],
-  ['slack token', /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/],
-  ['aws access key', /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/],
-  ['private key', /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/],
-  ['clerk/stripe secret', /\b(?:sk_live|sk_test|rk_live)_[A-Za-z0-9]{16,}\b/],
-  ['connection string with password', /\b(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|redis):\/\/[^:\s/]+:[^@\s]{3,}@/],
-  ['.env assignment', /^\+?\s*[A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|API_KEY|PRIVATE_KEY)[A-Z0-9_]*\s*=\s*\S{8,}/]
+/** What stands for a secret's hidden middle, whatever its length, so a masked key never shows how long it is. */
+export const SECRET_MASK = '********'
+
+/** A key as it is shown: its readable prefix, the mask, then its last four characters when at least 12 are hidden (`tail` false: none, for a password). */
+function maskKey(token, prefix, tail = true) {
+  const rest = token.slice(prefix.length)
+  return `${prefix}${SECRET_MASK}${tail && rest.length >= 12 ? rest.slice(-4) : ''}`
+}
+/** The mask for a family whose prefix (`sk-ant-api03-`, `ghp_`, `AKIA`) stays readable. */
+const keepPrefix = (re) => (token) => maskKey(token, re.exec(token)?.[0] ?? '')
+
+/**
+ * Secret shapes: the families `fix-evals/lib/secrets.mjs` refuses to write
+ * into a case, plus a few more providers' key prefixes. Each is a global
+ * pattern and what a match is shown as. A copy holding one is kept, and
+ * copies and pastes whole; only what is put on screen, or handed to an
+ * agent, is masked (`maskSecrets`). Order matters: the `.env` rule last, so
+ * a value a key family already masked is left alone.
+ */
+export const SECRET_FAMILIES = Object.freeze([
+  {
+    kind: 'private key',
+    re: /(-----BEGIN ((?:RSA |EC |OPENSSH |DSA |PGP |ENCRYPTED )?PRIVATE KEY)-----)([\s\S]*?)(-----END \2-----|$)/g,
+    mask: (_m, begin, _label, body, end) => `${begin}\n${maskKey(body.replace(/\s+/g, ''), '')}${end ? `\n${end}` : ''}`
+  },
+  { kind: 'jwt', re: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, mask: keepPrefix(/^eyJ/) },
+  { kind: 'anthropic/openai key', re: /\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b/g, mask: keepPrefix(/^sk-(?:ant-[a-z]+\d*-|(?:proj|svcacct|admin)-)?/) },
+  { kind: 'github token', re: /\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b/g, mask: keepPrefix(/^(?:ghp|gho|ghu|ghs|ghr|github_pat)_/) },
+  { kind: 'slack token', re: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g, mask: keepPrefix(/^xox[abprs]-/) },
+  { kind: 'aws access key', re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, mask: keepPrefix(/^(?:AKIA|ASIA)/) },
+  { kind: 'clerk/stripe secret', re: /\b(?:(?:sk|rk)_(?:live|test)|whsec)_[A-Za-z0-9]{16,}\b/g, mask: keepPrefix(/^(?:(?:sk|rk)_(?:live|test)|whsec)_/) },
+  { kind: 'google api key', re: /\bAIza[0-9A-Za-z_-]{35}\b/g, mask: keepPrefix(/^AIza/) },
+  {
+    kind: 'api key',
+    re: /\b(?:(?:pplx-|hf_|gsk_|xai-|npm_|lin_api_)[A-Za-z0-9]{30,}|fc-[0-9a-f]{32})\b/g,
+    mask: keepPrefix(/^(?:pplx-|hf_|gsk_|xai-|npm_|lin_api_|fc-)/)
+  },
+  { kind: 'bearer token', re: /\b(Bearer[ \t]+)([A-Za-z0-9._~+/-]{20,}=*)/g, mask: (_m, lead, token) => `${lead}${maskKey(token, '')}` },
+  {
+    kind: 'connection string with password',
+    re: /\b((?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|rediss?|amqps?):\/\/[^:\s/]+:)[^@\s]{3,}@/g,
+    mask: (_m, lead) => `${lead}${SECRET_MASK}@`
+  },
+  {
+    kind: '.env assignment',
+    re: /^(\+?[ \t]*(?:export[ \t]+)?([A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|API_KEY|PRIVATE_KEY)[A-Z0-9_]*)[ \t]*=[ \t]*)(\S{8,})/gm,
+    mask: (m, lead, name, value) => {
+      // A value a key family already masked, or a reference to another variable, stays as it is.
+      if (value.includes(SECRET_MASK) || /^["']?\$/.test(value)) return m
+      const quoted = /^(["'])(.*)\1$/.exec(value)
+      const shown = maskKey(quoted ? quoted[2] : value, '', !name.includes('PASSWORD'))
+      return lead + (quoted ? `${quoted[1]}${shown}${quoted[1]}` : shown)
+    }
+  }
 ])
 
-/** The kind of secret a text looks like, or null. Checks each line. */
-export function looksSecret(text) {
-  if (typeof text !== 'string' || !text) return null
-  for (const line of text.split(/\r?\n/)) {
-    for (const [kind, re] of SECRET_PATTERNS) if (re.test(line)) return kind
-  }
-  return null
+/**
+ * A text with every secret in it masked in place: a key keeps its prefix
+ * and its last four characters (`sk-ant-api03-********Xy9Q`), a password
+ * nothing, and the rest of the text is untouched. Masking a masked text
+ * changes nothing.
+ */
+export function maskSecrets(text) {
+  if (typeof text !== 'string') return ''
+  let out = text
+  for (const { re, mask } of SECRET_FAMILIES) out = out.replace(re, mask)
+  return out
 }
 
 /**
@@ -160,10 +206,12 @@ export function domainBlocked(url, domains) {
 /**
  * The capture decision (PRD §5.2). `snap` is the adapter's snapshot
  * ({ text, files, hasImage, imageBytes, excluded }); `ctx` the rules
- * ({ ownerExe, blockedExes, redactSecrets, paused }). Answers
- * `{ keep: true, kind }` or `{ keep: false, reason }`. Text wins over an
- * image when both are present (a rich copy from a browser); a file list wins
- * over both. The pane never shows a skipped copy — the absence is the feature.
+ * ({ ownerExe, blockedExes, paused }). Answers `{ keep: true, kind }` or
+ * `{ keep: false, reason }`. Text wins over an image when both are present
+ * (a rich copy from a browser); a file list wins over both. A key or token
+ * is kept like any text (keeping them is what this history is for); it is
+ * masked wherever it is shown. The pane never shows a skipped copy — the
+ * absence is the feature.
  */
 export function shouldCapture(snap, ctx = {}) {
   if (ctx.paused) return { keep: false, reason: 'paused' }
@@ -175,10 +223,6 @@ export function shouldCapture(snap, ctx = {}) {
   const text = typeof snap.text === 'string' ? snap.text : ''
   if (text.trim()) {
     if (Buffer.byteLength(text, 'utf8') > MAX_CLIP_BYTES) return { keep: false, reason: 'too-large' }
-    if (ctx.redactSecrets !== false) {
-      const kind = looksSecret(text)
-      if (kind) return { keep: false, reason: `secret:${kind}` }
-    }
     return { keep: true, kind: 'text' }
   }
   if (snap.hasImage) {
@@ -303,6 +347,15 @@ export function filterClips(clips, { group = 'all', source = '', query = '', lim
 }
 
 const TITLE_MAX = 80
+/** How much of a body, from its first visible character, a row's title and preview are read from: masking runs over this much, not a whole 256 KB clip on every listing. */
+const SHOWN_HEAD = 4096
+
+/** The start of a text body as a row shows it: from its first visible character, bounded, secrets masked. */
+function shownHead(text) {
+  if (typeof text !== 'string') return ''
+  const start = text.search(/\S/)
+  return start < 0 ? '' : maskSecrets(text.slice(start, start + SHOWN_HEAD))
+}
 
 /** First meaningful line, for a row. */
 export function firstLine(text) {
@@ -314,7 +367,7 @@ export function firstLine(text) {
   return ''
 }
 
-/** What a row is called: the user's title, else the first line, else what it is. */
+/** What a row is called: the user's title, else the first line (secrets masked), else what it is. */
 export function clipTitle(clip) {
   if (!clip) return ''
   if (typeof clip.title === 'string' && clip.title.trim()) return clip.title.trim().slice(0, TITLE_MAX)
@@ -324,14 +377,14 @@ export function clipTitle(clip) {
     return `${files.length} files`
   }
   if (clip.kind === 'image') return `Image ${clip.image?.width ?? '?'}×${clip.image?.height ?? '?'}`
-  const line = firstLine(clip.text)
+  const line = firstLine(shownHead(clip.text))
   return line.length > TITLE_MAX ? `${line.slice(0, TITLE_MAX - 1)}…` : line
 }
 
-/** A one-line preview of the body (whitespace collapsed), ≤ `max` characters. */
+/** A one-line preview of the body (whitespace collapsed, secrets masked), ≤ `max` characters. */
 export function clipPreview(clip, max = 200) {
   if (!clip) return ''
-  const body = clip.kind === 'files' ? (clip.files ?? []).join('  ') : clip.kind === 'image' ? '' : (clip.text ?? '')
+  const body = clip.kind === 'files' ? (clip.files ?? []).join('  ') : clip.kind === 'image' ? '' : shownHead(clip.text)
   const flat = body.replace(/\s+/g, ' ').trim()
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
 }

@@ -77,7 +77,6 @@ export interface ClipCaptureSettings {
   blockedExes: string[]
   /** Host names (with their subdomains) whose pages never feed a source URL: such a clip is dropped. */
   blockedDomains: string[]
-  redactSecrets: boolean
   captureImages: boolean
   maxItems: number
   maxAgeDays: number

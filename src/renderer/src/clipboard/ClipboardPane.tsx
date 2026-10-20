@@ -1,35 +1,23 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import {
-  AppWindow, Bot, Check, ChevronRight, ChevronsDownUp, Clipboard, ClipboardPaste, Copy, Download, Files, FolderPlus, Globe, Image, Layers,
+  AppWindow, Bot, Check, ChevronRight, ChevronsDownUp, ClipboardPaste, Copy, Download, Eye, EyeOff, Files, FolderPlus, Globe, Image, Layers,
   ListChecks, Merge, MoreHorizontal, Pause, Pencil, Play, Plus, Search, SlidersHorizontal, Square, SquarePen, Star, Terminal, Trash2, Upload, X
 } from 'lucide-react'
 import type { ClipSummary, ClipsListing } from '@shared/types'
-import { appDisplayName, chordLabel, fromSource, groupProblem, inGroup, looksLikeCode, orderFavorites, sizeLabel, sourceLabel } from '@shared/clips.mjs'
+import { chordLabel, fromSource, groupProblem, inGroup, looksLikeCode, maskSecrets, orderFavorites, sizeLabel, sourceLabel } from '@shared/clips.mjs'
 import { fuzzyScore } from '@shared/palette.mjs'
 import { ContextMenu, tidyEntries, type ContextEntry } from '../ContextMenu'
-import { Collapse } from '../Collapse'
 import { useTreeDrag, type DragPress } from '../useTreeDrag'
 import { tid } from '../testid'
 import { CaptureSettings } from './CaptureSettings'
+import { ClipNav, clipSources, groupDot, useNavSections } from './ClipNav'
 import { FilterChips, nextChip, type FilterChip } from './FilterChips'
 import { SourceCell } from './SourceCell'
 import { ClipEditCard } from './ClipEditCard'
 import { GroupManager, type GroupRequest } from './GroupManager'
 import { gripAt, useClipColumns } from './ClipColumns'
 
-/** Expanded sidebar sections. */
-const OPEN_KEY = 'tm.clips.open.v1'
 const SIZE_BADGE_FROM = 4 * 1024
-
-function readOpen(): string[] {
-  try {
-    const v = JSON.parse(localStorage.getItem(OPEN_KEY) ?? 'null')
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : ['groups', 'sources']
-  } catch { return ['groups', 'sources'] }
-}
-function writeOpen(list: string[]) {
-  try { localStorage.setItem(OPEN_KEY, JSON.stringify(list)) } catch { /* layout nicety only */ }
-}
 
 export interface ClipboardPaneHandle {
   focusSearch: () => void
@@ -59,14 +47,6 @@ function ago(at: number, now: number): string {
   return `${Math.round(h / 24)}d`
 }
 
-/** A small dot colour per group, from its name — never a filled row. */
-const GROUP_HUES = [18, 42, 140, 185, 215, 280, 330]
-function groupHue(name: string): number {
-  let h = 0
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0
-  return GROUP_HUES[h % GROUP_HUES.length]
-}
-
 /** The source glyph in a row: what kind of thing made the copy. */
 function SourceGlyph({ clip }: { clip: ClipSummary }) {
   const cls = 'clip-ic'
@@ -85,7 +65,6 @@ type MenuSpec =
   | { kind: 'clip'; id: string }
   | { kind: 'group'; name: string }
   | { kind: 'root' }
-  | { kind: 'pause' }
   | { kind: 'picked' }
   | { kind: 'picked-groups' }
 type Menu = MenuSpec & { x: number; y: number }
@@ -110,6 +89,10 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
   const [selected, setSelected] = useState<string | null>(null)
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [body, setBody] = useState<{ id: string; text: string } | null>(null)
+  /** The body as the detail card draws it: keys masked (prefix, ********, last 4) until the eye shows them. */
+  const maskedBody = useMemo(() => (body ? maskSecrets(body.text) : ''), [body])
+  /** The clip whose keys the detail card shows in full (the eye); a new selection hides them again. */
+  const [revealed, setRevealed] = useState<string | null>(null)
   /** The clip whose Edit… card is open (where the detail card sits). */
   const [editing, setEditing] = useState<string | null>(null)
   const [imageUrl, setImageUrl] = useState<{ id: string; url: string } | null>(null)
@@ -120,7 +103,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
   const [confirm, setConfirm] = useState<'clear' | 'clear-all' | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
-  const [openSections, setOpenSections] = useState<string[]>(readOpen)
+  const nav = useNavSections()
   const [now, setNow] = useState(Date.now())
   const [adding, setAdding] = useState<string | null>(null)
   /** The capture settings card or the group manager, shown where the detail card sits. */
@@ -219,51 +202,32 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
     group: (name: string) => clips.filter((c) => c.groups.includes(name)).length
   }), [clips])
 
-  /** Provenance filters with something behind them (PRD §4.3). */
-  const sources = useMemo(() => {
-    const out: { id: string; label: string; icon: ReactNode; count: number }[] = []
-    const kind = (k: string, label: string, icon: ReactNode) => {
-      const n = clips.filter((c) => c.source.kind === k).length
-      if (n) out.push({ id: k, label, icon, count: n })
-    }
-    kind('terminal', 'Terminal panes', <Terminal strokeWidth={2} />)
-    kind('chrome', 'Browser', <Globe strokeWidth={2} />)
-    kind('agent', 'Agents', <Bot strokeWidth={2} />)
-    kind('manual', 'Added by you', <Pencil strokeWidth={2} />)
-    const projects = new Map<string, number>()
-    const exes = new Map<string, number>()
-    for (const c of clips) {
-      if (c.source.project) projects.set(c.source.project, (projects.get(c.source.project) ?? 0) + 1)
-      if (c.source.exe && c.source.kind === 'app' && c.source.exe !== 'taylormade agents.exe') exes.set(c.source.exe, (exes.get(c.source.exe) ?? 0) + 1)
-    }
-    for (const [p, n] of [...projects].sort((a, b) => b[1] - a[1]).slice(0, 8)) out.push({ id: `project:${p}`, label: p, icon: <Layers strokeWidth={2} />, count: n })
-    for (const [e, n] of [...exes].sort((a, b) => b[1] - a[1]).slice(0, 8)) out.push({ id: `exe:${e}`, label: appDisplayName(e) || e, icon: <AppWindow strokeWidth={2} />, count: n })
-    return out
-  }, [clips])
+  const sources = useMemo(() => clipSources(clips), [clips])
 
   /**
-   * The Filter Table's tabs above the list: the sidebar's entries as chips,
-   * on the same state (`group`, `source`), so the two always agree — a click
-   * here is a click there. The sidebar stays for managing groups and dragging.
+   * Every filter in the sidebar's order — what Tab walks. The Filter Table's
+   * tabs above the list are these less the groups, which the sidebar lists
+   * (the user's call: groups down the left, not across the top). They share
+   * the sidebar's state (`group`, `source`), so a click here is a click there.
    */
-  const chips = useMemo<FilterChip[]>(() => [
+  const filters = useMemo<FilterChip[]>(() => [
     { id: 'all', label: 'All', count: counts.all, active: group === 'all' },
     ...(counts.favorites ? [{ id: 'favorites', label: 'Favorites', count: counts.favorites, star: true, active: group === 'favorites' }] : []),
     ...(counts.images ? [{ id: 'images', label: 'Images', count: counts.images, icon: <Image strokeWidth={2} />, active: group === 'images' }] : []),
-    // A group's description is its chip's hover text (Manage groups… sets it).
-    ...groups.filter((g) => counts.group(g)).map((g) => ({ id: g, label: g, count: counts.group(g), dot: `hsl(${groupHue(g)} 60% 62%)`, active: group === g, hint: groupInfo[g]?.description })),
+    ...groups.filter((g) => counts.group(g)).map((g) => ({ id: g, label: g, count: counts.group(g), dot: groupDot(g), active: group === g, hint: groupInfo[g]?.description })),
     ...sources.map((s) => ({ id: `src:${s.id}`, label: s.label, count: s.count, icon: s.icon, active: source === s.id }))
   ], [counts, groups, groupInfo, sources, group, source])
+  const chips = useMemo(() => filters.filter((c) => !groups.includes(c.id)), [filters, groups])
   /** A chip click does what the matching sidebar entry does: a view replaces the view, a source toggles on top of it. */
   const pickChip = (chip: FilterChip) => {
     if (chip.id.startsWith('src:')) setSource(source === chip.id.slice(4) ? '' : chip.id.slice(4))
     else setGroup(chip.id)
     setPicked(new Set())
   }
-  /** Tab / Shift+Tab walks the chips one at a time, like the picker: each one alone is the filter. */
+  /** Tab / Shift+Tab walks every filter one at a time (the groups too), like the picker: each one alone is the filter. */
   const stepChip = (back: boolean) => {
     const primary = source ? `src:${source}` : group
-    const next = nextChip(chips.map((c) => ({ ...c, active: c.id === primary })), back)
+    const next = nextChip(filters.map((c) => ({ ...c, active: c.id === primary })), back)
     if (!next) return
     if (next.id.startsWith('src:')) { setGroup('all'); setSource(next.id.slice(4)) } else { setGroup(next.id); setSource('') }
     setPicked(new Set())
@@ -283,6 +247,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
   }, [selecting, leaveSelect])
 
   // ---- the selected clip's body and image ----
+  useEffect(() => { setRevealed(null) }, [selected])
   useEffect(() => {
     if (!selected) { setBody(null); setImageUrl(null); return }
     const clip = byId.get(selected)
@@ -430,11 +395,6 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
     if (id) setSelected(id)
     else say('Could not add that')
   }
-  const setSectionOpen = (id: string, open: boolean) => setOpenSections((prev) => {
-    const next = open ? [...new Set([...prev, id])] : prev.filter((p) => p !== id)
-    writeOpen(next)
-    return next
-  })
 
   // ---- favorites drag order (the notes tree's plumbing, shared) ----
   const hitTest = (x: number, y: number, press: DragPress): DropTarget | null => {
@@ -511,7 +471,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
     return [
       ...groups.map((g): ContextEntry => ({
         kind: 'item', id: `group:${g}`, label: g, hint: groupInfo[g]?.description,
-        icon: first?.groups.includes(g) && ids.length === 1 ? <Check /> : <span className="clip-dot" style={{ background: `hsl(${groupHue(g)} 60% 62%)` }} />,
+        icon: first?.groups.includes(g) && ids.length === 1 ? <Check /> : <span className="clip-dot" style={{ background: groupDot(g) }} />,
         keepOpen: ids.length === 1,
         onSelect: () => { for (const id of ids) { const c = byId.get(id); if (c && !(ids.length === 1 && c.groups.includes(g))) toggleGroup(id, g); else if (ids.length === 1) toggleGroup(id, g) } }
       })),
@@ -545,14 +505,6 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
         { kind: 'item', id: 'delete', label: 'Delete group', icon: <Trash2 />, hint: `Its ${counts.group(m.name)} clip${counts.group(m.name) === 1 ? '' : 's'} stay in history`, onSelect: () => void deleteGroup(m.name) }
       ])
     }
-    if (m.kind === 'pause') {
-      return tidyEntries([
-        paused && { kind: 'item', id: 'resume', label: 'Resume capture', icon: <Play />, onSelect: () => void window.watch.pauseClips(null) },
-        { kind: 'item', id: 'pause-5', label: 'Pause for 5 minutes', icon: <Pause />, onSelect: () => void window.watch.pauseClips(5) },
-        { kind: 'item', id: 'pause-30', label: 'Pause for 30 minutes', icon: <Pause />, onSelect: () => void window.watch.pauseClips(30) },
-        { kind: 'item', id: 'pause', label: 'Pause until resumed', icon: <Pause />, onSelect: () => void window.watch.pauseClips(0) }
-      ])
-    }
     if (m.kind === 'picked-groups') return tidyEntries(groupEntries([...picked]))
     if (m.kind === 'picked') {
       return tidyEntries([
@@ -561,58 +513,35 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
         { kind: 'item', id: 'delete', label: `Delete ${picked.size}`, icon: <Trash2 />, onSelect: () => void remove([...picked]) }
       ])
     }
+    // More (⋯): the toolbar keeps only + and New group; pause, select and collapse live here (the user's call).
     return tidyEntries([
       { kind: 'item', id: 'add', label: 'Add text clip…', icon: <Plus />, onSelect: () => setAdding('') },
       { kind: 'item', id: 'new-group', label: 'New group…', icon: <FolderPlus />, onSelect: () => setRenaming({ name: null, value: '' }) },
       { kind: 'item', id: 'groups', label: 'Manage groups…', icon: <Layers />, hint: 'Names, descriptions (shown on hover), delete', onSelect: () => openGroups() },
       { kind: 'sep' },
+      { kind: 'item', id: 'select', label: selecting ? 'Leave select mode' : 'Select rows', icon: <ListChecks />, keys: selecting ? ['Esc'] : ['Shift', 'S'], hint: selecting ? undefined : 'A click picks a row: merge, group or delete several', onSelect: toggleSelect },
+      {
+        kind: 'submenu', id: 'pause', label: paused ? 'Capture is paused' : 'Pause capture', icon: paused ? <Play /> : <Pause />,
+        entries: tidyEntries([
+          paused && { kind: 'item', id: 'resume', label: 'Resume capture', icon: <Play />, onSelect: () => void window.watch.pauseClips(null) },
+          { kind: 'item', id: 'pause-5', label: 'Pause for 5 minutes', icon: <Pause />, onSelect: () => void window.watch.pauseClips(5) },
+          { kind: 'item', id: 'pause-30', label: 'Pause for 30 minutes', icon: <Pause />, onSelect: () => void window.watch.pauseClips(30) },
+          { kind: 'item', id: 'pause', label: 'Pause until resumed', icon: <Pause />, onSelect: () => void window.watch.pauseClips(0) }
+        ])
+      },
+      { kind: 'item', id: 'collapse', label: 'Collapse sections', icon: <ChevronsDownUp />, disabled: !nav.open.length, onSelect: nav.collapseAll },
+      { kind: 'sep' },
       { kind: 'item', id: 'import', label: 'Import backup…', icon: <Upload />, hint: 'A JSON export from this app or from Clipboard History Pro; duplicates are skipped', onSelect: () => void importFile() },
       { kind: 'item', id: 'export', label: 'Export to JSON…', icon: <Download />, hint: 'Writes every clip in the clear to a file you choose', onSelect: () => void exportAll() },
       { kind: 'sep' },
-      { kind: 'item', id: 'settings', label: 'Capture settings…', icon: <SlidersHorizontal />, hint: 'Blocked apps and sites, secrets, images, retention', onSelect: () => { setSettingsOpen('capture'); setSelected(null); setEditing(null) } },
+      { kind: 'item', id: 'settings', label: 'Capture settings…', icon: <SlidersHorizontal />, hint: 'Blocked apps and sites, keys, images, retention', onSelect: () => { setSettingsOpen('capture'); setSelected(null); setEditing(null) } },
       { kind: 'sep' },
       { kind: 'item', id: 'clear', label: 'Clear history…', icon: <Trash2 />, hint: 'Favorites and grouped clips stay', onSelect: () => setConfirm('clear') },
       { kind: 'item', id: 'clear-all', label: 'Clear everything…', icon: <Trash2 />, onSelect: () => setConfirm('clear-all') }
     ])
   }
 
-  // ---- sidebar ----
-  const navRow = (id: string, label: string, icon: ReactNode, count: number, extra: { kind?: 'group'; testId?: string; hint?: string } = {}) => {
-    const active = extra.kind === 'group' ? group === id : id.startsWith('src:') ? source === id.slice(4) : group === id && !id.startsWith('src:')
-    return (
-      <div
-        key={id}
-        className={`clip-nav-row ${active ? 'is-active' : ''}`}
-        onContextMenu={extra.kind === 'group' ? (e) => openMenu(e, { kind: 'group', name: id }) : undefined}
-      >
-        <button
-          className="clip-nav"
-          title={extra.hint}
-          onClick={() => {
-            if (id.startsWith('src:')) setSource(source === id.slice(4) ? '' : id.slice(4))
-            else setGroup(id)
-            setPicked(new Set())
-          }}
-          onKeyDown={extra.kind === 'group' ? (e) => { if (e.key === 'F2') { e.preventDefault(); setRenaming({ name: id, value: id }) } } : undefined}
-          data-testid={extra.testId ?? tid('clip-group', id)}
-        >
-          <span className="clip-nav-ic">{icon}</span>
-          <span className="clip-nav-name">{label}</span>
-          <span className="notes-gcount">{count || ''}</span>
-        </button>
-      </div>
-    )
-  }
-  const sectionHead = (id: string, label: string) => {
-    const open = openSections.includes(id)
-    return (
-      <button className={`clip-section ${open ? 'is-open' : ''}`} onClick={() => setSectionOpen(id, !open)} aria-expanded={open} data-testid={tid('clip-section', id)}>
-        <ChevronRight className="notes-chev" strokeWidth={2} />
-        <span>{label}</span>
-      </button>
-    )
-  }
-  const groupRow = (g: string) => renaming && renaming.name === g ? renameInput() : navRow(g, g, <span className="clip-dot" style={{ background: `hsl(${groupHue(g)} 60% 62%)` }} />, counts.group(g), { kind: 'group', hint: groupInfo[g]?.description })
+  // ---- sidebar: the shared left column; the rename field takes a group's row ----
   const renameInput = () => renaming && (
     <div className="notes-rename" key="rename">
       <Layers className="notes-rename-ic" strokeWidth={2} />
@@ -637,30 +566,12 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
     <div className="notes-toolbar" data-testid="clip-toolbar">
       <button className="notes-tool" onClick={() => setAdding('')} title="Add a text clip" data-testid="clip-tool:add"><Plus strokeWidth={2} /></button>
       <button className="notes-tool" onClick={() => setRenaming({ name: null, value: '' })} title="New group" data-testid="clip-tool:new-group"><FolderPlus strokeWidth={2} /></button>
+      <span className="notes-toolbar-grow" />
+      {/* Paused is the amber More (its Pause capture ▸ resumes), since the pause button moved into it. */}
       <button
         className={`notes-tool ${paused ? 'is-warn' : ''}`}
-        onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ kind: 'pause', x: r.left, y: r.bottom + 4 }) }}
-        title={paused ? 'Capture is paused — click to resume or extend' : 'Pause capture'}
-        aria-pressed={paused}
-        data-testid="clip-tool:pause"
-      >
-        {paused ? <Play strokeWidth={2} /> : <Pause strokeWidth={2} />}
-      </button>
-      <button
-        className={`notes-tool ${selecting ? 'is-on' : ''}`}
-        onClick={toggleSelect}
-        title={selecting ? 'Leave select mode (Esc)' : 'Select rows — a click picks a row (Shift+S)'}
-        aria-pressed={selecting}
-        data-testid="clip-tool:select"
-      >
-        <ListChecks strokeWidth={2} />
-      </button>
-      <span className="notes-toolbar-where" data-testid="clip-count">{paused ? 'paused' : `${clips.length} clip${clips.length === 1 ? '' : 's'}`}</span>
-      <button className="notes-tool" onClick={() => { setOpenSections([]); writeOpen([]) }} title="Collapse sections" data-testid="clip-tool:collapse"><ChevronsDownUp strokeWidth={2} /></button>
-      <button
-        className="notes-tool"
         onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ kind: 'root', x: r.left, y: r.bottom + 4 }) }}
-        title="More: add, import, export, capture settings, clear"
+        title={paused ? 'Capture is paused — More: resume, select, collapse, import, export, settings, clear' : 'More: select, pause, collapse, import, export, capture settings, clear'}
         data-testid="clip-tool:more"
       >
         <MoreHorizontal strokeWidth={2} />
@@ -755,6 +666,10 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
   }
 
   // ---- detail card ----
+  const shownBody = selectedClip && body && body.id === selectedClip.id ? body : null
+  const hasKeys = !!shownBody && maskedBody !== shownBody.text
+  const showKeys = hasKeys && revealed === selectedClip?.id
+  const detailText = shownBody ? (showKeys ? shownBody.text : maskedBody) : ''
   const detail = selectedClip && (
     <div className="clip-detail" data-testid="clip-detail">
       <div className="clip-detail-head">
@@ -764,6 +679,17 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
           {[sourceLabel(selectedClip.source), body && selectedClip.kind === 'text' ? `${body.text.length.toLocaleString()} chars` : sizeLabel(selectedClip.bytes), selectedClip.copies > 1 ? `copied ${selectedClip.copies}×` : null, selectedClip.edited ? 'edited' : null, selectedClip.merged ? 'merged' : null].filter(Boolean).join(' · ')}
         </span>
         <span className="clip-detail-actions">
+          {hasKeys && (
+            <button
+              className={`iconbtn iconbtn--sm ${showKeys ? 'is-on' : ''}`}
+              title={showKeys ? 'Mask the keys again' : 'Show the keys in full'}
+              aria-pressed={showKeys}
+              onClick={() => setRevealed(showKeys ? null : selectedClip.id)}
+              data-testid="clip-detail:reveal"
+            >
+              {showKeys ? <EyeOff className="gear gear--sm" strokeWidth={2} /> : <Eye className="gear gear--sm" strokeWidth={2} />}
+            </button>
+          )}
           <button className="iconbtn iconbtn--sm" title="Edit…" onClick={() => openEdit(selectedClip.id)} data-testid="clip-detail:edit"><SquarePen className="gear gear--sm" strokeWidth={2} /></button>
           {selectedClip.kind !== 'image' && <button className="iconbtn iconbtn--sm" title={focusedTerminal ? `Paste into ${focusedTerminal.label} (Ctrl+↵)` : 'Paste into a terminal pane (click one first)'} disabled={!focusedTerminal} onClick={() => void pasteInto(selectedClip.id, focusedTerminal)} data-testid="clip-detail:paste"><ClipboardPaste className="gear gear--sm" strokeWidth={2} /></button>}
           <button className="iconbtn iconbtn--sm" title="Copy (↵)" onClick={() => void copy(selectedClip.id)} data-testid="clip-detail:copy"><Copy className="gear gear--sm" strokeWidth={2} /></button>
@@ -779,10 +705,10 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
       )}
       {selectedClip.kind === 'image' ? (
         imageUrl?.id === selectedClip.id ? <img className="clip-detail-img" src={imageUrl.url} alt={selectedClip.title} draggable={false} /> : <div className="clip-detail-text">Loading image…</div>
-      ) : body?.id === selectedClip.id ? (
-        looksLikeCode(body.text) && selectedClip.kind === 'text'
-          ? <pre className="clip-code" data-testid="clip-code">{body.text.split('\n').map((line, i) => <span key={i} className="clip-code-line"><span className="clip-ln">{i + 1}</span>{line}{'\n'}</span>)}</pre>
-          : <pre className="clip-detail-text" data-testid="clip-text">{body.text}</pre>
+      ) : shownBody ? (
+        looksLikeCode(detailText) && selectedClip.kind === 'text'
+          ? <pre className="clip-code" data-testid="clip-code">{detailText.split('\n').map((line, i) => <span key={i} className="clip-code-line"><span className="clip-ln">{i + 1}</span>{line}{'\n'}</span>)}</pre>
+          : <pre className="clip-detail-text" data-testid="clip-text">{detailText}</pre>
       ) : <div className="clip-detail-text">Loading…</div>}
     </div>
   )
@@ -809,21 +735,25 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
       <div className="notes-side">
         {toolbar}
         {confirmRow}
-        <div className="notes-list clip-nav-list" onContextMenu={(e) => openMenu(e, { kind: 'root' })} data-testid="clip-nav">
-          {navRow('all', 'All', <Clipboard strokeWidth={2} />, counts.all)}
-          {navRow('favorites', 'Favorites', <Star strokeWidth={2} />, counts.favorites)}
-          {navRow('images', 'Images', <Image strokeWidth={2} />, counts.images)}
-          {sectionHead('groups', 'Groups')}
-          <Collapse open={openSections.includes('groups')}>
-            {groups.map(groupRow)}
-            {renaming?.name === null && renameInput()}
-            {!groups.length && renaming?.name !== null && <div className="notes-folder-empty">No groups — right-click a clip, or +</div>}
-          </Collapse>
-          {sources.length > 0 && sectionHead('sources', 'Sources')}
-          <Collapse open={openSections.includes('sources')}>
-            {sources.map((s) => navRow(`src:${s.id}`, s.label, s.icon, s.count, { testId: tid('clip-source', s.id) }))}
-          </Collapse>
-        </div>
+        <ClipNav
+          counts={counts}
+          groups={groups}
+          groupInfo={groupInfo}
+          sources={sources}
+          group={group}
+          source={source}
+          onGroup={(id) => { setGroup(id); setPicked(new Set()) }}
+          onSource={(id) => { setSource(source === id ? '' : id); setPicked(new Set()) }}
+          open={nav.open}
+          onSection={nav.toggle}
+          onGroupMenu={(e, name) => openMenu(e, { kind: 'group', name })}
+          onGroupKey={(e, name) => { if (e.key === 'F2') { e.preventDefault(); setRenaming({ name, value: name }) } }}
+          onRootMenu={(e) => openMenu(e, { kind: 'root' })}
+          renaming={renaming}
+          renameField={renameInput()}
+          emptyHint="No groups — right-click a clip, or +"
+          testIds={{ list: 'clip-nav', row: 'clip-group', source: 'clip-source', section: 'clip-section' }}
+        />
         {(listing.mode === 'poll' || listing.unprotected || notice) && (
           <div className={`notes-notice ${notice ? '' : 'is-quiet'}`} role="status" data-testid="clip-notice">
             {notice ?? (listing.unprotected ? 'Encryption is unavailable on this account — clips are stored in plain text.' : 'Capture runs on a 500 ms poll here, so a copy lands a moment later.')}
@@ -939,7 +869,7 @@ export const ClipboardPane = forwardRef<ClipboardPaneHandle, Props>(function Cli
                     groups={groups}
                     groupInfo={groupInfo}
                     count={counts.group}
-                    dot={(g) => `hsl(${groupHue(g)} 60% 62%)`}
+                    dot={groupDot}
                     manage={window.watch.manageClipGroup}
                     request={groupRequest}
                     onPick={(g) => { setGroup(g); setSource(''); setPicked(new Set()) }}

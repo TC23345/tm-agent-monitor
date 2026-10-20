@@ -50,7 +50,7 @@ A session waiting on you puts a red badge on the tray icon, an overlay on the ta
 
 ### Clipboard and Chrome
 
-Every copy is captured as it happens, deduplicated, and sealed with Windows' `safeStorage`. Password managers, excluded formats, blocklisted apps and sites, and likely secrets are skipped. **Ctrl+Alt+V** opens the picker at the cursor, with search, chips for favorites, images, groups and sources, a gear for settings, and resizable columns. A clip can carry a note, a text-expansion code (`;sig`) and its own global keybind. The unpacked extension in `extension/` adds Chrome's side: the page a copy came from, *Paste from clipboard ▸* in the right-click menu, *Save to favorites*, and text expansion in page fields. It talks to the app over native messaging, never the network (`node hooks/install.mjs --host`).
+Every copy is captured as it happens, deduplicated, and sealed with Windows' `safeStorage`. Password managers, excluded formats, and blocklisted apps and sites are skipped. API keys and tokens are kept and copy whole, but are shown masked everywhere (`sk-ant-api03-********Xy9Q`), to agents too. **Ctrl+Alt+V** opens the TaylorMade Clipboard picker at the cursor, with the pane's left column of views, groups and sources, a search, chips for favorites, images and sources, a gear for settings, and resizable columns. A clip can carry a note, a text-expansion code (`;sig`) and its own global keybind. The unpacked extension in `extension/` adds Chrome's side: the page a copy came from, *Paste from clipboard ▸* in the right-click menu, *Save to favorites*, and text expansion in page fields. It talks to the app over native messaging, never the network (`node hooks/install.mjs --host`).
 
 ## Automation
 

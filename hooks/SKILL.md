@@ -69,7 +69,7 @@ with where it came from (the **Clipboard** pane). It is a resource for you:
 
 - **Read what the user just copied** instead of asking them to paste it:
   `GET /v1/clips?limit=1` is the last copy (its `preview`), and
-  `GET /v1/clips/:id` the full `text`. "Here's the error, look at this"
+  `GET /v1/clips/:id` the full `text` (keys masked, below). "Here's the error, look at this"
   usually means the error is on the clipboard already.
 - **Leave the user something to paste**: `POST /v1/clips {text, title?}` puts
   it on their clipboard *and* in history, filed as an agent's. Say so in your
@@ -82,8 +82,14 @@ with where it came from (the **Clipboard** pane). It is a resource for you:
   or were asked to drive; with no `terminalId` it only copies. `tm clip paste`
   uses `TM_TERMINAL_ID` unless you pass `--terminal`, so from a chat pane it
   fails — pass the terminal you mean.
-- Password-manager copies and anything that looks like a secret are never in
-  history; do not try to route secrets through it.
+- **Keys reach you masked.** API keys, tokens and passwords are kept in history,
+  but every route shows them the way the user's screen does: a key is its
+  prefix, `********` and its last 4 (`sk-ant-api03-********Xy9Q`), a password
+  is `********`. That is deliberate, because what you read goes into your
+  conversation. Do not try to unmask one. To put a key where it is needed,
+  `tm clip paste <id> --terminal <id>` types it whole into a terminal, and
+  `tm clip copy <id>` puts it on the clipboard, without you seeing it.
+  Password-manager copies are never in history.
 - **Snippets are notes and coded clips**: every top-level
   `Notes\Snippets\*.md` and `Notes\Prompts\*.md` is a snippet, with or
   without a `shortcut: ;sig` first line (the line is only the expander
@@ -103,7 +109,7 @@ with where it came from (the **Clipboard** pane). It is a resource for you:
 | Route | Purpose |
 |---|---|
 | `GET /v1/clips?q=&group=&limit=` | Clipboard history, newest first: `{clips: [{id, kind, title, preview, source, copiedAt, favorite, groups, bytes, …}]}`. `q` is a fuzzy search, `group` a view (`all\|favorites\|images\|<name>`), `limit` 1–200 (default 20). |
-| `GET /v1/clips/:id` | One clip's full `text` (a file list is paths, one per line; an image has none). |
+| `GET /v1/clips/:id` | One clip's full `text`, keys masked (a file list is paths, one per line; an image has none). |
 | `POST /v1/clips` `{text, title?, groups?, favorite?, terminalId?}` | Put text on the user's clipboard and in history, attributed to the session in `terminalId`. `groups` names that do not exist yet are dropped. Returns `{id}` — 201. |
 | `POST /v1/clips/:id/paste` `{terminalId?}` | Type the clip into that terminal (raw, no Enter). Without `terminalId` it copies only. |
 | `GET /v1/snippets` | `{snippets: [{name, shortcut?, text}]}`: notes from `Notes\Snippets` and `Notes\Prompts` (named `Snippets/<name>`), then every clip with an expansion code (named by its title). |

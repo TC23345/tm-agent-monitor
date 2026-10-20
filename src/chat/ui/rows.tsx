@@ -10,11 +10,11 @@
 // delta re-renders only its own row.
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
-  Check, ChevronDown, ChevronRight, CircleDot, Circle, CircleCheck, Copy, CornerUpLeft, FileCode, Image as ImageIcon, MessageCircleQuestion, MoveDownRight, Square, X
+  Check, ChevronDown, ChevronRight, CircleDot, Circle, CircleCheck, CornerUpLeft, FileCode, Image as ImageIcon, MessageCircleQuestion, MoveDownRight, Square, X
 } from 'lucide-react'
 import { DiffView } from './DiffView'
 import { changeLines, changeSummary, countChanges, splitLines } from '../shared/diff.mjs'
-import { activitySummary, clockTime, fmtTokens, formatElapsed, relPath } from '../shared/present.mjs'
+import { activitySummary, clockTime, fmtTokens, formatElapsed, previewMarkdown, relPath, streamParts } from '../shared/present.mjs'
 import type {
   ApprovalChoice, AttachmentSummary, ChatItem, ChatItemApproval, ChatItemAssistant, ChatItemQuestion, ChatItemSystem, ChatItemThinking, ChatItemTool, ChatItemTurn, ChatItemUser, Provider
 } from '../shared/chatModel.mjs'
@@ -45,6 +45,8 @@ export interface RowActions {
   pendingPlan?: string | null
   onImplementPlan?: () => void
   onKeepPlanning?: () => void
+  /** A wide pane's agents panel: an Agent row that has a card there is one line, and a click opens the card. */
+  openAgent?: { has: (rowId: string) => boolean; open: (rowId: string) => void }
 }
 
 type Tone = 'ok' | 'bad' | 'wait' | 'run' | 'idle'
@@ -56,15 +58,13 @@ interface RowProps {
   nested?: ChatItem[]
   /** A plan approval's comments, made on a selection of the plan. */
   comments?: PlanComment[]
-  /** The last reply of a finished turn: its copy button stays visible. */
-  final?: boolean
   /** Under a prompt: the rewind confirmation it opened. */
   below?: ReactNode
   /** A Codex turn footer whose steps fold above it: the fold says how long it took. */
   folded?: boolean
 }
 
-export const Row = memo(function Row({ item, actions, nested, comments, final, below, folded }: RowProps) {
+export const Row = memo(function Row({ item, actions, nested, comments, below, folded }: RowProps) {
   switch (item.kind) {
     case 'user':
       return <UserRow item={item} actions={actions} below={below} />
@@ -74,18 +74,13 @@ export const Row = memo(function Row({ item, actions, nested, comments, final, b
       if (item.phase === 'commentary') {
         return (
           <Timeline tone="idle" testid="chat-row:commentary" className={`is-assistant is-commentary ${item.streaming ? 'is-streaming' : ''}`}>
-            <div className="chat-text">{item.streaming ? plain(item.text) : actions.renderText(item.text)}</div>
+            <ReplyText text={item.text} streaming={!!item.streaming} render={actions.renderText} />
           </Timeline>
         )
       }
       return (
-        <Timeline tone="idle" testid="chat-row:assistant" className={`is-assistant ${item.streaming ? 'is-streaming' : ''} ${final ? 'is-final' : ''}`} stamp={item.streaming ? undefined : item.at}>
-          <div className="chat-text">{item.streaming ? plain(item.text) : actions.renderText(item.text)}</div>
-          {item.streaming ? null : (
-            <div className="chat-reply-actions" data-testid="chat-reply-actions">
-              <CopyButton label="Copy response" onCopy={() => actions.copyText(item.text)} testid="chat-copy-response" />
-            </div>
-          )}
+        <Timeline tone="idle" testid="chat-row:assistant" className={`is-assistant ${item.streaming ? 'is-streaming' : ''}`} stamp={item.streaming ? undefined : item.at}>
+          <ReplyText text={item.text} streaming={!!item.streaming} render={actions.renderText} />
         </Timeline>
       )
     case 'thinking':
@@ -104,9 +99,9 @@ export const Row = memo(function Row({ item, actions, nested, comments, final, b
 })
 
 /** One step on the rail: the dot's tone, an optional time stamp, the content. */
-function Timeline({ tone, testid, className = '', stamp, children }: { tone: Tone; testid: string; className?: string; stamp?: number; children: ReactNode }) {
+function Timeline({ tone, testid, className = '', stamp, itemId, children }: { tone: Tone; testid: string; className?: string; stamp?: number; itemId?: string; children: ReactNode }) {
   return (
-    <div className={`chat-row is-tl tone-${tone} ${stamp !== undefined ? 'has-stamp' : ''} ${className}`} data-testid={testid}>
+    <div className={`chat-row is-tl tone-${tone} ${stamp !== undefined ? 'has-stamp' : ''} ${className}`} data-testid={testid} data-item={itemId}>
       {stamp !== undefined ? <Stamp at={stamp} /> : null}
       {children}
     </div>
@@ -117,23 +112,6 @@ function Stamp({ at }: { at: number }) {
   return <time className="chat-stamp" dateTime={new Date(at).toISOString()} title={new Date(at).toLocaleString()}>{clockTime(at)}</time>
 }
 
-function CopyButton({ label, onCopy, testid }: { label: string; onCopy: () => void; testid: string }) {
-  const [copied, setCopied] = useState(false)
-  return (
-    <button
-      className="chat-mini" aria-label={label} title={copied ? 'Copied' : label}
-      onClick={(e) => {
-        e.stopPropagation()
-        onCopy()
-        setCopied(true)
-        window.setTimeout(() => setCopied(false), 1200)
-      }}
-      data-testid={testid}
-    >
-      {copied ? <Check className="chat-ic" /> : <Copy className="chat-ic" />}
-    </button>
-  )
-}
 
 /** True when the click ended a text selection rather than meaning a click. */
 function selecting(): boolean {
@@ -304,19 +282,25 @@ export function ToolRow({ item, actions, nested }: { item: ChatItemTool; actions
   const detailNode = detail ? (item.path && (view === 'read' || view === 'edit' || view === 'write') ? <PathLink path={item.path} label={view === 'read' ? detail : relPath(detail, actions.cwd)} actions={actions} /> : detail) : null
   // Only a task can move: the row has a task id once the CLI started it (not while it waits for approval).
   const canBackground = actions.onBackground && running && !item.background && !!item.taskId && (view === 'command' || view === 'agent') && actions.provider === 'claude'
+  // On a wide pane an agent's card holds its steps: the row is one line that opens it.
+  const toCard = view === 'agent' && !!actions.openAgent?.has(item.id)
+  const stepCount = toCard ? (nested ?? []).filter((x) => x.kind === 'tool').length : 0
   const head = (
     <>
       <span className="chat-tool-name">{label}</span>
       {detailNode ? <span className={`chat-tool-detail ${item.detailMono ? 'is-mono' : ''}`} title={detail}>{detailNode}</span> : null}
       {item.elapsedMs !== undefined && item.elapsedMs >= 1000 && !running ? <span className="chat-tool-elapsed">in {formatElapsed(item.elapsedMs)}</span> : null}
       {item.background ? <span className="chat-tag">In background</span> : null}
-      {toggles ? (open ? <ChevronDown className="chat-ic chat-step-chev" /> : <ChevronRight className="chat-ic chat-step-chev" />) : null}
+      {toCard && stepCount ? <span className="chat-tool-elapsed">{stepCount} step{stepCount === 1 ? '' : 's'}</span> : null}
+      {toCard ? <ChevronRight className="chat-ic chat-step-chev" /> : toggles ? (open ? <ChevronDown className="chat-ic chat-step-chev" /> : <ChevronRight className="chat-ic chat-step-chev" />) : null}
     </>
   )
   return (
-    <Timeline tone={toolTone(item)} testid="chat-row:tool" className={`is-tool is-${view} is-${item.status}`}>
+    <Timeline tone={toolTone(item)} testid="chat-row:tool" className={`is-tool is-${view} is-${item.status}`} itemId={item.id}>
       <div className="chat-step-line">
-        {toggles
+        {toCard
+          ? <button className="chat-step-head is-toggle" onClick={() => { if (!selecting()) actions.openAgent?.open(item.id) }} title={`${item.title} — open in the agents panel`} data-testid="chat-open-agent">{head}</button>
+          : toggles
           ? <button className="chat-step-head is-toggle" onClick={() => { if (!selecting()) setOpen((v) => !v) }} aria-expanded={open} title={item.title}>{head}</button>
           : <div className="chat-step-head" title={item.title}>{head}</div>}
         {canBackground || (item.background && item.taskId && running && actions.onStopTask) ? (
@@ -328,7 +312,7 @@ export function ToolRow({ item, actions, nested }: { item: ChatItemTool; actions
       </div>
       {item.status === 'declined'
         ? <div className="chat-tool-summary">Declined{item.output ? <> · <span className="chat-reason">Reason: {item.output}</span></> : null}</div>
-        : <ToolBody item={item} view={view} open={open} actions={actions} nested={nested} />}
+        : toCard ? null : <ToolBody item={item} view={view} open={open} actions={actions} nested={nested} />}
     </Timeline>
   )
 }
@@ -338,9 +322,11 @@ function ToolBody({ item, view, open, actions, nested }: { item: ChatItemTool; v
   const running = item.status === 'running'
   switch (view) {
     case 'command':
+      // The model is still writing the command (its input streams in with the block): nothing runs yet.
+      if (running && !item.input) return <IoGrid><IoRow label="IN" muted="…" /></IoGrid>
       return (
         <IoGrid>
-          <IoRow label="IN" text={item.input ?? ''} kind="in" onCopy={item.input ? () => actions.copyText(item.input ?? '') : undefined} />
+          <IoRow label="IN" text={item.input ?? ''} kind="in" />
           {item.output ? <IoRow label="OUT" text={item.output} kind="out" /> : running ? <IoRow label="OUT" muted={item.background ? 'Running in the background…' : 'Running…'} /> : null}
         </IoGrid>
       )
@@ -439,12 +425,12 @@ function AgentBody({ item, open, actions, nested }: { item: ChatItemTool; open: 
   )
 }
 
-function IoGrid({ children }: { children: ReactNode }) {
+export function IoGrid({ children }: { children: ReactNode }) {
   return <div className="chat-io" data-testid="chat-io">{children}</div>
 }
 
 /** One IN / OUT row: clipped to 60 px with a fade, the rest one click away (the extension opens it in an editor tab). */
-function IoRow({ label, text, muted, kind, onCopy }: { label?: string; text?: string; muted?: string; kind?: 'in' | 'out'; onCopy?: () => void }) {
+export function IoRow({ label, text, muted, kind }: { label?: string; text?: string; muted?: string; kind?: 'in' | 'out' }) {
   const box = useRef<HTMLDivElement | null>(null)
   const [open, setOpen] = useState(false)
   const [clipped, setClipped] = useState(false)
@@ -463,7 +449,6 @@ function IoRow({ label, text, muted, kind, onCopy }: { label?: string; text?: st
       >
         {muted ? <span className="chat-io-muted">{muted}</span> : <pre>{text}</pre>}
       </div>
-      {onCopy ? <span className="chat-io-copy"><CopyButton label="Copy" onCopy={onCopy} testid="chat-io-copy" /></span> : null}
     </div>
   )
 }
@@ -570,7 +555,7 @@ function ToolApproval({ item, actions }: { item: ChatItemApproval; actions: RowA
                   <span className="chat-option-key">{options.length + 1}</span><span className="chat-option-label">{denyLabel}</span>
                 </button>
               ) : (
-                <div className="chat-option is-deny">
+                <div className="chat-option has-field">
                   <button className="chat-option-btn" onClick={deny} data-testid="chat-approve:deny">
                     <span className="chat-option-key">{options.length + 1}</span><span className="chat-option-label">{denyLabel}</span>
                   </button>
@@ -637,7 +622,7 @@ function PlanApproval({ item, actions, comments }: { item: ChatItemApproval; act
             <div className="chat-options">
               <button className={`chat-option ${comments.length ? '' : 'is-primary'}`} onClick={() => actions.onAnswer(item.id, 'plan-auto')} data-testid="chat-plan:auto"><span className="chat-option-key">1</span><span className="chat-option-label">Yes, and auto-accept edits</span></button>
               <button className="chat-option" onClick={() => actions.onAnswer(item.id, 'plan-manual')} data-testid="chat-plan:manual"><span className="chat-option-key">2</span><span className="chat-option-label">Yes, and manually approve edits</span></button>
-              <div className={`chat-option is-deny ${comments.length ? 'is-primary' : ''}`}>
+              <div className={`chat-option has-field ${comments.length ? 'is-primary' : ''}`}>
                 <button className="chat-option-btn" onClick={keepPlanning} data-testid="chat-plan:keep"><span className="chat-option-key">3</span><span className="chat-option-label">No, keep planning</span></button>
                 <input
                   className="chat-option-input" placeholder="Tell Claude what to change" value={feedback} aria-label="Tell Claude what to change"
@@ -654,18 +639,33 @@ function PlanApproval({ item, actions, comments }: { item: ChatItemApproval; act
   )
 }
 
-/** One or more questions: option buttons (single or multi) with a Markdown preview for the focused one, an "Other" field, Submit and Dismiss. */
+/**
+ * One or more questions, in the approval card's vocabulary: full-width
+ * numbered options (one answer, or several for a multi-select question), the
+ * focused option's preview beside them (below on a narrow pane), *Other* as
+ * the last option with its field, then Submit and Dismiss.
+ */
 function QuestionRow({ item, actions }: { item: ChatItemQuestion; actions: RowActions }) {
+  const card = useRef<HTMLDivElement | null>(null)
   const [picked, setPicked] = useState<Record<string, string[]>>({})
   const [other, setOther] = useState<Record<string, string>>({})
   const [focus, setFocus] = useState<Record<string, string>>({})
   const done = !!item.answers || !!item.cancelled
-  const toggle = (qid: string, label: string, multi: boolean) =>
+  const byId = (qid: string) => item.questions.find((q) => q.id === qid)
+  const toggle = (qid: string, label: string, multi: boolean) => {
     setPicked((p) => {
       const cur = p[qid] ?? []
       if (multi) return { ...p, [qid]: cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label] }
       return { ...p, [qid]: cur[0] === label ? [] : [label] }
     })
+    // One answer: an option takes the place of what was typed under Other.
+    if (!multi) setOther((o) => (o[qid] ? { ...o, [qid]: '' } : o))
+  }
+  const type = (qid: string, text: string) => {
+    setOther((o) => ({ ...o, [qid]: text }))
+    // …and typed text takes the place of a picked option.
+    if (text.trim() && !byId(qid)?.multiSelect) setPicked((p) => (p[qid]?.length ? { ...p, [qid]: [] } : p))
+  }
   const answers = (): Record<string, string[]> => {
     const out: Record<string, string[]> = {}
     for (const q of item.questions) {
@@ -676,73 +676,90 @@ function QuestionRow({ item, actions }: { item: ChatItemQuestion; actions: RowAc
     }
     return out
   }
-  const complete = item.questions.every((q) => (picked[q.id]?.length ?? 0) > 0 || (other[q.id] ?? '').trim())
-  // With one question, its options answer to 1–9 as well.
+  const answered = item.questions.filter((q) => (picked[q.id]?.length ?? 0) > 0 || (other[q.id] ?? '').trim()).length
+  const complete = answered === item.questions.length
+  // With one question, its options answer to 1–9 as well, and the number after them goes to Other.
   const first = item.questions.length === 1 ? item.questions[0] : undefined
   const onKey = numberKeys((n) => {
     if (done || !first?.options) return
     const o = first.options[n - 1]
     if (o) toggle(first.id, o.label, first.multiSelect)
+    else if (n === first.options.length + 1 && first.allowOther) card.current?.querySelector<HTMLInputElement>(`[data-other="${first.id}"]`)?.focus()
   })
+  const field = (q: ChatItemQuestion['questions'][number], className: string) => (
+    <input
+      className={className}
+      type={q.secret ? 'password' : 'text'}
+      placeholder={q.options ? 'Type your answer…' : 'Your answer'}
+      aria-label={q.options ? 'Other' : q.text}
+      value={other[q.id] ?? ''}
+      onChange={(e) => type(q.id, e.target.value)}
+      onKeyDown={(e) => { if (e.key === 'Enter' && complete) { e.preventDefault(); actions.onAnswerQuestion(item.id, answers()) } }}
+      data-other={q.id}
+      data-testid={`chat-other:${q.id}`}
+    />
+  )
   return (
     <Timeline tone={done ? 'idle' : 'wait'} testid="chat-row:question" className={`is-question ${done ? 'is-decided' : 'is-waiting'}`}>
-      <div className="chat-card" tabIndex={-1} onKeyDown={onKey}>
+      <div className="chat-card" ref={card} tabIndex={-1} onKeyDown={onKey}>
         <div className="chat-approval-title"><MessageCircleQuestion className="chat-ic" aria-hidden /> {item.title}</div>
         {item.detail ? <pre className="chat-pre">{item.detail}</pre> : null}
         {item.questions.map((q) => {
-          const shown = q.options?.find((o) => o.label === (focus[q.id] ?? picked[q.id]?.[0]))
+          const options = q.options ?? []
+          const previews = options.some((o) => o.preview)
+          // The preview follows the pointer and the keys; until then it is the picked option's, else the first one's.
+          const shown = options.find((o) => o.label === (focus[q.id] ?? picked[q.id]?.[0])) ?? options[0]
           return (
             <div key={q.id} className="chat-q">
               {q.header ? <div className="chat-q-header">{q.header}</div> : null}
-              <div className="chat-q-text">{q.text}</div>
+              <div className="chat-q-text">{q.text}{!done && q.multiSelect ? <span className="chat-approval-hint">Select all that apply</span> : null}</div>
               {done ? (
                 <div className="chat-approval-decided">{item.cancelled ? 'Dismissed' : (item.answers?.[q.id] ?? []).join(', ') || '—'}</div>
-              ) : (
-                <>
-                  {q.options ? (
-                    <div className="chat-q-options">
-                      {q.options.map((o, i) => (
+              ) : q.options ? (
+                <div className={`chat-q-body ${previews ? 'has-preview' : ''}`}>
+                  <div className="chat-options">
+                    {options.map((o, i) => {
+                      const on = (picked[q.id] ?? []).includes(o.label)
+                      return (
                         <button
                           key={o.label}
-                          className={`chat-btn is-option ${(picked[q.id] ?? []).includes(o.label) ? 'is-on' : ''}`}
-                          title={o.description}
-                          aria-pressed={(picked[q.id] ?? []).includes(o.label)}
+                          className={`chat-option ${on ? 'is-on' : ''} ${previews && shown === o ? 'is-shown' : ''}`}
+                          aria-pressed={on}
                           onClick={() => toggle(q.id, o.label, q.multiSelect)}
                           onMouseEnter={() => setFocus((f) => ({ ...f, [q.id]: o.label }))}
                           onFocus={() => setFocus((f) => ({ ...f, [q.id]: o.label }))}
                           data-testid={`chat-option:${o.label}`}
                         >
-                          <span className="chat-q-label">{first === q ? <span className="chat-option-key">{i + 1}</span> : null}{o.label}</span>
-                          {o.description ? <span className="chat-q-desc">{o.description}</span> : null}
+                          {first === q ? <span className="chat-option-key">{i + 1}</span> : null}
+                          <span className="chat-option-label">{o.label}{o.description ? <span className="chat-option-hint">{o.description}</span> : null}</span>
+                          {on ? <Check className="chat-ic chat-option-check" aria-hidden /> : null}
                         </button>
-                      ))}
-                    </div>
-                  ) : null}
-                  {q.options?.some((o) => o.preview) ? (
+                      )
+                    })}
+                    {q.allowOther ? (
+                      <div className={`chat-option has-field ${(other[q.id] ?? '').trim() ? 'is-on' : ''}`}>
+                        <button className="chat-option-btn" tabIndex={-1} onClick={(e) => e.currentTarget.parentElement?.querySelector('input')?.focus()} data-testid={`chat-other-key:${q.id}`}>
+                          {first === q ? <span className="chat-option-key">{options.length + 1}</span> : null}<span className="chat-option-label">Other</span>
+                        </button>
+                        {field(q, 'chat-option-input')}
+                      </div>
+                    ) : null}
+                  </div>
+                  {previews ? (
                     <div className="chat-q-preview" data-testid="chat-question-preview">
-                      {shown?.preview ? <div className="chat-text">{actions.renderText(shown.preview)}</div> : <span className="chat-io-muted">No preview for this option</span>}
+                      {shown?.preview ? <div className="chat-text">{actions.renderText(previewMarkdown(shown.preview))}</div> : <span className="chat-io-muted">No preview for this option</span>}
                     </div>
                   ) : null}
-                  {q.options === null || q.allowOther ? (
-                    <input
-                      className="chat-ref-input"
-                      type={q.secret ? 'password' : 'text'}
-                      placeholder={q.options ? 'Other…' : 'Your answer'}
-                      value={other[q.id] ?? ''}
-                      onChange={(e) => setOther((o) => ({ ...o, [q.id]: e.target.value }))}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && complete) { e.preventDefault(); actions.onAnswerQuestion(item.id, answers()) } }}
-                      data-testid={`chat-other:${q.id}`}
-                    />
-                  ) : null}
-                </>
-              )}
+                </div>
+              ) : field(q, 'chat-q-answer')}
             </div>
           )
         })}
         {done ? null : (
           <div className="chat-approval-actions">
             <button className="chat-btn is-allow" disabled={!complete} onClick={() => actions.onAnswerQuestion(item.id, answers())} data-testid="chat-question:submit">Submit</button>
-            <button className="chat-btn" onClick={() => actions.onAnswerQuestion(item.id, null)} data-testid="chat-question:dismiss">Dismiss</button>
+            <button className="chat-btn is-quiet" onClick={() => actions.onAnswerQuestion(item.id, null)} data-testid="chat-question:dismiss">Dismiss</button>
+            {item.questions.length > 1 && !complete ? <span className="chat-approval-hint" data-testid="chat-question:progress">{answered} of {item.questions.length} answered</span> : null}
           </div>
         )}
       </div>
@@ -753,7 +770,7 @@ function QuestionRow({ item, actions }: { item: ChatItemQuestion; actions: RowAc
 /**
  * A system line: an interruption, a compaction (open it for its summary), a
  * slash command's output, a background task that finished, a usage limit,
- * a notice — and an error, with Copy error and Retry.
+ * a notice — and an error, with Retry when the turn can be retried (select its text to copy it).
  */
 function SystemRow({ item, actions }: { item: ChatItemSystem; actions: RowActions }) {
   // A /status row opens on its lines; anything else folds its detail away.
@@ -773,10 +790,9 @@ function SystemRow({ item, actions }: { item: ChatItemSystem; actions: RowAction
         <div className="chat-step-head"><span className="chat-system-text">{item.text}</span>{extra ? <span className="chat-system-extra">{extra}</span> : null}</div>
       )}
       {open && item.detail ? (item.variant === 'command' ? <IoGrid><IoRow text={item.detail} kind="out" /></IoGrid> : <div className="chat-system-detail">{plain(item.detail)}</div>) : null}
-      {item.level === 'error' ? (
+      {item.level === 'error' && actions.onRetry ? (
         <div className="chat-system-actions">
-          <button className="chat-textbtn" onClick={() => actions.copyText(item.text)} data-testid="chat-copy-error"><Copy className="chat-ic" aria-hidden /> Copy error</button>
-          {actions.onRetry ? <button className="chat-textbtn" onClick={actions.onRetry} data-testid="chat-retry">Retry</button> : null}
+          <button className="chat-textbtn" onClick={actions.onRetry} data-testid="chat-retry">Retry</button>
         </div>
       ) : null}
     </Timeline>
@@ -897,6 +913,39 @@ function PlanCard({ item, actions }: { item: ChatItemAssistant; actions: RowActi
         ) : null}
       </div>
     </Timeline>
+  )
+}
+
+/** How long after a reply finishes a table that only now settles still rolls in (a reply that ends on its table). */
+const REVEAL_TAIL_MS = 800
+
+/**
+ * A reply's text. Finished: Markdown. Streaming (`streamParts`): its finished
+ * blocks as Markdown, as the extension draws them, and the block being written
+ * as plain text so it streams; once that block reaches a table, only the
+ * table's header shows, shimmering, until the table is finished. Then the
+ * whole table settles into the Markdown above and its rows roll in under the
+ * header (`is-revealing`, which only a streaming reply carries, so a stored
+ * reply's tables are simply there). The settled Markdown keeps its place as
+ * the first child, so the reply ending re-renders it rather than mounting it
+ * again, and its tables do not roll in twice.
+ */
+function ReplyText({ text, streaming, render }: { text: string; streaming: boolean; render: (text: string) => ReactNode }) {
+  const parts = useMemo(() => (streaming ? streamParts(text) : null), [text, streaming])
+  const settled = parts ? parts.settled : text
+  const settledNode = useMemo(() => (settled ? render(settled) : null), [settled, render])
+  const [revealing, setRevealing] = useState(streaming)
+  useEffect(() => {
+    if (streaming) { setRevealing(true); return }
+    const timer = window.setTimeout(() => setRevealing(false), REVEAL_TAIL_MS)
+    return () => window.clearTimeout(timer)
+  }, [streaming])
+  return (
+    <div className={`chat-text ${revealing ? 'is-revealing' : ''}`}>
+      {settledNode}
+      {parts?.live ? plain(parts.live) : null}
+      {parts?.table ? <div className="chat-table-pending" aria-busy="true" data-testid="chat-table-pending">{render(parts.table)}</div> : null}
+    </div>
   )
 }
 

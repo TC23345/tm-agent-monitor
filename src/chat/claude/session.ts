@@ -168,9 +168,10 @@ const QUESTIONS: Record<string, string> = { WebFetch: 'Allow fetching this url?'
  * plan, then approve it (leaving plan mode for *Edit automatically* or
  * *Manual*) or keep planning.
  */
-export function approvalItem(id: string, toolName: string, input: Record<string, unknown>, ctx: { title?: string; decisionReason?: string; blockedPath?: string; suggestions?: PermissionUpdate[] }, at: number): ChatItemApproval {
+export function approvalItem(id: string, toolName: string, input: Record<string, unknown>, ctx: { title?: string; decisionReason?: string; blockedPath?: string; suggestions?: PermissionUpdate[]; toolUseID?: string }, at: number): ChatItemApproval {
   if (toolName === 'ExitPlanMode') {
-    return { kind: 'approval', id, title: 'Claude’s plan', toolName, variant: 'plan', plan: typeof input.plan === 'string' ? input.plan : '', choices: ['plan-auto', 'plan-manual', 'deny'], at }
+    // The card is the step: it names the tool row it stands for, which the pane then leaves out.
+    return { kind: 'approval', id, title: 'Claude’s plan', toolName, variant: 'plan', plan: typeof input.plan === 'string' ? input.plan : '', choices: ['plan-auto', 'plan-manual', 'deny'], at, ...(ctx.toolUseID ? { toolUseId: ctx.toolUseID } : {}) }
   }
   const view = toolView(toolName, input)
   const edits = view.view === 'edit' ? view.edits : view.view === 'write' ? [{ path: view.path ?? '', before: '', after: view.content ?? '' }] : undefined
@@ -323,7 +324,7 @@ export class ClaudeSession extends EventEmitter {
     if (toolName === 'AskUserQuestion') {
       const questions = questionsFromAskUserQuestion(input)
       if (questions.length) {
-        const item: ChatItemQuestion = { kind: 'question', id, title: 'Claude needs a decision', questions, at }
+        const item: ChatItemQuestion = { kind: 'question', id, title: 'Claude needs a decision', questions, at, ...(ctx.toolUseID ? { toolUseId: ctx.toolUseID } : {}) }
         const promise = new Promise<PermissionResult>((resolve) => {
           this.pending.set(id, { resolve, suggestions: [], questionInput: input })
           ctx.signal.addEventListener('abort', () => {

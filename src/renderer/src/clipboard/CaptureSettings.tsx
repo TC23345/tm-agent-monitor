@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AppWindow, Globe, Plus, SlidersHorizontal, X } from 'lucide-react'
 import type { ClipCaptureSettings } from '@shared/types'
-import { appLabel, blocklistEntry } from '@shared/clips.mjs'
+import { appLabel, blocklistEntry, SECRET_MASK } from '@shared/clips.mjs'
 import { tid } from '../testid'
 
 type BlockKind = 'app' | 'site'
@@ -45,8 +45,8 @@ function NumberField({ value, min, max, onCommit, testId, label }: { value: numb
 /**
  * The pane's capture settings (PRD §5.2), a card where the detail card sits:
  * one blocklist of apps (copies never captured) and sites (a copy the
- * extension traces to that page — or a subdomain — is dropped), the secret
- * heuristics, image capture, and retention. Every change goes straight to
+ * extension traces to that page — or a subdomain — is dropped), how keys are
+ * shown, image capture, and retention. Every change goes straight to
  * `clips:settings`; the listing that comes back through `clips:changed` is
  * what the card shows, so it never disagrees with the store.
  */
@@ -121,9 +121,9 @@ export function CaptureSettings({ settings, onClose }: { settings: ClipCaptureSe
           <button className="clip-confirm-yes clip-block-go" onClick={add} disabled={!draft.trim()} data-testid="clip-block-go"><Plus strokeWidth={2} />Block</button>
           {problem && <span className="clip-block-problem" role="alert">{problem}</span>}
         </div>
-        <div className="clip-settings-row">
-          <span className="clip-settings-label">Skip secrets<span className="shint">API keys, tokens, PEM blocks and KEY=value lines are never captured</span></span>
-          <Toggle on={settings.redactSecrets} onClick={() => patch({ redactSecrets: !settings.redactSecrets })} testId="clip-setting:redact" />
+        <div className="clip-settings-row" data-testid="clip-setting:keys">
+          <span className="clip-settings-label">Keys and tokens<span className="shint">Kept, and copied and pasted whole. Wherever a clip is shown, and to agents, a key is its prefix and its last 4 characters; a password is hidden.</span></span>
+          <code className="clip-settings-sample">sk-ant-{SECRET_MASK}Xy9Q</code>
         </div>
         <div className="clip-settings-row">
           <span className="clip-settings-label">Capture images<span className="shint">Screenshots and copied pictures, up to 5 MB each</span></span>

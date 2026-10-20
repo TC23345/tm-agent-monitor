@@ -16,7 +16,8 @@ export const INTERNAL_COPY_WINDOW_MS: number
 export const BURST_MS: number
 export const BUILTIN_GROUPS: readonly string[]
 export const PASSWORD_MANAGER_EXES: readonly string[]
-export const SECRET_PATTERNS: ReadonlyArray<readonly [string, RegExp]>
+export const SECRET_MASK: string
+export const SECRET_FAMILIES: ReadonlyArray<{ kind: string; re: RegExp; mask: (match: string, ...groups: string[]) => string }>
 
 export type ClipKind = 'text' | 'image' | 'files'
 export type ClipSourceKind = 'app' | 'terminal' | 'chrome' | 'agent' | 'manual'
@@ -87,7 +88,6 @@ export interface CaptureSnapshot {
 export interface CaptureContext {
   ownerExe?: string
   blockedExes?: string[]
-  redactSecrets?: boolean
   paused?: boolean
 }
 
@@ -95,7 +95,8 @@ export type CaptureDecision = { keep: true; kind: ClipKind } | { keep: false; re
 
 export interface ProcessInfo { hwnd?: string; pid: number; exe: string; title?: string }
 
-export function looksSecret(text: string): string | null
+/** The text with every key, token and password in it masked in place (prefix, ********, last 4). */
+export function maskSecrets(text: string | null | undefined): string
 export function parseDropFiles(buf: Uint8Array | Buffer | null | undefined): string[]
 export function blockedExe(exe: string | undefined, list: readonly string[]): boolean
 /** A typed blocklist entry normalised (an exe name, or a host name), or null when it is not one. */

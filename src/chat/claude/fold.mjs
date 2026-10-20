@@ -6,17 +6,24 @@ import { addUsage, appendDelta, appendItem, clip, closeTurn, dequeue, emptyTrans
 import { argDetail, clockTime, imageSize, mcpTitle, splitMcpName } from '../shared/present.mjs'
 
 /**
- * Live fold state: the transcript plus the stream cursor — which API message
- * is streaming and which content-block index maps to which item — and the
- * compaction row still waiting for its summary. The pane holds one of these
- * per session.
- * @typedef {{ transcript: import('../shared/chatModel.mjs').Transcript, stream: { messageId: string | null, blocks: Record<number, string> }, compactId?: string | null }} ClaudeFold
+ * Live fold state: the transcript plus a stream cursor per thread — which API
+ * message is streaming and which content-block index maps to which item — and
+ * the compaction row still waiting for its summary. The pane holds one of
+ * these per session.
+ * `streams` is keyed by `parent_tool_use_id` ('' for the session itself): a
+ * background agent streams while the session does, and with one shared cursor
+ * each thread's `message_start` cut the other's blocks loose (thinking rows
+ * never learnt how long they took, deltas landed on fresh rows).
+ * @typedef {{ messageId: string | null, blocks: Record<number, string> }} StreamCursor
+ * @typedef {{ transcript: import('../shared/chatModel.mjs').Transcript, streams: Record<string, StreamCursor>, compactId?: string | null }} ClaudeFold
  */
 
 /** @returns {ClaudeFold} */
 export function startFold(transcript) {
-  return { transcript, stream: { messageId: null, blocks: {} }, compactId: null }
+  return { transcript, streams: {}, compactId: null }
 }
+
+const NO_STREAM = { messageId: null, blocks: {} }
 
 /** The text Claude Code records when the user interrupts a turn. */
 const INTERRUPT_TEXT = /^\[Request interrupted by user(?: for tool use)?\]$/
@@ -113,7 +120,8 @@ export function toolView(name, input) {
     case 'Agent':
       return {
         label: 'Agent', detail: firstLineOf(String(i.description ?? i.prompt ?? ''), 120) || undefined, view: 'agent',
-        ...(typeof i.prompt === 'string' && i.prompt ? { prompt: clip(i.prompt, MAX_TOOL_OUTPUT) } : {})
+        ...(typeof i.prompt === 'string' && i.prompt ? { prompt: clip(i.prompt, MAX_TOOL_OUTPUT) } : {}),
+        ...(typeof i.subagent_type === 'string' && i.subagent_type ? { agentType: i.subagent_type } : {})
       }
     case 'Skill':
       return { label: String(i.skill ?? i.name ?? 'Skill'), detail: 'skill', view: 'other' }
@@ -223,7 +231,8 @@ function foldAssistantBlocks(t, messageId, content, at, parentToolUseId) {
       const text = block.type === 'text' ? block.text ?? '' : block.type === 'thinking' ? block.thinking ?? '' : '[redacted]'
       if (!text) continue
       const id = blockTarget(t, messageId, kind, text)
-      t = t.items.some((x) => x.id === id) ? updateItem(t, id, { text, streaming: false }) : appendItem(t, { kind, id, text, streaming: false, at })
+      // A subagent's text and thinking nest under its Agent row, like its tools; without the parent they ran down the session's own timeline.
+      t = t.items.some((x) => x.id === id) ? updateItem(t, id, { text, streaming: false }) : appendItem(t, { kind, id, text, streaming: false, at, ...(parentToolUseId ? { parent: parentToolUseId } : {}) })
     } else if (block.type === 'tool_use') {
       const view = toolView(block.name, block.input)
       const row = { kind: 'tool', id: block.id, name: block.name, title: toolTitle(block.name, block.input), input: toolInput(block.name, block.input), status: 'running', at, parent: parentToolUseId ?? undefined, ...view }
@@ -283,8 +292,9 @@ export function foldSdkMessage(f, msg, opts = {}) {
   if (!msg || typeof msg !== 'object') return f
   const at = Date.now()
   let t = f.transcript
-  let stream = f.stream
-  const keep = (transcript) => ({ ...f, transcript, stream })
+  const thread = typeof msg.parent_tool_use_id === 'string' ? msg.parent_tool_use_id : ''
+  let stream = f.streams[thread] ?? NO_STREAM
+  const keep = (transcript) => ({ ...f, transcript, streams: stream === (f.streams[thread] ?? NO_STREAM) ? f.streams : { ...f.streams, [thread]: stream } })
   switch (msg.type) {
     case 'system': {
       if (msg.subtype === 'init') {
@@ -338,6 +348,9 @@ export function foldSdkMessage(f, msg, opts = {}) {
         if (!row?.background && !t.background.some((x) => x.id === msg.task_id)) return f
         const what = row?.label ? `${row.label}${row.detail ? ` · ${row.detail}` : ''}` : 'A background task'
         const summary = typeof msg.summary === 'string' ? msg.summary.trim() : ''
+        // The row learns how its task ended, for the agents panel: a background agent's own row closed when it was launched.
+        const outcome = msg.status === 'completed' || msg.status === 'failed' || msg.status === 'stopped' ? msg.status : 'stopped'
+        if (row) t = updateItem(t, row.id, { outcome, endedAt: at, ...(summary ? { summary: clip(summary, MAX_TOOL_OUTPUT) } : {}) })
         return keep(appendItem(t, {
           kind: 'system', id: `task:${msg.task_id}:${msg.status}`, text: `${what} ${TASK_WORDS[msg.status] ?? msg.status}`, level: msg.status === 'failed' ? 'warning' : 'info', at, variant: 'task',
           ...(summary ? { detail: clip(summary, MAX_TOOL_OUTPUT) } : {})
@@ -366,13 +379,13 @@ export function foldSdkMessage(f, msg, opts = {}) {
       if (ev.type === 'content_block_start') {
         const b = ev.content_block ?? {}
         if (b.type === 'tool_use') {
-          t = appendItem(t, { kind: 'tool', id: b.id, name: b.name, title: toolTitle(b.name, b.input), input: '', status: 'running', at, ...(msg.parent_tool_use_id ? { parent: msg.parent_tool_use_id } : {}), ...toolView(b.name, b.input) })
+          t = appendItem(t, { kind: 'tool', id: b.id, name: b.name, title: toolTitle(b.name, b.input), input: '', status: 'running', at, ...(thread ? { parent: thread } : {}), ...toolView(b.name, b.input) })
           stream = { messageId, blocks: { ...stream.blocks, [ev.index]: b.id } }
         } else {
           const id = `${messageId}:${ev.index}`
           // A thinking row exists from the block's start, so it can say how long it took
           // even when the provider omits the thinking text itself.
-          if ((b.type === 'thinking' || b.type === 'redacted_thinking') && !t.items.some((x) => x.id === id)) t = appendItem(t, { kind: 'thinking', id, text: '', streaming: true, at })
+          if ((b.type === 'thinking' || b.type === 'redacted_thinking') && !t.items.some((x) => x.id === id)) t = appendItem(t, { kind: 'thinking', id, text: '', streaming: true, at, ...(thread ? { parent: thread } : {}) })
           stream = { messageId, blocks: { ...stream.blocks, [ev.index]: id } }
         }
         return keep(t)
@@ -386,8 +399,8 @@ export function foldSdkMessage(f, msg, opts = {}) {
       if (ev.type === 'content_block_delta') {
         const d = ev.delta ?? {}
         const id = stream.blocks[ev.index] ?? `${messageId}:${ev.index}`
-        if (d.type === 'text_delta') t = appendDelta(t, id, 'assistant', d.text, at)
-        else if (d.type === 'thinking_delta') t = appendDelta(t, id, 'thinking', d.thinking, at)
+        if (d.type === 'text_delta') t = appendDelta(t, id, 'assistant', d.text, at, thread || undefined)
+        else if (d.type === 'thinking_delta') t = appendDelta(t, id, 'thinking', d.thinking, at, thread || undefined)
         return keep(t)
       }
       if (ev.type === 'message_delta' && ev.usage) {
@@ -434,7 +447,9 @@ export function foldSdkMessage(f, msg, opts = {}) {
         t = setStatus(appendItem(t, { kind: 'system', id: `result:${msg.uuid ?? at}`, text: String(text), level: 'error', at }), 'error', String(text))
       } else t = setStatus(t, 'idle')
       t = closeTurn(t, { at, durationMs: num(msg.duration_ms), outputTokens: num(u.output_tokens), id: `turn:${msg.uuid ?? at}` })
-      return { ...f, transcript: t, stream: { messageId: null, blocks: {} } }
+      // The session's turn is over; a background agent may still be mid-message, so its cursor stays.
+      const { '': _session, ...agents } = f.streams
+      return { ...f, transcript: t, streams: agents }
     }
     default:
       return f

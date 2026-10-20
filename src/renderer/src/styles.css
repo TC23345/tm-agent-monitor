@@ -316,6 +316,8 @@ kbd {
   border-bottom: 1px solid var(--hairline);
 }
 .gpane-ic { width: 14px; height: 14px; flex: 0 0 14px; color: var(--faint); }
+/* The clipboard pane's icon is the app's tm mark (TaylorMade Clipboard), a little larger than a glyph so it reads. */
+.gpane-ic.gpane-mark { width: 16px; height: 16px; flex-basis: 16px; border-radius: 4px; user-select: none; }
 /* The pane kind (or what it runs, or its file), fixed for the pane's life —
    the header is an editor title bar with tools, not a content picker. */
 .gpane-title {
@@ -1208,6 +1210,13 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .md .syn-punct, .md .syn-meta { color: var(--syn-punct); }
 .md blockquote { margin: 0 0 0.75em; padding: 2px 0 2px 12px; border-left: 3px solid var(--hairline); color: var(--muted); }
 .md hr { border: 0; border-top: 1px solid var(--hairline); margin: 1em 0; }
+/* GFM tables (Claude Code's replies, a note's): collapsed 1 px borders round every cell, as the Claude Code
+   extension draws them, headers in its default centre unless the delimiter row aligns them; the wrapper
+   scrolls sideways instead of clipping a table wider than its pane. */
+.md-table { max-width: 100%; overflow-x: auto; margin: 0 0 0.75em; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+.md table { border-collapse: collapse; border: 1px solid var(--line-strong); }
+.md th, .md td { border: 1px solid var(--line-strong); padding: 4px 10px; vertical-align: top; unicode-bidi: plaintext; }
+.md th { font-weight: 650; }
 .md a { color: var(--accent-bright); text-decoration: none; }
 .md a:hover { text-decoration: underline; }
 .md strong { font-weight: 700; }
@@ -2091,6 +2100,8 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .clips.is-paused .clip-list { color: var(--ink-3); }
 .clips.is-paused .clip-row { opacity: 0.72; }
 .notes-tool.is-warn { color: var(--st-permission); background: rgba(233, 162, 60, 0.14); }
+/* The toolbar keeps + and New group at the left and More at the right; pause, select and collapse are in More. */
+.notes-toolbar-grow { flex: 1 1 auto; }
 .notes-tool.is-on { color: var(--accent-bright); background: rgba(217, 119, 87, 0.14); }
 
 /* sidebar: built-in views, groups, sources */
@@ -2186,7 +2197,8 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .clip-main { container-type: inline-size; }
 .clip-list { scrollbar-gutter: stable; }
 @container (min-width: 520px) {
-  .clip-head-wrap { display: block; overflow: hidden; scrollbar-gutter: stable; scrollbar-width: thin; padding: 6px 8px 0; border-bottom: 1px solid var(--line); }
+  /* flex: none — its overflow: hidden drops its flex minimum to 0, and a tall card under the list (Capture settings) squeezed the header in half. */
+  .clip-head-wrap { display: block; flex: none; overflow: hidden; scrollbar-gutter: stable; scrollbar-width: thin; padding: 6px 8px 0; border-bottom: 1px solid var(--line); }
   .clip-head { display: grid; grid-template-columns: var(--picker-cols); align-items: end; gap: 0 10px; height: 22px; padding: 0 10px 5px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-5); }
   .clip-row .clip-keychip { display: inline-block; }
   .clip-head-when, .clip-head-key { text-align: right; }
@@ -2233,6 +2245,8 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .clip-settings-label .shint { font-weight: 400; line-height: 1.4; }
 .clip-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid var(--hairline); }
 .clip-settings-limits { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
+/* How a key is shown, as an example (Keys and tokens has no switch: keys are always kept, always masked on screen). */
+.clip-settings-sample { flex: 0 0 auto; padding: 3px 8px; border-radius: var(--r-chip); background: var(--tint); color: var(--muted); font: 11.5px/1.3 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: nowrap; }
 .clip-settings-num { width: 64px; height: 26px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface-2); color: var(--text); font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; outline: none; }
 .clip-settings-num:focus { border-color: var(--accent); }
 .clip-block-table { display: flex; flex-direction: column; border: 1px solid var(--hairline); border-radius: var(--r-control); overflow: hidden; }
@@ -2277,8 +2291,14 @@ html[data-window="picker"], html[data-window="picker"] body, html[data-window="p
 /* The workspace bar's row is its command center tall (28 px plus its border); the picker has none, so the menu row holds that height. */
 .picker-menubar { min-height: 30px; }
 .menu-item .menu-item-keys { margin-left: auto; padding-left: 14px; }
-/* The picker's bar holds two icon buttons at its right — export, and the in-card settings (lit while open) — instead of text menus. */
+/* The picker's bar: the tm mark and the window's name, then two icon buttons at its right — export, and the in-card settings (lit while open) — instead of text menus. */
+.picker-brand { font-size: 12.5px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: none; }
 .picker-menubar-tools { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+/* Under the bar: the Clipboard pane's left column (views, the groups open, sources), then the chips and the list. */
+.picker-body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 176px minmax(0, 1fr); }
+.picker-side { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
+.picker-side .clip-nav-list { padding: 8px 6px 14px; }
+.picker-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .menu-btn--icon { display: grid; place-items: center; width: 30px; padding: 0; }
 .menu-btn--icon svg { width: 15px; height: 15px; }
 /* Settings inside the card: the chip row carries the sections (Keybinds · Groups · Window) behind a back circle, and the list's place is one scrolling panel. */
@@ -2428,7 +2448,7 @@ button.pset-row:focus-visible { outline: 2px solid var(--accent); outline-offset
    pane keeps its radii; chips, buttons and fields keep theirs; the shadow stays. */
 html[data-window="picker"] { --r-card: 0px; --r-row: 0px; }
 html[data-window="picker"] .picker, html[data-window="picker"] .picker-head, html[data-window="picker"] .picker-editor,
-html[data-window="picker"] .picker-row, html[data-window="picker"] .picker-glide { border-radius: 0; }
+html[data-window="picker"] .picker-row, html[data-window="picker"] .picker-glide, html[data-window="picker"] .clip-nav-row { border-radius: 0; }
 .picker-empty { padding: 28px 12px; text-align: center; font-size: 13px; color: var(--ink-4); }
 .picker-notice { margin: 0 14px 6px; padding: 6px 10px; border-radius: var(--r-control); background: rgba(233, 162, 60, 0.12); color: var(--st-permission); font-size: 12px; animation: fade-in 140ms ease; }
 @media (prefers-reduced-motion: reduce) {
@@ -2481,6 +2501,9 @@ html[data-window="picker"] .picker-row, html[data-window="picker"] .picker-glide
 .clip-field-code { flex: 0 1 180px; }
 .clip-field-hint { font-size: 11px; color: var(--ink-5); }
 .clip-field-hint.is-warn { color: var(--st-permission); }
+/* A clip holding a key: its Text is masked and read-only until Show to edit. */
+.clip-field-text.is-masked { color: var(--ink-3); cursor: default; }
+.clip-field-keys { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: -4px; }
 .clip-keybind { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 24px; }
 .clip-keybind .clip-chord { font-size: 11px; padding: 2px 7px; }
 .clip-keybind-none { font-size: 12px; color: var(--ink-5); }

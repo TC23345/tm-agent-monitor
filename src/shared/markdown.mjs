@@ -1,14 +1,16 @@
 /**
- * A small Markdown reader for the Notes pane's preview. It produces a plain
- * tree — never HTML — so the renderer can build React elements from it and
- * a note written by an agent can carry no markup into the app. Covers what
- * a notepad uses: headings, paragraphs, bullet / numbered / task lists
- * (nested by indent), fenced code, block quotes, rules, and inline code,
- * bold, italic, strikethrough, and links (http/https/mailto only).
+ * A small Markdown reader for the Notes pane's preview, the file pane's and
+ * the chat panes' replies. It produces a plain tree — never HTML — so the
+ * renderer can build React elements from it and a note written by an agent
+ * can carry no markup into the app. Covers what a notepad uses: headings,
+ * paragraphs, bullet / numbered / task lists (nested by indent), fenced code,
+ * block quotes, rules, GFM tables (Claude Code's replies use them), and
+ * inline code, bold, italic, strikethrough, and links (http/https/mailto only).
  *
  * Block nodes: { type: 'heading', level, children } · { type: 'paragraph',
  * children } · { type: 'list', ordered, start, items: [{ checked, children }] }
  * · { type: 'code', lang, text } · { type: 'quote', children } · { type: 'hr' }
+ * · { type: 'table', align: ('left'|'center'|'right'|null)[], head: Inline[][], rows: Inline[][][] }
  * Inline nodes: { type: 'text', text } · { type: 'code', text } ·
  * { type: 'strong' | 'em' | 'del', children } · { type: 'link', href, children }
  */
@@ -88,12 +90,53 @@ function parseBlocks(lines) {
       continue
     }
 
+    const table = tableStart(lines, i)
+    if (table) {
+      i += 2
+      const rows = []
+      // Rows run to a blank line or another block; a short row is padded, a long one cut to the header's width.
+      while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) {
+        const cells = tableCells(lines[i]) ?? [lines[i].trim()]
+        rows.push(table.align.map((_, k) => parseInline(cells[k] ?? '')))
+        i++
+      }
+      out.push({ type: 'table', align: table.align, head: table.head.map((cell) => parseInline(cell)), rows })
+      continue
+    }
+
     const paragraph = [line.trim()]
     i++
-    while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) paragraph.push(lines[i++].trim())
+    // A table interrupts a paragraph, as in GFM.
+    while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i]) && !tableStart(lines, i)) paragraph.push(lines[i++].trim())
     out.push({ type: 'paragraph', children: parseInline(paragraph.join(' ')) })
   }
   return out
+}
+
+/** A row's cells: split on pipes, `\|` kept as a pipe inside a cell, the outer pipes optional, each trimmed. Null without a pipe. */
+function tableCells(line) {
+  if (!line.includes('|')) return null
+  let s = line.trim()
+  if (s.startsWith('|')) s = s.slice(1)
+  if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1)
+  const cells = []
+  let cur = ''
+  for (let k = 0; k < s.length; k++) {
+    if (s[k] === '\\' && s[k + 1] === '|') { cur += '|'; k++; continue }
+    if (s[k] === '|') { cells.push(cur.trim()); cur = ''; continue }
+    cur += s[k]
+  }
+  cells.push(cur.trim())
+  return cells
+}
+
+/** A table starts at a header row followed by a delimiter row (`| --- | :---: | ---: |`) with as many cells; each delimiter names its column's alignment. */
+function tableStart(lines, i) {
+  const head = tableCells(lines[i])
+  const delims = i + 1 < lines.length ? tableCells(lines[i + 1]) : null
+  if (!head || !delims || head.length !== delims.length || !delims.every((c) => /^:?-+:?$/.test(c))) return null
+  const align = delims.map((c) => (c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : c.startsWith(':') ? 'left' : null))
+  return { head, align }
 }
 
 function indentOf(line) {

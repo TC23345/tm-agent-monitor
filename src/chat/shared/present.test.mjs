@@ -1,10 +1,64 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  argDetail, clockTime, effortLabel, fmtTokens, formatElapsed, imageSize, latestModels, mcpTitle, modelLabel, serverTitle, splitMcpName,
+  argDetail, cardSteps, clockTime, previewMarkdown, streamParts, effortLabel, fmtTokens, formatElapsed, imageSize, latestModels, mcpTitle, modelLabel, serverTitle, splitMcpName,
   WORKING_VERBS, activitySummary, describePermissionUpdates, limitLines, limitName, matchFiles, relPath, resetPhrase, transcriptMarkdown, verbDelay
 } from './present.mjs'
 import { emptyTranscript } from './chatModel.mjs'
+
+test('previewMarkdown keeps a code preview’s lines in a fence and leaves Markdown as written', () => {
+  const code = 'function divide(a, b) {\n  return a / b;\n}'
+  assert.equal(previewMarkdown(code), '```\n' + code + '\n```')
+  assert.equal(previewMarkdown('/**\n * @param {number} a\n */\nconst x = 1\n'), '```\n/**\n * @param {number} a\n */\nconst x = 1\n```')
+  assert.equal(previewMarkdown('┌──────┐\n│ Save │\n└──────┘'), '```\n┌──────┐\n│ Save │\n└──────┘\n```')
+  assert.equal(previewMarkdown('## Option A\n- fast\n- cheap'), '## Option A\n- fast\n- cheap')
+  assert.equal(previewMarkdown('Uses **one** call'), 'Uses **one** call')
+  assert.equal(previewMarkdown('```js\nx()\n```'), '```js\nx()\n```')
+  assert.equal(previewMarkdown('\r\n'), '')
+  assert.equal(previewMarkdown(undefined), '')
+})
+
+test('streamParts: finished blocks settle at a blank line, the block being written stays live', () => {
+  assert.deepEqual(streamParts('Hello wor'), { settled: '', live: 'Hello wor', table: null })
+  assert.deepEqual(streamParts('Para one.\n\nPara tw'), { settled: 'Para one.', live: 'Para tw', table: null })
+  assert.deepEqual(streamParts('One.\n\n'), { settled: 'One.', live: '', table: null })
+  // A blank line inside an open fence is code, not a block boundary.
+  assert.deepEqual(streamParts('Intro\n\n```js\nconst a = 1\n\nconst b'), { settled: 'Intro', live: '```js\nconst a = 1\n\nconst b', table: null })
+  assert.deepEqual(streamParts('```\n| a | b |\n|---|---|\n'), { settled: '', live: '```\n| a | b |\n|---|---|\n', table: null }, 'a table inside a fence is code')
+})
+
+test('streamParts: a table on its way shows only its header, from its first cell until the table is finished', () => {
+  const lead = '**The 6 open tasks:**\n\n'
+  assert.deepEqual(streamParts(`${lead}| Task | Wh`), { settled: '**The 6 open tasks:**', live: '', table: '| Task | Wh |\n| --- | --- |' })
+  assert.deepEqual(streamParts(`${lead}| Task | What to do |\n| --`), { settled: '**The 6 open tasks:**', live: '', table: '| Task | What to do |\n| --- | --- |' })
+  // The delimiter row, once written, is the table's own (its alignment comes with it); the rows stay hidden.
+  assert.deepEqual(streamParts(`${lead}| Task | What to do |\n| :-- | --: |\n| Set up | **Noth`), { settled: '**The 6 open tasks:**', live: '', table: '| Task | What to do |\n| :-- | --: |' })
+  // A blank line finishes it: the whole table settles and the next block streams.
+  const done = streamParts(`${lead}| Task | What to do |\n| --- | --- |\n| Set up | Nothing. |\n\nThe ga`)
+  assert.deepEqual(done, { settled: `${lead}| Task | What to do |\n| --- | --- |\n| Set up | Nothing. |`, live: 'The ga', table: null })
+  // A paragraph the table interrupts stays live above the header; a lone pipe shows nothing yet.
+  assert.deepEqual(streamParts('Intro line\n| a | b |\n|---|---|\n| 1 |'), { settled: '', live: 'Intro line', table: '| a | b |\n|---|---|' })
+  assert.deepEqual(streamParts('Intro\n|'), { settled: '', live: 'Intro', table: null })
+  // A line under it that is not a delimiter row: it was never a table.
+  assert.deepEqual(streamParts('| just a pipe\nand more text\nx'), { settled: '', live: '| just a pipe\nand more text\nx', table: null })
+  assert.deepEqual(streamParts('| a | b |\nnot a'), { settled: '', live: '| a | b |\nnot a', table: null })
+})
+
+test('cardSteps leaves out the question and plan rows their cards stand in for, and nothing else', () => {
+  const items = [
+    { kind: 'tool', id: 'tu1', name: 'AskUserQuestion', title: 'Question', status: 'running', at: 1 },
+    { kind: 'question', id: 'perm:1', title: 'Claude needs a decision', questions: [], at: 2, toolUseId: 'tu1' },
+    { kind: 'tool', id: 'tu2', name: 'ExitPlanMode', title: 'Claude’s plan', status: 'running', at: 3 },
+    { kind: 'approval', id: 'perm:2', title: 'Claude’s plan', choices: [], at: 4, variant: 'plan', toolUseId: 'tu2' },
+    // A Write's row keeps its diff and result; its approval card is only the question.
+    { kind: 'tool', id: 'tu3', name: 'Write', title: 'Write a.js', status: 'running', at: 5 },
+    { kind: 'approval', id: 'perm:3', title: 'Allow Write', choices: [], at: 6, toolUseId: 'tu3' },
+    // A stored session: the row with no card.
+    { kind: 'tool', id: 'tu4', name: 'AskUserQuestion', title: 'Question', status: 'done', at: 7 }
+  ]
+  assert.deepEqual([...cardSteps(items)], ['tu1', 'tu2'])
+  assert.equal(cardSteps([]).size, 0)
+})
 
 test('the working line uses the extension’s 82 verbs on its 2 s, 3 s, 5 s schedule', () => {
   assert.equal(WORKING_VERBS.length, 82)

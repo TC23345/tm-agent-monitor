@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import { applyRetention, cleanGroupDescription, dedupeKey, groupProblem, sanitizeClip, sanitizeGroupInfo, sanitizeGroups, sortClips, upsertClip, MAX_CLIPS, MAX_GROUPS, RETENTION_DAYS, groupNameOk, mergeText } from '../shared/clips.mjs'
 
 const DEFAULT_META = Object.freeze({
-  groups: [], groupInfo: {}, favoritesOrder: [], pausedUntil: 0, blockedExes: [], blockedDomains: [], redactSecrets: true, captureImages: true,
+  groups: [], groupInfo: {}, favoritesOrder: [], pausedUntil: 0, blockedExes: [], blockedDomains: [], captureImages: true,
   maxItems: MAX_CLIPS, maxAgeDays: RETENTION_DAYS
 })
 
@@ -48,7 +48,6 @@ export function sanitizeMeta(raw) {
     // matched with their subdomains (`domainBlocked`), so a leading dot or
     // capitals are noise here.
     blockedDomains: [...new Set(strs(r.blockedDomains, 100).map((d) => d.trim().toLowerCase().replace(/^\.+/, '')).filter(Boolean))],
-    redactSecrets: r.redactSecrets !== false,
     captureImages: r.captureImages !== false,
     maxItems: num(r.maxItems, 50, 10_000, MAX_CLIPS),
     maxAgeDays: num(r.maxAgeDays, 1, 3650, RETENTION_DAYS)
@@ -184,7 +183,7 @@ export class ClipStore {
   updateSettings(patch) {
     const p = isRecord(patch) ? patch : {}
     const next = { ...this.meta }
-    for (const key of ['blockedExes', 'blockedDomains', 'redactSecrets', 'captureImages', 'maxItems', 'maxAgeDays']) if (key in p) next[key] = p[key]
+    for (const key of ['blockedExes', 'blockedDomains', 'captureImages', 'maxItems', 'maxAgeDays']) if (key in p) next[key] = p[key]
     this.meta = sanitizeMeta(next)
     this.clips = applyRetention(this.clips, this.retention())
     this.metaDirty = true

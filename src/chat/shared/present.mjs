@@ -341,6 +341,113 @@ function fuzzyScore(path, q) {
 }
 
 /**
+ * A question option's preview as Markdown that keeps its lines. The CLI
+ * draws a preview in a monospace box with its newlines, and most previews
+ * are code, a mockup or a config, where a joined line or a collapsed indent
+ * changes what it says; a Markdown paragraph joins its lines. So a preview
+ * with no Markdown of its own (a fence, a `##` heading, a list, bold, a
+ * table) goes in a fence, and one that has Markdown renders as written.
+ * @param {string | null | undefined} text
+ * @returns {string}
+ */
+export function previewMarkdown(text) {
+  const s = String(text ?? '').replace(/\r\n/g, '\n').replace(/^\n+/, '').trimEnd()
+  if (!s) return ''
+  // Lists only from the margin: a JSDoc block's ` * @param` lines are code.
+  const markdown = s.includes('```') || /^#{2,6}\s+\S/m.test(s) || /^(?:[-*+]|\d+\.)\s+\S/m.test(s) || /\*\*[^*\n]+\*\*/.test(s) || /^\|.+\|\s*$/m.test(s)
+  return markdown ? s : `\`\`\`\n${s}\n\`\`\``
+}
+
+/** The tools whose prompt card is the whole step: the question and the plan say everything their tool row would. */
+const CARD_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode'])
+
+/**
+ * The tool rows a prompt card stands in for, by id: an AskUserQuestion or
+ * ExitPlanMode row whose question or plan card is in the transcript. The
+ * pane leaves those rows out, so the step has one dot and one title. A
+ * stored session has no cards, so its rows stay.
+ * @param {import('./chatModel.mjs').ChatItem[]} items
+ * @returns {Set<string>}
+ */
+export function cardSteps(items) {
+  const asked = new Set(items.flatMap((x) => ((x.kind === 'approval' || x.kind === 'question') && x.toolUseId ? [x.toolUseId] : [])))
+  return new Set(items.flatMap((x) => (x.kind === 'tool' && asked.has(x.id) && CARD_TOOLS.has(x.name) ? [x.id] : [])))
+}
+
+/** A table row's cells: split on pipes, `\|` kept inside a cell, the outer pipes optional. */
+function rowCells(line) {
+  let s = line.trim()
+  if (s.startsWith('|')) s = s.slice(1)
+  if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1)
+  return s.split(/(?<!\\)\|/).map((c) => c.trim())
+}
+
+/**
+ * A reply that is still streaming, split for drawing. The Claude Code
+ * extension draws a streaming reply's finished blocks as Markdown
+ * (`streaming: "settledBlocks"`); the pane does the same, and adds what the
+ * user asked for when a table is on its way: its header alone, shimmering,
+ * until the table is finished.
+ *   settled  every finished block, up to the last blank line outside a code
+ *            fence: drawn as Markdown.
+ *   live     the block being written: drawn as plain text, so it streams.
+ *   table    once that block reaches a table (a line starting with `|`
+ *            outside a fence, not contradicted by the line under it), the
+ *            text before the table stays in `live` and this is the table's
+ *            header as Markdown (its header row and a delimiter row). The
+ *            rows stay hidden until a blank line or the reply's end finishes
+ *            the table, which then joins `settled`.
+ * @param {string} text
+ * @returns {{ settled: string, live: string, table: string | null }}
+ */
+export function streamParts(text) {
+  const s = String(text ?? '').replace(/\r\n?/g, '\n')
+  const lines = s.split('\n')
+  let fence = ''
+  let boundary = 0
+  let offset = 0
+  for (const line of lines) {
+    const end = Math.min(offset + line.length + 1, s.length)
+    if (fence) {
+      const close = /^\s{0,3}(`{3,}|~{3,})\s*$/.exec(line)
+      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = ''
+    } else {
+      const open = /^\s{0,3}(`{3,}|~{3,})/.exec(line)
+      if (open) fence = open[1]
+      else if (!line.trim() && offset > 0) boundary = end
+    }
+    offset = end
+  }
+  const settled = s.slice(0, boundary).trimEnd()
+  const block = s.slice(boundary)
+  const rows = block.split('\n')
+  let inFence = ''
+  for (let k = 0; k < rows.length; k++) {
+    const line = rows[k]
+    const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(line)
+    if (inFence) { if (marker && marker[1][0] === inFence[0] && /^\s{0,3}(`{3,}|~{3,})\s*$/.test(line)) inFence = ''; continue }
+    if (marker) { inFence = marker[1]; continue }
+    if (!/^\s{0,3}\|/.test(line)) continue
+    const head = rowCells(line)
+    // The last row is still arriving: an empty cell after its final pipe is not a cell yet.
+    if (k === rows.length - 1 && head.length > 1 && head[head.length - 1] === '') head.pop()
+    const next = rows[k + 1]
+    if (next !== undefined) {
+      const complete = k + 1 < rows.length - 1
+      const delims = rowCells(next)
+      const isDelims = delims.length === head.length && delims.every((c) => /^:?-+:?$/.test(c))
+      // A finished line under it that is not a delimiter row, or one that cannot become one: not a table.
+      if (complete ? !isDelims : !/^[\s|:-]*$/.test(next)) continue
+      if (complete) return { settled, live: rows.slice(0, k).join('\n').trimEnd(), table: `${line.trim()}\n${next.trim()}` }
+    }
+    const before = rows.slice(0, k).join('\n').trimEnd()
+    if (!head.some(Boolean)) return { settled, live: before, table: null }
+    return { settled, live: before, table: `| ${head.join(' | ')} |\n|${' --- |'.repeat(head.length)}` }
+  }
+  return { settled, live: block, table: null }
+}
+
+/**
  * The conversation as Markdown, for Copy conversation and Save conversation:
  * prompts and replies in full, each step as one line, approvals and questions
  * with their answers. Thinking is left out (it is the model's, not the
@@ -359,6 +466,8 @@ export function transcriptMarkdown(t) {
         out.push('', `## You · ${clockTime(x.at)}`, '', x.text || '', ...(x.attachments ?? []).map((a) => `- ${a.kind === 'image' ? 'Image' : 'File'}: ${a.path ?? a.name}`), '')
         break
       case 'assistant':
+        // A subagent's text is its own, reported back through its Agent row's result.
+        if (x.parent) break
         out.push('', `## ${who} · ${clockTime(x.at)}`, '', x.text, '')
         break
       case 'tool':

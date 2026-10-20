@@ -76,6 +76,11 @@ import { changeLines, countChanges, splitLines } from './diff.mjs'
  * @property {string} [parent] the Agent row this step ran under (a subagent's step)
  * @property {string} [taskId] the CLI's task id while this command or agent is a task (what `stopTask` takes)
  * @property {boolean} [background] the command or agent now runs in the background
+ * @property {string} [agentType] an Agent row's subagent type (Explore, general-purpose)
+ * @property {'completed' | 'failed' | 'stopped'} [outcome] how a background task ended (its row closed when it was launched)
+ * @property {number} [endedAt] when it ended
+ * @property {string} [summary] what the finished background task reported
+ * @property {{ tool: string, receivers: string[], states: Record<string, { status: string, message?: string }>, model?: string }} [collab] Codex: a multi-agent call — the agent threads it named and each one's last state
  */
 /**
  * `command`: IN (the command) and OUT (its output), open. `edit`: a summary and
@@ -107,6 +112,7 @@ import { changeLines, countChanges, splitLines } from './diff.mjs'
  * @property {string} [plan] the plan, Markdown
  * @property {string} [rule] what "don't ask again" saves, in words ("Bash(npm test:*) in this project")
  * @property {string} [message] what the user told the agent with a refusal
+ * @property {string} [toolUseId] the tool call it asks about, when the card stands in for that step (ExitPlanMode)
  */
 /**
  * `plan-auto` / `plan-manual` approve a plan and leave plan mode for
@@ -123,6 +129,7 @@ import { changeLines, countChanges, splitLines } from './diff.mjs'
  * @property {'interrupt' | 'compact' | 'command' | 'cleared' | 'task' | 'limit' | 'notice'} [variant]
  * @property {string} [detail] the compaction's summary, a command's output, a task's summary
  * @property {number} [tokens] a compaction: the context it started from
+ * @property {{ id: string, name: string, kind: string }} [agent] Codex: a subagent's activity — its thread, its name, what happened
  */
 /**
  * The end of a turn: how long it took, what it produced, and the files it
@@ -159,6 +166,7 @@ import { changeLines, countChanges, splitLines } from './diff.mjs'
  * @property {Record<string, string[]>} [answers] once answered, by question id
  * @property {boolean} [cancelled]
  * @property {number} at
+ * @property {string} [toolUseId] the AskUserQuestion call it stands in for
  */
 /** @typedef {ChatItemUser | ChatItemAssistant | ChatItemThinking | ChatItemTool | ChatItemApproval | ChatItemQuestion | ChatItemSystem | ChatItemTurn} ChatItem */
 
@@ -379,11 +387,11 @@ export function closeTurn(t, info) {
   return appendItem(t, item)
 }
 
-/** Add streamed text to an assistant/thinking item; creates it when absent. */
-export function appendDelta(t, id, kind, delta, at) {
+/** Add streamed text to an assistant/thinking item; creates it when absent (under `parent`, a subagent's Agent row, when given). */
+export function appendDelta(t, id, kind, delta, at, parent) {
   if (!delta) return t
   const i = t.items.findIndex((x) => x.id === id)
-  if (i < 0) return appendItem(t, { kind, id, text: clip(delta, MAX_TEXT), streaming: true, at })
+  if (i < 0) return appendItem(t, { kind, id, text: clip(delta, MAX_TEXT), streaming: true, at, ...(parent ? { parent } : {}) })
   const current = t.items[i]
   if (current.kind !== kind) return t
   return updateItem(t, id, { text: clip(current.text + delta, MAX_TEXT), streaming: true })

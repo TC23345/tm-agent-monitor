@@ -2,6 +2,42 @@
 
 Releases are GitHub Releases on `TC23345/tm-agent-monitor`; installed apps update from `latest.yml` there. Local builds land in `dist/` as `tm-agent-monitor-<version>-x64.exe`.
 
+## 0.4.65 — 2026-10-18
+
+- **An agents panel beside the chat.** When a Claude Code chat starts an agent, a column opens on the right of a wide chat pane (820 px or more). It has a card per agent and per background command: what it's doing, *Running 1m 20s* / *Finished in 8s* / *Failed* / *Stopped*, its type, its step count, its latest step, and *Stop* while it runs in the background. Click a card to see its prompt, its steps and its result, with *Show in conversation*. The panel stays with the finished agents until your next message, so you can read what they did. Close it with its ×, or with Escape while your focus is in it.
+  - The transcript keeps each agent as one line (*Agent · Survey the files · In background · 4 steps →*) that opens its card, instead of repeating its steps.
+  - The composer chip says what runs (*1 agent*, *2 agents · 1 in background*) and shows or hides the panel. In a narrow pane there's no panel; the chip opens a *Running now* menu with Stop.
+  - Codex chats get cards for their agents too, built from Codex's agent calls. These are unit-tested only, because no Codex session spawned an agent in testing.
+- **Fixed: a background agent's thoughts and replies ran down the chat's own timeline.** They now sit under the agent's row (and in its card).
+- **Fixed: *Thought* rows with no time while agents ran.** The chat and its agents shared one tracker for streamed blocks, so an agent's message cut the chat's thinking blocks loose before they could say how long they took.
+- **A command still being written shows *IN …*** instead of an empty box with *Running…* under it.
+- **Claude's questions read the right way round.**
+  - Each question's header (*Sources*, *Time*) is now its bold title, and the question itself is plain text under it. Before, the question was a bold paragraph under a small grey caps label.
+  - The options are full-width numbered rows like a permission prompt's, with the label bold over its description. The chosen one gets a check and a brighter edge.
+  - *Other* is the last option, with its field in the same row.
+  - Submit stays the main button while it waits, with *1 of 3 answered* beside it, and Dismiss is quiet. Before, a disabled Submit was the dimmest thing on the card.
+- **Option previews sit beside the options and keep their lines.** On a wide card, the preview of the option you point at (the first one until then) sits to the right of the options, in a monospace box; on a narrow card it sits under them. Code, mockups and configs keep their line breaks and indentation, which used to run together into one line.
+- **No duplicate step above a question or a plan.** The *Question* and *Claude's plan* rows with their own dot are gone while the card is on screen; the card is the step.
+- ***No, keep planning* and its field are one box,** like *No* and *Tell Claude what to do instead* on a permission prompt. Before, only the label half lit up.
+- **Fixed: the selection bar could land far from the text you selected.** When a selection started where a line wrapped, the bar went to the far end of the line above. It now sits over the first character you selected.
+- **The clipboard keeps API keys, and masks them on screen.** Copies that look like a key, a token or a password used to be skipped. Now they are kept, and copying, pasting, keybinds and expansion codes use them whole.
+  - Everywhere a clip is shown (rows, the detail card, the picker, the palette, Chrome's menu), a key is its prefix, `********` and its last 4 characters: `sk-ant-api03-********Xy9Q`. A password, such as one in a connection string or a `DB_PASSWORD=` line, is `********`.
+  - The detail card's eye shows the keys in full. The Edit… card opens with them masked and read-only; *Show to edit* makes them editable. Saving a title without that leaves the key as it was.
+  - Agents read keys masked too, because what an agent reads goes into its conversation. `tm clip paste` and `tm clip copy` still use the whole key, so an agent can put one where it is needed without seeing it.
+  - More shapes are recognised: Google, Perplexity, Hugging Face, Groq, xAI, npm, Linear and Firecrawl keys, Stripe and Clerk webhook secrets, and `Bearer` tokens.
+  - Capture settings' *Skip secrets* switch is gone; *Keys and tokens* says how they are shown.
+- **The clipboard picker has the pane's left column.** All, Favorites and Images, then your groups listed open, then Sources, beside the list. Groups are no longer chips across the top, in the picker or in the pane; Tab still steps through them. The picker opens wider (720 px) to make room.
+- **TaylorMade Clipboard.** The pane's header and the picker's title bar say *TaylorMade Clipboard* beside the tm mark.
+- **A quieter clipboard toolbar.** It keeps + (add a clip) and New group; *Select rows*, *Pause capture* and *Collapse sections* moved into ⋯, which turns amber while capture is paused.
+- **Fixed: the clipboard table's header was cut in half while Capture settings was open.**
+- **Tables in chat replies render as tables.** A Markdown table in Claude's or Codex's reply used to show as one paragraph of pipes. It is now drawn with bordered cells, like the Claude Code extension draws it, and bold, code and links keep working inside the cells. A table wider than the pane scrolls sideways. Notes and file previews get tables too.
+- **A table streams in as a header first.** While Claude writes a table, the reply shows just the table's header, shimmering. When the table is complete, its rows roll in under the header and the rest of the reply keeps streaming. Finished paragraphs also show formatted while the reply streams, instead of as plain text until the end.
+- **The effort control is a slider.** In the model menu, the dots and level stay beside *Effort*, and under them a *Thinking* slider (Neon UI's ThinkingSelect, in the app's orange) runs from *Auto* to the model's highest level. Click a level, drag it (it stretches past the ends and springs back), or use the arrow keys. The level applies when you let go. Pixel sparkles in the fill get livelier at higher levels.
+- **No more copy buttons in chats.** Replies, a command's IN, code blocks and errors no longer have their own copy button. Selecting text already copies it and offers *Quote*. *Copy conversation* and *Save conversation* stay.
+- **See a pasted image before you send it.** Rest the pointer on an image in the chat box and a larger preview opens above it, with its name and size. Click the image or the preview to open it full size over the whole workspace; close it with the X, a click outside it, or Escape. Before, only the 16-pixel thumbnail opened the image, and only inside the chat pane.
+- **Quotes wait as chips.** *Quote* on a selection now puts it above the chat box as a chip, instead of typing it into the box. Rest on the chip to read the whole quote. Its ↓ button moves it into the box as `> ` lines, so you can edit it. Quotes left as chips go at the top of your message when you send it.
+- **Fixed: the cursor could stay put after the chat box changed its text** (a picked `@` file, a fork's prompt put back). It now moves as soon as the text changes, instead of on the next frame the window draws.
+
 ## 0.4.64 — 2026-10-18
 
 - **Fixed: a permission prompt in a chat was red in uneven patches.** The card had a red wash behind it that showed through some parts (the command box, the *No* row's field) and not others (the options), and the primary option's terracotta border sat next to the red one. Now the only red is the card's border; everything inside is the same neutral grey, and the primary option is marked with a brighter grey edge.

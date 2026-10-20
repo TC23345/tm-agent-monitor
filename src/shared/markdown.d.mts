@@ -11,6 +11,7 @@ export type BlockNode =
   | { type: 'code'; lang: string; text: string }
   | { type: 'quote'; children: BlockNode[] }
   | { type: 'hr' }
+  | { type: 'table'; align: ('left' | 'center' | 'right' | null)[]; head: InlineNode[][]; rows: InlineNode[][][] }
 
 export function parseMarkdown(source: string): BlockNode[]
 export function parseInline(text: string): InlineNode[]
