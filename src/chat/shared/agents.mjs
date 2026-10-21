@@ -108,7 +108,7 @@ function claudeAgents(t) {
     const result = said && steps.some((s) => s.kind === 'assistant' && s.text.trim() === said) ? undefined : x.summary ?? (x.background ? undefined : x.output)
     cards.push({
       id: x.id, kind: 'agent', name: x.detail || 'Agent', ...(x.agentType ? { type: x.agentType } : {}), state, background: !!x.background,
-      startedAt: x.at, ...(x.endedAt ? { endedAt: x.endedAt } : {}), steps: tools.length, ...(last ? { latest: stepLine(last) } : {}),
+      startedAt: x.at, ...(x.endedAt ? { endedAt: x.endedAt } : {}), steps: tools.length, ...(state === 'running' && x.progress ? { latest: x.progress } : last ? { latest: stepLine(last) } : {}),
       rowId: x.id, ...(stopId ? { stopId } : {}), ...(x.prompt ? { prompt: x.prompt } : {}), ...(result ? { result } : {}), items: steps
     })
   }

@@ -69,7 +69,7 @@ export const PANE_KINDS: { id: PaneKind; label: string; icon: typeof Activity; h
   { id: 'clipboard', label: 'Clipboard', icon: Clipboard, hint: 'Everything you copy, in any app — searchable, starred, grouped, and pasteable into a pane' },
   { id: 'web', label: 'Web', icon: Globe, hint: 'A site in a pane — its own signed-in browser session, shared by every web pane' },
   { id: 'file', label: 'File', icon: FileText, hint: 'A project file — click one in a project’s tree (a badge’s left-click)' },
-  { id: 'chat', label: 'Chat', icon: MessageSquare, hint: 'A Claude Code or Codex conversation — the extensions’ chat over the same CLI, with its own history (Terminal menu)' },
+  { id: 'chat', label: 'Chat', icon: MessageSquare, hint: 'TaylorMade CC (Claude Code) or TaylorMade Codex — the extensions’ chat over the same CLI, with its own history (File menu)' },
   { id: 'keys', label: 'Keys', icon: Keyboard, hint: 'Every keyboard shortcut — the workspace’s, and the ones Claude Code, Codex and the shell keep (F1)' }
 ]
 
@@ -268,7 +268,7 @@ export const LAUNCH_KINDS: TerminalLaunch[] = ['claude', 'codex', 'shell']
 /**
  * A terminal pane's name, as its header title and in every list of panes.
  * The agents say "terminal" because a chat pane runs the same CLI and is
- * called "Claude Code chat" / "Codex chat": the two surfaces never share a name.
+ * headed "TaylorMade CC" / "TaylorMade Codex": the two surfaces never share a name.
  */
 export function terminalName(launch: TerminalLaunch): string {
   return launch === 'claude' ? 'Claude Code terminal' : launch === 'codex' ? 'Codex terminal' : 'Terminal'

@@ -25,3 +25,7 @@ export function sendPasteKeys(): boolean
 export function releaseModifierKeys(): boolean
 /** The foreground window resolved to its process (provenance fallback). */
 export function foregroundWindowInfo(): { hwnd: string; pid: number; exe: string; title: string } | null
+/** A kill-on-close job object (a handle), or null; `addToJob` puts a running process in it, `endJob` ends them all. */
+export function createKillJob(): unknown | null
+export function addToJob(job: unknown, pid: number): boolean
+export function endJob(job: unknown): void

@@ -1219,6 +1219,16 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .md th { font-weight: 650; }
 .md a { color: var(--accent-bright); text-decoration: none; }
 .md a:hover { text-decoration: underline; }
+/* A chat reply's extras (0.4.68): a path opens in a file pane, an image is a placeholder that opens it, math is KaTeX's. */
+.md a.md-path { color: inherit; text-decoration: underline dotted; text-underline-offset: 2px; cursor: pointer; }
+.md a.md-path:hover { color: var(--accent-bright); }
+.md a.md-path > code { color: inherit; }
+.md-image { display: inline-flex; align-items: center; gap: 5px; margin: 1px 0; padding: 1px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--elev); color: inherit; font: inherit; font-size: 12px; cursor: pointer; vertical-align: baseline; }
+.md-image:hover { border-color: var(--accent-bright); }
+.md-image-ic { color: var(--muted); }
+.md-math.is-display { margin: 0.4em 0 0.75em; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.md-math .katex { font-size: 1.08em; }
+.md-math.is-source { white-space: pre-wrap; }
 .md strong { font-weight: 700; }
 .md del { color: var(--muted); }
 .iconbtn.is-on { color: var(--accent-bright); background: rgba(217, 119, 87, 0.14); }

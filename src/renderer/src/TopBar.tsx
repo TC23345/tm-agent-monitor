@@ -121,8 +121,8 @@ export function TopBar(props: Props) {
           {openMenu === 'file' && (
             <MenuPop {...away}>
               {/* New: Claude Code and Codex start as chat panes, a terminal is a plain shell (type `claude` there for a CLI session). */}
-              <MenuItem icon={<ProviderBadge provider="claude" />} label="New Claude Code chat" hint={paneFull ? 'All six panes are open' : `A Claude Code chat pane in ${where} — pick up any earlier session from its history`} onClick={run(() => onNewChat('claude'))} disabled={paneFull} />
-              <MenuItem icon={<ProviderBadge provider="codex" />} label="New Codex chat" hint={paneFull ? 'All six panes are open' : `A Codex chat pane in ${where} — pick up any earlier thread from its history`} onClick={run(() => onNewChat('codex'))} disabled={paneFull} />
+              <MenuItem icon={<ProviderBadge provider="claude" />} label="New TaylorMade CC" hint={paneFull ? 'All six panes are open' : `A TaylorMade CC pane (Claude Code) in ${where} — pick up any earlier session from its history`} onClick={run(() => onNewChat('claude'))} disabled={paneFull} />
+              <MenuItem icon={<ProviderBadge provider="codex" />} label="New TaylorMade Codex" hint={paneFull ? 'All six panes are open' : `A TaylorMade Codex pane in ${where} — pick up any earlier thread from its history`} onClick={run(() => onNewChat('codex'))} disabled={paneFull} />
               <MenuItem icon={<Terminal strokeWidth={2} />} label="New terminal" hint={paneFull ? 'All six panes are open — opens a window instead' : `Open a PowerShell terminal in a pane in ${where} (Ctrl+Shift+\`)`} onClick={run(() => onNewTerminal('shell'))} />
               <div className="menu-sep" />
               <MenuItem icon={<FolderPlus strokeWidth={2} />} label="New project…" hint="Create a project folder and open it in Cursor" onClick={run(onNewProject)} />

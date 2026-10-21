@@ -26,6 +26,8 @@ export interface ChatBridge {
   answer(id: string, approvalId: string, choice: ApprovalChoice, message?: string): Promise<void>
   /** Answers by question id; `null` dismisses the question. */
   answerQuestion(id: string, questionId: string, answers: Record<string, string[]> | null): Promise<void>
+  /** One of Claude Code's user dialogs (a refusal's fallback, Fable credits, auto mode's fallback): its card's result, or `null` to dismiss. */
+  answerDialog?(id: string, dialogId: string, result: string | null): Promise<void>
   /** Change the live session's model, effort, permission mode, fast mode or output style (the composer's chips); the transcript push reflects it. */
   configure(id: string, patch: ChatConfigPatch): Promise<void>
   /** What the composer's menus offer: models with their efforts, modes, slash commands, output styles. Fetched on demand. */

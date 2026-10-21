@@ -1,6 +1,6 @@
 ---
 name: tm-agent-monitor
-description: Read and drive the TaylorMade Agent Monitor from inside a Claude Code or Codex session — see what other sessions are running or waiting, spawn a terminal, send it input, read its output, and wait for another session to need attention. Use before starting a second session in a project, when asked to run something in a separate terminal, or to coordinate with another agent on this machine.
+description: Read and drive the TaylorMade Agent Monitor from inside a Claude Code or Codex session — see what other sessions are running or waiting, start a chat (TaylorMade CC / TaylorMade Codex) or a terminal, send it a message or input, read what it did, and wait for it to finish or need the user. Use before starting a second session in a project, when asked to run something in a separate terminal, or to coordinate with another agent on this machine.
 ---
 
 # TaylorMade Agent Monitor
@@ -8,15 +8,14 @@ description: Read and drive the TaylorMade Agent Monitor from inside a Claude Co
 The monitor is a Windows tray app that watches every Claude Code, Codex, and
 Cursor session on this machine and embeds terminals and chat panes. It serves
 a loopback HTTP API for agents. Everything below is read-only except the
-terminal routes, which only touch shells the monitor spawned, and the
-clipboard and snippet routes, which add to the user's clipboard history and
-notes.
+chat and terminal routes, which start and drive sessions, and the clipboard and
+snippet routes, which add to the user's clipboard history and notes.
 
 ## Find it
 
 The app publishes `%APPDATA%\taylormade-agent-monitor\hook-endpoint.json`
 (`TM_AGENT_MONITOR_ENDPOINT_FILE` overrides the path — it is set for you when
-you run inside a terminal pane or a Claude Code chat pane):
+you run inside a terminal pane or a TaylorMade CC chat pane):
 
 ```json
 { "schemaVersion": 1, "port": 7459, "token": "…", "pid": 1234, "updatedAt": 0 }
@@ -34,10 +33,10 @@ sends carries it, so your row in `GET /v1/status` is the agent whose
 
 - **Terminal pane**: it is the PTY id — your row in `GET /v1/terminals`, and
   the `terminalId` the clip routes take.
-- **Claude Code chat pane**: it is the chat's id. Chat panes are not
-  terminals: `GET /v1/terminals` does not list them, no route types into or
-  reads them, and a clip pasted to that id answers 404 `terminal not found`.
-- **Codex chat pane**: not set. Every Codex chat shares one app-server
+- **TaylorMade CC chat pane** (Claude Code): it is the chat's id — your row in
+  `GET /v1/chats`. Chat panes are not terminals: `GET /v1/terminals` does not
+  list them, and a clip pasted to that id answers 404 `terminal not found`.
+- **TaylorMade Codex chat pane**: not set. Every Codex chat shares one app-server
   process, so no session has a pane id of its own; the app finds your pane by
   your session id instead.
 - **Not set** otherwise: you are in an ordinary terminal outside the app.
@@ -104,10 +103,38 @@ with where it came from (the **Clipboard** pane). It is a resource for you:
   registered. When a chord matters, point them there (in the picker: the gear
   → **Keybinds** → *Change in Settings…*).
 
+## Chats
+
+Claude Code and Codex start as **chat panes** in this app (*TaylorMade CC* and
+*TaylorMade Codex*), not terminals, so to start or steer another session use
+the chat routes:
+
+1. `POST /v1/chats {provider: "claude"|"codex", cwd, prompt}` starts one and
+   sends the prompt (a pane opens on it when the grid has room; it runs either
+   way). Keep the `id` it returns.
+2. `GET /v1/chats/:id/wait?until=idle&timeout=120000` holds until the turn is
+   over (or the chat errors or closes). It returns at once if it is already
+   there, so wait for `running` first when you need the turn you just started.
+3. `GET /v1/chats/:id/output?items=20` reads what it did: its status, what it
+   waits for, and its last steps as plain lines (thinking left out).
+4. `POST /v1/chats/:id/input {text}` sends the next message — queued as the
+   next turn if one is running. `POST /v1/chats/:id/interrupt {}` stops a turn.
+
+**Approvals and questions stay with the user.** When `waitingFor` is set (or a
+wait returns `waiting`), tell the user what the chat asks and where; there is
+no route to answer it, on purpose. Check `GET /v1/chats` and `/v1/status`
+before starting a chat in a project that already has one.
+
 ## Routes
 
 | Route | Purpose |
 |---|---|
+| `GET /v1/chats` | Live chat panes: `{chats: [{id, provider, cwd, sessionId, status, title}]}`; `status` is `idle\|running\|waiting\|error\|closed`. |
+| `POST /v1/chats` `{provider?, cwd?, model?, prompt?}` | Start a chat (Claude Code unless `provider` says `codex`) in `cwd` (must exist; home by default), optionally sending `prompt` (≤ 64 KiB). Returns `{id, provider, cwd}` — 201. |
+| `POST /v1/chats/:id/input` `{text}` | Send a message (≤ 64 KiB); queued while a turn runs. 202. |
+| `GET /v1/chats/:id/output?items=30` | `{id, status, waitingFor, queued, total, items: [{kind, text, …}]}`: the last 1–200 steps, oldest first. |
+| `GET /v1/chats/:id/wait?until=idle&timeout=60000` | Long-poll until the chat's status is `until` (`running\|waiting\|idle`), it errors or closes, or the timeout (ms, ≤ 120000). Returns `{id, status, satisfied}`. |
+| `POST /v1/chats/:id/interrupt` `{}` | Stop the turn in flight. 202. |
 | `GET /v1/clips?q=&group=&limit=` | Clipboard history, newest first: `{clips: [{id, kind, title, preview, source, copiedAt, favorite, groups, bytes, …}]}`. `q` is a fuzzy search, `group` a view (`all\|favorites\|images\|<name>`), `limit` 1–200 (default 20). |
 | `GET /v1/clips/:id` | One clip's full `text`, keys masked (a file list is paths, one per line; an image has none). |
 | `POST /v1/clips` `{text, title?, groups?, favorite?, terminalId?}` | Put text on the user's clipboard and in history, attributed to the session in `terminalId`. `groups` names that do not exist yet are dropped. Returns `{id}` — 201. |
@@ -131,8 +158,9 @@ $t = Invoke-RestMethod "http://127.0.0.1:$($ep.port)/v1/terminals" -Method Post 
 Invoke-RestMethod "http://127.0.0.1:$($ep.port)/v1/terminals/$($t.id)/output?lines=40" -Headers $h
 ```
 
-From the repo checkout, `npm run tm -- status | terminals | new | send | read | wait`
-wraps the same calls (`tm --help`), and `npm run tm -- clip list | show | copy | add | paste`
+From the repo checkout, `npm run tm -- chats list | new | send | read | wait | stop` wraps
+the chat routes, `npm run tm -- status | terminals | new | send | read | wait`
+the terminal ones (`tm --help`), and `npm run tm -- clip list | show | copy | add | paste`
 the clipboard ones (`tm clip list` from a pane shows the last copies). Two differences from the raw routes: `tm send` presses Enter unless
 you pass `--no-enter`, and `tm wait --timeout` is in **seconds** and exits 3
 when it times out (0 when satisfied).
@@ -150,12 +178,14 @@ when it times out (0 when satisfied).
   `codex` launch — that submits a prompt to another agent.
 - Read output before deciding a command finished; `exitCode` is the shell's,
   not the command's.
-- A session in a chat pane can be watched (`/v1/status`, `/wait`) but not
-  driven: there is no route into a chat. Ask the user to answer it there.
+- **Drive chats you started**, or one the user asked you to. Never send a
+  message into a chat the user is working in without being asked. Approvals and
+  questions in any chat are the user's to answer.
 
-## Driving another Claude Code pane (orchestration)
+## Driving a Claude Code terminal pane (orchestration)
 
-When the user asks you to start or steer a session in another terminal pane,
+Prefer a chat (above). When the user asks you to steer a CLI session they
+started in a terminal pane,
 the routes above are the whole mechanism — the same daemon, no new API. What
 was learned running it (2026-09-23, Claude Code 2.1):
 

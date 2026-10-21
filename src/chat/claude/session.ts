@@ -18,13 +18,13 @@ import {
 } from '@anthropic-ai/claude-agent-sdk'
 import { foldSdkMessage, sessionMessagesToTranscript, sessionSummary, startFold, toolView, type ClaudeFold } from './fold.mjs'
 import {
-  answerQuestion as answerQuestionItem, appendItem, beginTurn, decideApproval, emptyTranscript, enqueue, setStatus, summarizeAttachments, unqueue,
-  type ApprovalChoice, type Attachment, type ChatConfigPatch, type ChatItemApproval, type ChatItemQuestion, type ChatOptions, type ContextUsage, type McpRequest, type McpServer,
+  answerQuestion as answerQuestionItem, appendItem, beginTurn, decideApproval, emptyTranscript, enqueue, setStatus, settleDialog, summarizeAttachments, unqueue,
+  type ApprovalChoice, type Attachment, type ChatConfigPatch, type ChatItemApproval, type ChatItemDialog, type ChatItemQuestion, type ChatOptions, type ContextUsage, type McpRequest, type McpServer,
   type ModeOption, type Question, type RewindResult, type SessionSummary, type Transcript
 } from '../shared/chatModel.mjs'
-import { describePermissionUpdates } from '../shared/present.mjs'
+import { DIALOG_KINDS, describePermissionUpdates } from '../shared/present.mjs'
 import { resolveClaude } from '../shared/findCli.mjs'
-import { killProcessTree } from '../shared/processTree.mjs'
+import { killProcessTree, type AdoptProcess } from '../shared/processTree.mjs'
 
 /**
  * Control requests the SDK's runtime sends for the extension but leaves out of
@@ -50,6 +50,8 @@ export interface ClaudeSessionOptions {
   env?: Record<string, string>
   /** Extra `--flag value` pairs (`{ effort: 'high' }`); `null` for a bare flag. */
   extraArgs?: Record<string, string | null>
+  /** The host keeps everything the CLI starts together (a Windows job in claude-watch); close ends it. */
+  adoptProcess?: AdoptProcess
   /** Allow Claude Code to read the user's settings (hooks included) — default true, like the extension. */
   settingSources?: ('user' | 'project' | 'local')[]
   log?: (line: string) => void
@@ -222,6 +224,10 @@ export class ClaudeSession extends EventEmitter {
   private interrupting = false
   /** The CLI's process id (the SDK's `onProcessSpawned`), so close can end what it started too. */
   private pid: number | null = null
+  /** Ends what the host keeps of this CLI's processes (`adoptProcess`). */
+  private release: (() => void) | null = null
+  /** User dialogs waiting for an answer, by item id: what settles the SDK's `onUserDialog` promise. */
+  private dialogs = new Map<string, (result: { behavior: 'completed'; result: unknown } | { behavior: 'cancelled' }) => void>()
   /** The consume loop; resolves when the process is gone (close, exit, or error). */
   done: Promise<void> | null = null
 
@@ -272,10 +278,16 @@ export class ClaudeSession extends EventEmitter {
         thinking: { type: 'adaptive', display: 'summarized' },
         perTaskStopAffordance: true,
         promptSuggestions: true,
+        // A running agent's card gets a one-line status (task_progress.summary).
+        agentProgressSummaries: true,
         toolConfig: { askUserQuestion: { previewFormat: 'markdown' } },
         // Called by the SDK's runtime, absent from its typings (the extension passes it too).
-        ...({ onProcessSpawned: (pid: number) => { this.pid = pid } } as Record<string, unknown>),
+        ...({ onProcessSpawned: (pid: number) => { this.pid = pid; this.release = this.config.adoptProcess?.(pid) ?? null } } as Record<string, unknown>),
         canUseTool,
+        // The dialogs the extension renders (DIALOG_KINDS); the CLI sends only the kinds declared, and without
+        // them falls back to its no-dialog behaviour (a refusal just ended the turn).
+        supportedDialogKinds: DIALOG_KINDS,
+        onUserDialog: (request, { signal }) => this.userDialog(request, signal),
         abortController: this.abort,
         stderr: (data) => this.log(`[claude stderr] ${data.trimEnd()}`)
       }
@@ -373,6 +385,35 @@ export class ClaudeSession extends EventEmitter {
     else if (choice === 'plan-manual') p.resolve({ behavior: 'allow', updatedPermissions: setMode('default') })
     else if (choice === 'deny') p.resolve({ behavior: 'deny', message: refusalMessage(said, !!p.plan) })
     else p.resolve({ behavior: 'deny', message: 'The user cancelled.', interrupt: true })
+  }
+
+  /** A user dialog from the CLI: a card in the transcript that waits like a question until `answerDialog`. */
+  private userDialog(request: { dialogKind: string; payload: Record<string, unknown>; toolUseID?: string }, signal: AbortSignal): Promise<{ behavior: 'completed'; result: unknown } | { behavior: 'cancelled' }> {
+    if (!DIALOG_KINDS.includes(request.dialogKind)) return Promise.resolve({ behavior: 'cancelled' })
+    const id = `dialog:${++this.seq}`
+    const item: ChatItemDialog = {
+      kind: 'dialog', id, dialogKind: request.dialogKind, payload: request.payload && typeof request.payload === 'object' ? request.payload : {}, at: Date.now(),
+      ...(request.toolUseID ? { toolUseId: request.toolUseID } : {})
+    }
+    return new Promise((resolve) => {
+      this.dialogs.set(id, resolve)
+      signal.addEventListener('abort', () => {
+        if (this.dialogs.delete(id)) {
+          this.update(settleDialog(this.transcript, id, null))
+          resolve({ behavior: 'cancelled' })
+        }
+      }, { once: true })
+      this.update(setStatus(appendItem(this.transcript, item), 'waiting'))
+    })
+  }
+
+  /** Answer a user dialog with one of its card's results; `null` dismisses it. */
+  answerDialog(dialogId: string, result: string | null): void {
+    const resolve = this.dialogs.get(dialogId)
+    if (!resolve) return
+    this.dialogs.delete(dialogId)
+    this.update(settleDialog(this.transcript, dialogId, result))
+    resolve(result === null ? { behavior: 'cancelled' } : { behavior: 'completed', result })
   }
 
   /** Answer an AskUserQuestion (answers by question text); `null` dismisses it. */
@@ -616,6 +657,9 @@ export class ClaudeSession extends EventEmitter {
   close(): void {
     // The tree first: once the CLI is gone its servers can no longer be found by parent id.
     killProcessTree(this.pid)
+    // Then what the tree kill cannot reach: a server whose parent shim had already exited.
+    this.release?.()
+    this.release = null
     this.input.end()
     this.abort.abort()
   }

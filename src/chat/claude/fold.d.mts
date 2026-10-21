@@ -6,12 +6,15 @@ export interface ClaudeFold {
   streams: Record<string, { messageId: string | null; blocks: Record<number, string> }>
   /** The compaction row still waiting for its summary. */
   compactId?: string | null
+  /** The rows each assistant message made, by its wire uuid, for a refusal's retraction. */
+  wire?: Record<string, string[]>
 }
 
 export function startFold(transcript: Transcript): ClaudeFold
 export function toolTitle(name: string, input: unknown): string
 export function toolView(name: string, input: unknown): Pick<ChatItemTool, 'label' | 'detail' | 'detailMono' | 'view' | 'edits' | 'content' | 'path' | 'todos' | 'prompt' | 'agentType'>
 export function resultText(content: unknown): string
+export function limitWarning(info: { rateLimitType?: string; utilization?: number; surpassedThreshold?: number; resetsAt?: number }): string
 export function toolOutcome(text: string, isError: boolean): { status: 'done' | 'failed' | 'declined'; output: string }
 export function storedCommand(text: string): string | null
 export function storedCommandOutput(text: string): string | null

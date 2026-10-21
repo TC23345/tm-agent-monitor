@@ -547,3 +547,136 @@ export function cardInsertion(card, text, caret) {
   const at = Math.max(0, Math.min(text.length, caret))
   return { start: at, end: at, insert: card.text, after: text.slice(0, at) + card.text + text.slice(at), caret: at + card.text.length }
 }
+
+// ---- A chat for another agent to read (claude-watch's GET /v1/chats/:id/output, 2026-10-21) ----
+
+const DIGEST_TEXT = 4000
+
+function clip(text, max = DIGEST_TEXT) {
+  const s = String(text ?? '')
+  return s.length > max ? `${s.slice(0, max)}… (${s.length - max} more characters)` : s
+}
+
+/**
+ * A chat as another agent reads it: its status, what it waits for (an approval or a question, which only the
+ * user answers), and its last `limit` steps as plain lines, oldest first. Thinking is left out (it is the agent's,
+ * not the conversation's); a tool step is its name, its line and, when it failed, why.
+ * @param {import('./chatModel.mjs').Transcript} t
+ */
+export function chatDigest(t, limit = 30) {
+  const n = Math.max(1, Math.min(200, Math.floor(limit) || 30))
+  const pending = [...t.items].reverse().find((x) => (x.kind === 'approval' && !x.decided) || (x.kind === 'question' && !x.answers && !x.cancelled) || (x.kind === 'dialog' && !x.result && !x.cancelled))
+  const items = []
+  for (const x of t.items) {
+    if (x.kind === 'user') items.push({ kind: 'user', text: clip(x.text), ...(x.attachments?.length ? { attachments: x.attachments.map((a) => a.name) } : {}) })
+    else if (x.kind === 'assistant') items.push({ kind: 'assistant', text: clip(x.text), ...(x.streaming ? { streaming: true } : {}) })
+    else if (x.kind === 'tool') items.push({ kind: 'tool', text: [x.label ?? x.name, x.detail ?? x.title].filter(Boolean).join(' · '), status: x.status, ...(x.status === 'failed' && x.output ? { output: clip(x.output, 600) } : {}) })
+    else if (x.kind === 'approval') items.push({ kind: 'approval', text: x.title, ...(x.decided ? { decided: x.decided } : {}) })
+    else if (x.kind === 'question') items.push({ kind: 'question', text: (x.questions ?? []).map((q) => q.question).join(' / ') || 'Question', ...(x.answers || x.cancelled ? { answered: true } : {}) })
+    else if (x.kind === 'system') items.push({ kind: 'system', text: x.text, level: x.level })
+    else if (x.kind === 'dialog') items.push({ kind: 'dialog', text: dialogCard(x)?.title ?? x.dialogKind, ...(x.result ? { result: x.result } : x.cancelled ? { result: 'dismissed' } : {}) })
+  }
+  return {
+    provider: t.provider, sessionId: t.sessionId, cwd: t.cwd, title: t.title, model: t.model, status: t.status,
+    ...(t.error ? { error: t.error } : {}),
+    waitingFor: pending ? { kind: pending.kind, text: pending.kind === 'approval' ? pending.title : pending.kind === 'dialog' ? (dialogCard(pending)?.title ?? pending.dialogKind) : (pending.questions ?? []).map((q) => q.question).join(' / ') } : null,
+    queued: t.queue.length,
+    total: items.length,
+    items: items.slice(-n)
+  }
+}
+
+// ---- Claude Code's user dialogs (onUserDialog, 0.4.68) ----
+// The three kinds the Claude Code extension declares (2.1.305, extension.js `supportedDialogKinds`), in its
+// own words (webview: the refusal-fallback, Fable-overage and auto-mode-fallback cards). The CLI only sends a
+// kind a client declared, and degrades to its no-dialog behaviour otherwise.
+
+export const DIALOG_KINDS = ['refusal_fallback_prompt', 'fable_overage_consent_prompt', 'auto_mode_server_fallback']
+const USAGE_URL = 'https://claude.ai/settings/usage'
+const EXTRA_USAGE_URL = 'https://support.claude.com/en/articles/12429409-extra-usage-for-paid-claude-plans'
+const AUTO_MODE_BODY = "Auto mode is using Claude Code's built-in classifier in this session, and those classifier requests are billed. Continue to keep going in auto mode, or Stop to end this turn."
+const SAFEGUARD_WHY = {
+  bio: 'Our intentionally broad safeguards allow us to deliver more capabilities faster, but can sometimes flag legitimate biology tasks.',
+  cyber: 'Our intentionally broad safeguards allow us to deliver more capabilities faster, but can sometimes flag legitimate coding and cybersecurity tasks.'
+}
+const ZERO_DECIMAL = new Set(['JPY', 'KRW', 'VND'])
+
+function money(cents, currency) {
+  const code = (currency ?? 'USD').toUpperCase()
+  const amount = ZERO_DECIMAL.has(code) ? cents : cents / 100
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: code }).format(amount)
+  } catch {
+    return `${amount} ${code}`
+  }
+}
+
+/** A help link the CLI may name: https on claude.com or anthropic.com only. */
+function trustedHelp(url) {
+  if (typeof url !== 'string') return null
+  try {
+    const u = new URL(url)
+    return u.protocol === 'https:' && ['claude.com', 'anthropic.com'].some((h) => u.hostname === h || u.hostname.endsWith(`.${h}`)) ? url : null
+  } catch {
+    return null
+  }
+}
+
+/** The extension's support article for a model's safeguards. */
+function refusalHelp(model) {
+  const m = model.toLowerCase().replace(/\[1m\]$/, '')
+  if (m.includes('claude-opus-5') && !m.includes('claude-opus-5-5')) return 'https://support.claude.com/en/articles/16049681'
+  if (m === 'fable' || m.includes('claude-fable-')) return 'https://support.claude.com/en/articles/15363606'
+  return 'https://support.claude.com/en/articles/8106465'
+}
+
+/**
+ * What a user-dialog card shows and what each button answers: `result` is what the CLI is told (`null` is
+ * the dismiss), `openUrl` a page the button also opens. Null for a payload the card cannot read, which is
+ * answered as dismissed. `name` turns a model id into its menu name.
+ * @param {{ dialogKind: string, payload: Record<string, unknown> }} dialog
+ * @param {(model: string) => string} [name]
+ */
+export function dialogCard(dialog, name = (m) => modelLabel(m) || m) {
+  const p = dialog.payload && typeof dialog.payload === 'object' ? dialog.payload : {}
+  if (dialog.dialogKind === 'refusal_fallback_prompt') {
+    if (typeof p.originalModel !== 'string' || typeof p.fallbackModel !== 'string') return null
+    const original = name(p.originalModel)
+    const fallback = name(p.fallbackModel)
+    const category = typeof p.apiRefusalCategory === 'string' ? p.apiRefusalCategory : null
+    const lead = category && SAFEGUARD_WHY[category]
+      ? `${original}'s safeguards flagged this message. ${SAFEGUARD_WHY[category]}`
+      : `${original}'s safeguards flagged this message. This sometimes happens with safe, normal conversations.`
+    const body = fallback !== original ? `${lead} Edit and retry, or continue with ${fallback}.` : lead
+    return {
+      title: 'Session paused', body: [body], learnMore: refusalHelp(p.originalModel), dismissable: true, delayMs: 0,
+      actions: [{ label: `Switch to ${fallback}`, result: 'retry_fallback', primary: true }, { label: `Edit prompt and retry with ${original}`, result: 'edit_prompt', editPrompt: true }]
+    }
+  }
+  if (dialog.dialogKind === 'fable_overage_consent_prompt') {
+    if (typeof p.overagesEnabled !== 'boolean') return null
+    const model = typeof p.modelName === 'string' && p.modelName.trim() ? p.modelName.trim() : 'Fable'
+    const balance = typeof p.balanceCents === 'number' && Number.isFinite(p.balanceCents) ? p.balanceCents : null
+    const currency = typeof p.currency === 'string' ? p.currency : null
+    const switchDefault = { label: 'Switch to the default model and continue', result: 'switch_default' }
+    const card = (title, body, primary, blocked) => ({
+      title, body: [body], learnMore: EXTRA_USAGE_URL, dismissable: true, delayMs: 0,
+      actions: [{ label: primary, result: 'consent', primary: true, ...(blocked ? { openUrl: USAGE_URL } : {}) }, switchDefault]
+    })
+    if (!p.overagesEnabled) return card(`${model} requires usage credits`, `${model} runs on usage credits, billed separately from your plan. You don't have usage credits yet.`, 'Buy usage credits on claude.ai', true)
+    if (balance !== null && balance <= 0) return card(`${model} requires usage credits`, `${model} runs on usage credits — you have ${money(0, currency)} in credits.`, 'Buy usage credits on claude.ai', true)
+    const left = balance !== null ? ` — you have ${money(balance, currency)} in credits` : ', billed separately from your plan'
+    return card(`Continue on ${model} with usage credits?`, `${model} runs on usage credits${left}. Your other models remain included in your plan.`, `Continue with ${model}`, false)
+  }
+  if (dialog.dialogKind === 'auto_mode_server_fallback') {
+    const title = typeof p.title === 'string' ? p.title.trim() : ''
+    const paragraphs = Array.isArray(p.paragraphs) ? p.paragraphs.filter((x) => typeof x === 'string' && x.trim()) : []
+    return {
+      title: title || 'Auto mode', body: paragraphs.length ? paragraphs : [AUTO_MODE_BODY], learnMore: trustedHelp(p.helpUrl), dismissable: false,
+      // The extension holds both buttons for half a second, so a key already on its way does not answer it.
+      delayMs: 500,
+      actions: [{ label: 'Continue', result: 'continue', primary: true }, { label: 'Stop', result: 'interrupt' }]
+    }
+  }
+  return null
+}

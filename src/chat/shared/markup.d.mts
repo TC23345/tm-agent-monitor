@@ -3,7 +3,8 @@ export type Mark =
   | { kind: 'box'; color: string; width: number; x: number; y: number; w: number; h: number }
   | { kind: 'arrow'; color: string; width: number; x1: number; y1: number; x2: number; y2: number }
   | { kind: 'text'; color: string; size: number; x: number; y: number; w: number; text: string }
-export type MarkupTool = 'pen' | 'highlight' | 'box' | 'arrow' | 'text' | 'eraser'
+  | { kind: 'crop'; x: number; y: number; w: number; h: number }
+export type MarkupTool = 'pen' | 'highlight' | 'box' | 'arrow' | 'text' | 'eraser' | 'crop'
 export interface MarkHistory { past: Mark[][]; present: Mark[]; future: Mark[][] }
 
 export const MARK_COLORS: string[]
@@ -19,6 +20,9 @@ export function segmentDistance(px: number, py: number, x1: number, y1: number, 
 export function hitMark(mark: Mark, x: number, y: number, tolerance: number): boolean
 export function markAt(marks: Mark[], x: number, y: number, tolerance: number): number
 export function keepMark(mark: Mark, minSize: number): boolean
+export function cropOf(marks: Mark[]): Extract<Mark, { kind: 'crop' }> | null
+export function withCrop(marks: Mark[], crop: Extract<Mark, { kind: 'crop' }>): Mark[]
+export function cropRect(marks: Mark[], width: number, height: number): { x: number; y: number; w: number; h: number }
 export function historyOf(marks?: Mark[]): MarkHistory
 export function commitMarks(h: MarkHistory, next: Mark[]): MarkHistory
 export function undoMarks(h: MarkHistory): MarkHistory

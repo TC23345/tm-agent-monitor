@@ -4,7 +4,7 @@ import {
   argDetail, cardSteps, clockTime, previewMarkdown, streamParts, effortLabel, fmtTokens, formatElapsed, imageSize, latestModels, mcpTitle, modelLabel, serverTitle, splitMcpName,
   WORKING_VERBS, activitySummary, describePermissionUpdates, limitLines, limitName, matchFiles, relPath, resetPhrase, transcriptMarkdown, verbDelay
 } from './present.mjs'
-import { cardInsertion, cardTitle, composeMessage, isLongPaste, quoteBlock } from './present.mjs'
+import { cardInsertion, cardTitle, chatDigest, composeMessage, dialogCard, isLongPaste, quoteBlock } from './present.mjs'
 import { emptyTranscript } from './chatModel.mjs'
 
 test('previewMarkdown keeps a code preview’s lines in a fence and leaves Markdown as written', () => {
@@ -233,4 +233,59 @@ test('cardInsertion: a quote leads the text, a paste lands at the caret', () => 
   const p = cardInsertion({ kind: 'paste', text: 'PASTE' }, 'see  here', 4)
   assert.deepEqual(p, { start: 4, end: 4, insert: 'PASTE', after: 'see PASTE here', caret: 9 })
   assert.equal(cardInsertion({ kind: 'paste', text: 'x' }, 'ab', 99).after, 'abx')
+})
+
+test('chatDigest: the last steps as plain lines, what waits for the user, no thinking', () => {
+  const t = { ...emptyTranscript('claude', { cwd: 'C:\\p', sessionId: 's1' }), status: 'waiting', items: [
+    { kind: 'user', id: 'u', text: 'run the tests', at: 1 },
+    { kind: 'thinking', id: 'th', text: 'hmm', streaming: false, at: 2 },
+    { kind: 'tool', id: 't', name: 'Bash', title: 'npm test', label: 'Bash', detail: 'Run the tests', status: 'failed', output: '1 failing', at: 3 },
+    { kind: 'assistant', id: 'a', text: 'One test fails.', streaming: false, at: 4 },
+    { kind: 'approval', id: 'ap', title: 'Edit App.tsx', choices: ['allow', 'deny'], at: 5 }
+  ] }
+  const d = chatDigest(t, 3)
+  assert.equal(d.status, 'waiting')
+  assert.deepEqual(d.waitingFor, { kind: 'approval', text: 'Edit App.tsx' })
+  assert.equal(d.total, 4)
+  assert.deepEqual(d.items.map((x) => x.kind), ['tool', 'assistant', 'approval'])
+  assert.equal(d.items[0].text, 'Bash · Run the tests')
+  assert.equal(d.items[0].output, '1 failing')
+  const answered = chatDigest({ ...t, items: t.items.map((x) => (x.kind === 'approval' ? { ...x, decided: 'allow' } : x)) })
+  assert.equal(answered.waitingFor, null)
+  const q = { kind: 'question', id: 'q', title: 'Claude needs a decision', questions: [{ id: 'q1', question: 'Which port?', header: 'Port', options: [], multiSelect: false }], at: 6 }
+  assert.deepEqual(chatDigest({ ...t, items: [q] }).waitingFor, { kind: 'question', text: 'Which port?' })
+  assert.equal(chatDigest({ ...t, items: [{ ...q, answers: { q1: ['80'] } }] }).waitingFor, null)
+  assert.equal(chatDigest({ ...t, items: [{ kind: 'assistant', id: 'b', text: 'x'.repeat(5000), streaming: true, at: 1 }] }).items[0].text.length < 4100, true)
+})
+
+test('dialogCard: the refusal fallback in the extension\'s words, and its answers', () => {
+  const name = (m) => ({ 'claude-opus-5-5': 'Opus 5.5', 'claude-sonnet-5-5': 'Sonnet 5.5' })[m] ?? m
+  const c = dialogCard({ dialogKind: 'refusal_fallback_prompt', payload: { originalModel: 'claude-opus-5-5', fallbackModel: 'claude-sonnet-5-5', apiRefusalCategory: 'cyber' } }, name)
+  assert.equal(c.title, 'Session paused')
+  assert.match(c.body[0], /^Opus 5\.5's safeguards flagged this message\. Our intentionally broad safeguards .* cybersecurity tasks\. Edit and retry, or continue with Sonnet 5\.5\.$/)
+  assert.deepEqual(c.actions.map((a) => [a.label, a.result]), [['Switch to Sonnet 5.5', 'retry_fallback'], ['Edit prompt and retry with Opus 5.5', 'edit_prompt']])
+  assert.equal(c.learnMore, 'https://support.claude.com/en/articles/8106465')
+  assert.equal(dialogCard({ dialogKind: 'refusal_fallback_prompt', payload: {} }), null)
+})
+
+test('dialogCard: Fable credits, blocked or not', () => {
+  const none = dialogCard({ dialogKind: 'fable_overage_consent_prompt', payload: { overagesEnabled: false } })
+  assert.equal(none.title, 'Fable requires usage credits')
+  assert.deepEqual(none.actions[0], { label: 'Buy usage credits on claude.ai', result: 'consent', primary: true, openUrl: 'https://claude.ai/settings/usage' })
+  const some = dialogCard({ dialogKind: 'fable_overage_consent_prompt', payload: { overagesEnabled: true, modelName: 'Fable 5.1', balanceCents: 1250, currency: 'usd' } })
+  assert.equal(some.title, 'Continue on Fable 5.1 with usage credits?')
+  assert.match(some.body[0], /you have \$12\.50 in credits/)
+  assert.deepEqual(some.actions.map((a) => a.result), ['consent', 'switch_default'])
+  assert.equal(dialogCard({ dialogKind: 'fable_overage_consent_prompt', payload: { overagesEnabled: true, balanceCents: 0 } }).actions[0].openUrl, 'https://claude.ai/settings/usage')
+})
+
+test('dialogCard: the auto-mode fallback, its help link only on Anthropic\'s sites, and unknown kinds', () => {
+  const c = dialogCard({ dialogKind: 'auto_mode_server_fallback', payload: { helpUrl: 'https://evil.example/x' } })
+  assert.equal(c.learnMore, null)
+  assert.equal(c.dismissable, false)
+  assert.equal(c.delayMs, 500)
+  assert.match(c.body[0], /^Auto mode is using Claude Code's built-in classifier/)
+  assert.deepEqual(c.actions.map((a) => a.result), ['continue', 'interrupt'])
+  assert.equal(dialogCard({ dialogKind: 'auto_mode_server_fallback', payload: { helpUrl: 'https://docs.claude.com/x', paragraphs: ['A', ' '] } }).learnMore, 'https://docs.claude.com/x')
+  assert.equal(dialogCard({ dialogKind: 'something_new', payload: {} }), null)
 })

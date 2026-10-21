@@ -97,7 +97,13 @@ function load() {
       SendInput: user32.func('uint32 __stdcall SendInput(uint32 count, CW_INPUT *inputs, int size)'),
       GlobalLock: kernel32.func('void * __stdcall GlobalLock(uintptr_t h)'),
       GlobalUnlock: kernel32.func('int __stdcall GlobalUnlock(uintptr_t h)'),
-      GlobalSize: kernel32.func('size_t __stdcall GlobalSize(uintptr_t h)')
+      GlobalSize: kernel32.func('size_t __stdcall GlobalSize(uintptr_t h)'),
+      // A chat's process job (`createKillJob`): everything a CLI starts, ended together.
+      CreateJobObjectW: kernel32.func('uintptr_t __stdcall CreateJobObjectW(uintptr_t attrs, uintptr_t name)'),
+      SetInformationJobObject: kernel32.func('int __stdcall SetInformationJobObject(uintptr_t job, int infoClass, void *info, uint32 length)'),
+      OpenProcess: kernel32.func('uintptr_t __stdcall OpenProcess(uint32 access, int inherit, uint32 pid)'),
+      AssignProcessToJobObject: kernel32.func('int __stdcall AssignProcessToJobObject(uintptr_t job, uintptr_t process)'),
+      TerminateJobObject: kernel32.func('int __stdcall TerminateJobObject(uintptr_t job, uint32 exitCode)')
     }
 
     const PROCESSENTRY32W = koffi.struct('CW_PROCESSENTRY32W', {
@@ -431,6 +437,72 @@ export function focusByPid(pid) {
 }
 
 // ---- clipboard ------------------------------------------------------------
+// ---- process jobs (0.4.68) ----
+// A chat's CLI goes into a job object when it starts, and every process it
+// starts after that is in the job too, even one whose parent has since exited:
+// `npx`/`cmd` shims start an MCP server and exit, and a tree walk by parent id
+// (`taskkill /T`) then cannot find the server (the `railway mcp` orphan,
+// reproduced 2026-10-21). Ending the job ends them all; KILL_ON_JOB_CLOSE also
+// ends them if the app dies without closing the chat.
+
+const JobObjectExtendedLimitInformation = 9
+const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+/** JOBOBJECT_EXTENDED_LIMIT_INFORMATION on x64: 144 bytes, BasicLimitInformation.LimitFlags at 16. */
+const EXTENDED_LIMIT_SIZE = 144
+const LIMIT_FLAGS_OFFSET = 16
+const PROCESS_SET_QUOTA = 0x0100
+const PROCESS_TERMINATE = 0x0001
+
+/** A new kill-on-close job, or null when Win32 is unavailable or it could not be made. */
+export function createKillJob() {
+  const a = load()
+  if (!a) return null
+  try {
+    const job = a.fns.CreateJobObjectW(0, 0)
+    if (!job) return null
+    const info = Buffer.alloc(EXTENDED_LIMIT_SIZE)
+    info.writeUInt32LE(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, LIMIT_FLAGS_OFFSET)
+    if (!a.fns.SetInformationJobObject(job, JobObjectExtendedLimitInformation, info, EXTENDED_LIMIT_SIZE)) {
+      a.fns.CloseHandle(job)
+      return null
+    }
+    return job
+  } catch {
+    return null
+  }
+}
+
+/** Put a running process in the job; false when it is gone or cannot be opened. */
+export function addToJob(job, pid) {
+  const a = load()
+  if (!a || !job || !Number.isInteger(pid) || pid <= 0) return false
+  try {
+    const proc = a.fns.OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid)
+    if (!proc) return false
+    const ok = !!a.fns.AssignProcessToJobObject(job, proc)
+    a.fns.CloseHandle(proc)
+    return ok
+  } catch {
+    return false
+  }
+}
+
+/** End every process in the job and let the job go. */
+export function endJob(job) {
+  const a = load()
+  if (!a || !job) return
+  try {
+    a.fns.TerminateJobObject(job, 1)
+  } catch {
+    /* already empty */
+  }
+  try {
+    a.fns.CloseHandle(job)
+  } catch {
+    /* already closed */
+  }
+}
+
 // Reads and the change listener only. What to keep, dedupe, or redact is
 // decided in src/shared/clips.mjs; the watcher in src/main/clipboardWatch.ts
 // picks between the listener and the sequence-number poll.

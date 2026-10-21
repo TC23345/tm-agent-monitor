@@ -454,7 +454,15 @@ export function App() {
       case 'layout': applyLayout(raw.name); break
       case 'settings': setSettingsSection(raw.section); setSettingsOpen(true); break
       case 'clipboard': openClipboard(); break
-      case 'chat': startIn(raw.provider, { cwd: raw.cwd, label: raw.cwd ? raw.cwd.split(/[\\/]/).filter(Boolean).pop() : context.label }); break
+      case 'chat':
+        // A chat the daemon already started for an agent: a pane attaches to it when the grid has room; else it
+        // runs headless, still driven through /v1/chats.
+        if (raw.chatId) {
+          if (panes.length < MAX_PANES) addPane('chat', undefined, undefined, undefined, { provider: raw.provider, cwd: raw.cwd ?? '', chatId: raw.chatId })
+          break
+        }
+        startIn(raw.provider, { cwd: raw.cwd, label: raw.cwd ? raw.cwd.split(/[\\/]/).filter(Boolean).pop() : context.label })
+        break
       case 'open': {
         const label = raw.cwd ? raw.cwd.split(/[\\/]/).pop() : undefined
         if (raw.sessionId) {
@@ -867,7 +875,7 @@ export function App() {
     addPane('terminal', { launch: 'shell', cwd: context.cwd, label: context.label, initialCommand: command.command })
   }
 
-  /** A project group dropped on the grid: a terminal there (Shift for a Claude Code chat). */
+  /** A project group dropped on the grid: a terminal there (Shift for TaylorMade CC). */
   const dropProject = (key: string, claude: boolean) => {
     const group = groups.find((g) => g.key === key)
     if (!group?.cwd) return
@@ -1021,7 +1029,9 @@ export function App() {
             bridge={window.watch.chat}
             config={pane.chat!}
             onConfig={(patch) => updateChat(pane.id, patch)}
-            renderText={(text) => <MarkdownView source={text} />}
+            draftKey={pane.id}
+            openUrl={(url) => { void window.watch.openExternal(url) }}
+            renderText={(text) => <MarkdownView source={text} chat={{ cwd: pane.chat?.cwd, openPath: openFile }} />}
             copyText={(text) => window.watch.copyText(text, { cwd: pane.chat?.cwd })}
             openFile={openFile}
             listFiles={(cwd) => window.watch.listChatFiles(cwd)}
@@ -1060,7 +1070,8 @@ export function App() {
   /** What a terminal or chat pane runs, as its header title — the surface named on both, so they never read alike. */
   const paneTitle = (pane: PaneInstance) =>
     pane.kind === 'terminal' && pane.term ? terminalName(pane.term.launch)
-      : pane.kind === 'chat' && pane.chat ? (pane.chat.provider === 'claude' ? 'Claude Code chat' : 'Codex chat')
+      // A chat is named for the user everywhere (2026-10-21): TaylorMade CC runs Claude Code, TaylorMade Codex runs Codex.
+      : pane.kind === 'chat' && pane.chat ? (pane.chat.provider === 'claude' ? 'TaylorMade CC' : 'TaylorMade Codex')
       : pane.kind === 'notes' ? "TC's Notes"
       : pane.kind === 'clipboard' ? 'TaylorMade Clipboard'
         : pane.kind === 'web' ? pane.web?.label
@@ -1320,8 +1331,8 @@ export function App() {
     // the ways to start a session, and the jump to a waiting one.
     // "terminal" / "chat" in every launch label: the two surfaces run the same CLI and must never share a name.
     // Claude Code and Codex start as chat panes; a terminal is a plain shell (type `claude` there for a CLI session).
-    cmd('new-claude-chat', 'New Claude Code chat', () => newChat('claude'), { icon: <ProviderBadge provider="claude" />, keywords: ['agent', 'chat', 'conversation', 'session'], pinned: true, detail: full ? 'all six panes are open' : context.label })
-    cmd('new-codex-chat', 'New Codex chat', () => newChat('codex'), { icon: <ProviderBadge provider="codex" />, keywords: ['agent', 'chat', 'conversation', 'thread', 'session'], pinned: true, detail: full ? 'all six panes are open' : context.label })
+    cmd('new-claude-chat', 'New TaylorMade CC', () => newChat('claude'), { icon: <ProviderBadge provider="claude" />, keywords: ['agent', 'chat', 'conversation', 'session', 'claude code'], pinned: true, detail: full ? 'all six panes are open' : context.label })
+    cmd('new-codex-chat', 'New TaylorMade Codex', () => newChat('codex'), { icon: <ProviderBadge provider="codex" />, keywords: ['agent', 'chat', 'conversation', 'thread', 'session', 'codex'], pinned: true, detail: full ? 'all six panes are open' : context.label })
     cmd('new-terminal', 'New terminal', () => newTerminal('shell'), { icon: <Terminal strokeWidth={2} />, keywords: ['shell', 'powershell'], keys: ['Ctrl', 'Shift', '`'], pinned: true, detail: full ? 'opens a window — all six panes are open' : context.label })
     cmd('ext-terminal', 'Open external terminal', () => window.watch.openTerminal(context.cwd, 'shell'), { icon: <SquareTerminal strokeWidth={2} />, detail: context.label ?? 'home folder' })
     const focusedChat = panes.find((p) => p.id === focusedPane && p.kind === 'chat')
@@ -1626,7 +1637,7 @@ export function App() {
             <div className="gridempty" data-testid="grid-empty">
               <SquareTerminal strokeWidth={1.5} style={{ width: 28, height: 28 }} />
               <div className="gridempty-hint">
-                Nothing open. Right-click a project at the top of the sidebar to start a Claude Code or Codex chat there (File has them too).
+                Nothing open. Right-click a project at the top of the sidebar to start TaylorMade CC or TaylorMade Codex there (File has them too).
                 <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>`</kbd> opens a terminal; <kbd>Ctrl</kbd><kbd>K</kbd> finds everything else.
               </div>
             </div>

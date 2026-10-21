@@ -29,7 +29,7 @@ import { PendingCalls, WORKER_TIMEOUT_MS, type WorkerKind } from '../shared/usag
 import { mockSnapshot, mockHistory, mockUsageInsights, mockWindows, mockEvents } from './mock.js'
 import { HISTORY_MAX_DAYS, HISTORY_RECENT_DAYS } from '../shared/history.mjs'
 import { parseWorkspaceArgs } from '../shared/workspaceCommand.mjs'
-import { focusHwnd, focusByPid, listDesktopWindows, clipboardOwner, foregroundWindowInfo, sendPasteKeys, available as winAvailable } from '../native/win32.mjs'
+import { focusHwnd, focusByPid, listDesktopWindows, clipboardOwner, foregroundWindowInfo, sendPasteKeys, available as winAvailable, createKillJob, addToJob, endJob } from '../native/win32.mjs'
 import { startClipboardWatch, type ClipboardWatch } from './clipboardWatch.js'
 import { installWebPaneGuards } from './webPanes.js'
 import { clipboardHasImage, makeThumbnail, protectText, protectionAvailable, readClipboardSnapshot, readClipboardText, unprotectText, writeClipboardImage, writeClipboardText } from './clipboardIo.js'
@@ -44,6 +44,7 @@ import { parseClipImport, snippetNote, MAX_IMPORT_BYTES } from '../shared/clipIm
 import { agentForTerminal } from '../shared/attention.mjs'
 import { ChatManager } from '../chat/host/chatManager'
 import type { ApprovalChoice, Attachment } from '../chat/shared/chatModel.mjs'
+import { chatDigest } from '../chat/shared/present.mjs'
 import { buildWindowList } from '../shared/windows.mjs'
 import { parseProjectCommands } from '../shared/projectCommands.mjs'
 import { parseGitStatus, type GitStatus } from '../shared/gitStatus.mjs'
@@ -212,7 +213,18 @@ const terminals = new TerminalManager(
 const chats = new ChatManager({
   envFor: (id) => ({ TM_AGENT_MONITOR_ENDPOINT_FILE: config.endpointFile, TM_TERMINAL_ID: id }),
   scratchDir: app.getPath('temp'),
-  log: (line) => console.log(`[chat] ${line}`)
+  log: (line) => console.log(`[chat] ${line}`),
+  // Each CLI in a job of its own (0.4.68): closing the chat ends every MCP server it started, even one whose
+  // npx/cmd parent had already exited, which the tree kill cannot find; and the app dying ends them too.
+  adoptProcess: (pid) => {
+    const job = createKillJob()
+    if (!job) return null
+    if (!addToJob(job, pid)) {
+      endJob(job)
+      return null
+    }
+    return () => endJob(job)
+  }
 })
 chats.on('change', (id: string, transcript: unknown) => {
   if (win && !win.isDestroyed()) win.webContents.send('chat:changed', id, transcript)
@@ -2277,6 +2289,13 @@ function registerIpc(): void {
       return false
     }
   })
+  // One of Claude Code's user dialogs (0.4.68): only the answers its three cards offer, or null (dismissed).
+  const DIALOG_RESULTS = new Set(['retry_fallback', 'edit_prompt', 'consent', 'switch_default', 'continue', 'interrupt'])
+  ipcMain.handle('chat:answer-dialog', async (_e, id: unknown, dialogId: unknown, result: unknown) => {
+    if (!validTermId(id) || typeof dialogId !== 'string' || !/^dialog:\d{1,9}$/.test(dialogId)) return
+    if (result !== null && (typeof result !== 'string' || !DIALOG_RESULTS.has(result))) return
+    try { await chats.answerDialog(id, dialogId, result) } catch { /* already answered, or the chat is gone */ }
+  })
   ipcMain.handle('chat:answer-question', async (_e, id: unknown, questionId: unknown, answers: unknown) => {
     if (!validTermId(id) || !validRequestId(questionId)) return
     let clean: Record<string, string[]> | null = null
@@ -3114,8 +3133,8 @@ if (!gotLock) {
     // uninstall, which a dev electron.exe does not.
     if (process.platform === 'win32' && app.isPackaged) {
       app.setUserTasks([
-        { program: process.execPath, arguments: 'chat --provider claude', iconPath: process.execPath, iconIndex: 0, title: 'New Claude Code chat', description: 'Start a Claude Code chat pane in the workspace' },
-        { program: process.execPath, arguments: 'chat --provider codex', iconPath: process.execPath, iconIndex: 0, title: 'New Codex chat', description: 'Start a Codex chat pane in the workspace' },
+        { program: process.execPath, arguments: 'chat --provider claude', iconPath: process.execPath, iconIndex: 0, title: 'New TaylorMade CC', description: 'Start TaylorMade CC (Claude Code) in the workspace' },
+        { program: process.execPath, arguments: 'chat --provider codex', iconPath: process.execPath, iconIndex: 0, title: 'New TaylorMade Codex', description: 'Start TaylorMade Codex in the workspace' },
         { program: process.execPath, arguments: 'open --launch shell', iconPath: process.execPath, iconIndex: 0, title: 'New terminal', description: 'Open a terminal in the workspace' },
         { program: process.execPath, arguments: 'show', iconPath: process.execPath, iconIndex: 0, title: 'Show workspace', description: 'Bring the workspace to the front' }
       ])
@@ -3177,6 +3196,47 @@ if (!gotLock) {
         input: (id, data) => terminals.input(id, data),
         read: (id, lines) => terminals.read(id, lines),
         list: () => terminals.list()
+      },
+      // Chat routes for agents (0.4.68): the same ChatManager the panes use. A
+      // new chat is announced to the renderer, which attaches a pane to it
+      // when the grid has room (it runs headless otherwise); like the terminal
+      // routes, nothing here shows the window.
+      chats: {
+        list: async () => Promise.all(chats.list().map(async (c) => ({ ...c, title: (await chats.get(c.id))?.title ?? null }))),
+        create: async ({ provider, cwd, model, prompt }) => {
+          const folder = cwd ?? app.getPath('home')
+          let directory = false
+          try {
+            directory = existsSync(folder) && statSync(folder).isDirectory()
+          } catch {
+            /* unreadable path: treated as missing */
+          }
+          if (!directory) return { error: 'cwd is not an existing directory' }
+          let created: { id: string }
+          try {
+            created = await chats.create({ provider, cwd: folder, resume: null, model: model ?? null, permissionMode: null })
+          } catch (error) {
+            return { error: `could not start the chat: ${error instanceof Error ? error.message : error}` }
+          }
+          if (win && !win.isDestroyed()) win.webContents.send('workspace:command', { kind: 'chat', provider, cwd: folder, chatId: created.id })
+          if (prompt) await chats.send(created.id, prompt, [])
+          return { id: created.id, provider, cwd: folder }
+        },
+        send: async (id, text) => {
+          if (!(await chats.get(id))) return 'missing'
+          await chats.send(id, text, [])
+          return 'ok'
+        },
+        read: async (id, items) => {
+          const t = await chats.get(id)
+          return t ? chatDigest(t, items) : null
+        },
+        status: async (id) => (await chats.get(id))?.status ?? null,
+        interrupt: async (id) => {
+          if (!(await chats.get(id))) return 'missing'
+          await chats.interrupt(id)
+          return 'ok'
+        }
       },
       // Clipboard routes for agents (PRD §4.1): the same store and rules as
       // the pane. `clipStore` is created after the daemon and read lazily.

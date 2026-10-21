@@ -46,6 +46,8 @@ export interface ChatItemTool {
   endedAt?: number
   /** What the finished background task reported. */
   summary?: string
+  /** While it runs: an agent's one-line status (Claude's task_progress) or an MCP call's progress message (Codex). */
+  progress?: string
   /** Codex: a multi-agent call — the tool, the agent threads it named, each one's last state. */
   collab?: CollabCall
 }
@@ -109,7 +111,17 @@ export interface ChatItemSystem {
 }
 export interface TurnFile { path: string; added: number; removed: number }
 export interface ChatItemTurn { kind: 'turn'; id: string; at: number; durationMs?: number; outputTokens?: number; files: TurnFile[]; turnId?: string; undone?: boolean; interrupted?: boolean }
-export type ChatItem = ChatItemUser | ChatItemAssistant | ChatItemThinking | ChatItemTool | ChatItemApproval | ChatItemQuestion | ChatItemSystem | ChatItemTurn
+export interface ChatItemDialog {
+  kind: 'dialog'
+  id: string
+  dialogKind: string
+  payload: Record<string, unknown>
+  at: number
+  toolUseId?: string
+  result?: string
+  cancelled?: boolean
+}
+export type ChatItem = ChatItemUser | ChatItemAssistant | ChatItemThinking | ChatItemTool | ChatItemApproval | ChatItemQuestion | ChatItemDialog | ChatItemSystem | ChatItemTurn
 
 export interface Usage { inputTokens: number; outputTokens: number; contextTokens?: number; contextWindow?: number; costUsd?: number }
 export interface BackgroundTask { id: string; description: string; type: string; toolUseId?: string }
@@ -190,7 +202,8 @@ export function appendDelta(t: Transcript, id: string, kind: 'assistant' | 'thin
 export function settleStreams(t: Transcript): Transcript
 export function pendingApprovals(t: Transcript): ChatItemApproval[]
 export function pendingQuestions(t: Transcript): ChatItemQuestion[]
-export function pendingRequests(t: Transcript): (ChatItemApproval | ChatItemQuestion)[]
+export function pendingRequests(t: Transcript): (ChatItemApproval | ChatItemQuestion | ChatItemDialog)[]
+export function settleDialog(t: Transcript, id: string, result: string | null): Transcript
 export function answerQuestion(t: Transcript, id: string, answers: Record<string, string[]> | null): Transcript
 export function summarizeAttachments(list?: Attachment[]): AttachmentSummary[] | undefined
 export function setStatus(t: Transcript, status: SessionStatus, error?: string | null): Transcript

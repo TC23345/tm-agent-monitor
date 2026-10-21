@@ -34,3 +34,13 @@ export function cardTitle(text: string): string
 export function quoteBlock(text: string): string
 export function composeMessage(cards: TextCard[], text: string): string
 export function cardInsertion(card: TextCard, text: string, caret: number): { start: number; end: number; insert: string; after: string; caret: number }
+export interface ChatDigestItem { kind: 'user' | 'assistant' | 'tool' | 'approval' | 'question' | 'dialog' | 'system'; text: string; [extra: string]: unknown }
+export interface ChatDigest {
+  provider: string; sessionId: string | null; cwd: string; title: string | null; model: string | null; status: string; error?: string
+  waitingFor: { kind: 'approval' | 'question' | 'dialog'; text: string } | null; queued: number; total: number; items: ChatDigestItem[]
+}
+export function chatDigest(t: Transcript, limit?: number): ChatDigest
+export const DIALOG_KINDS: string[]
+export interface DialogAction { label: string; result: string; primary?: boolean; openUrl?: string; editPrompt?: boolean }
+export interface DialogCard { title: string; body: string[]; learnMore: string | null; dismissable: boolean; delayMs: number; actions: DialogAction[] }
+export function dialogCard(dialog: { dialogKind: string; payload: Record<string, unknown> }, name?: (model: string) => string): DialogCard | null

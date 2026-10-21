@@ -549,8 +549,13 @@
 .chat-suggest-key { position: absolute; right: 10px; top: 10px; color: var(--faint, var(--muted, #888)); }
 .chat-input-foot { display: flex; align-items: center; gap: 4px; padding: 2px 6px 6px; min-width: 0; container-type: inline-size; }
 /* The chips keep their widest word's width (StableText) and the mode chip never shrinks; in a footer this narrow the
-   clock gives way first, to its icon (its title still says the time). */
-@container (max-width: 420px) { .chat-foot-clock-text { display: none; } .chat-foot-clock { padding: 0 4px; } }
+   clock gives way to its icon (its title still says the time) and the model chip drops its effort word (the menu's
+   heading still says it), so the model's name reads whole instead of both words cut to a letter ("G… H…"). */
+@container (max-width: 420px) {
+  .chat-foot-clock-text { display: none; }
+  .chat-foot-clock { padding: 0 4px; }
+  .chat-footchip-sub { display: none; }
+}
 .chat-foot-gap { flex: 1; }
 .chat-iconbtn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--muted, inherit); cursor: pointer; flex: 0 0 auto; }
 .chat-iconbtn:hover:not(:disabled) { background: rgba(127, 127, 127, 0.14); color: inherit; }
@@ -585,6 +590,12 @@
 .chat-pop.is-add { left: -2px; right: auto; bottom: calc(100% + 6px); width: 248px; }
 .chat-pop-item.is-row { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; padding-right: 8px; }
 .chat-pop-item.is-static { cursor: default; }
+/* One of Claude Code's user dialogs (DialogRow): the extension's card — title (with a dismiss ×), paragraphs, Learn more, buttons. */
+.chat-dialog-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.chat-dialog-x { width: 22px; height: 22px; }
+.chat-dialog-body { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--chat-ink); }
+.chat-dialog-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.chat-dialog-link:hover { color: var(--accent, #4a7bd0); }
 .chat-pop-item.is-static:hover { background: transparent; }
 /* A model's or a mode's right-click menu (RowMenu), inside the menu's scrolling box, and a row being renamed. */
 .chat-rowmenu { position: absolute; z-index: 2; padding: 4px; border: 1px solid var(--chat-line); border-radius: var(--r-card, 8px); background: var(--card, #1f1e23); box-shadow: var(--chat-float-shadow); }

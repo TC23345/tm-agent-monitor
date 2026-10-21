@@ -14,9 +14,9 @@ import {
 } from 'lucide-react'
 import { DiffView } from './DiffView'
 import { changeLines, changeSummary, countChanges, splitLines } from '../shared/diff.mjs'
-import { activitySummary, clockTime, fmtTokens, formatElapsed, previewMarkdown, relPath, streamParts } from '../shared/present.mjs'
+import { activitySummary, clockTime, fmtTokens, formatElapsed, previewMarkdown, relPath, streamParts, dialogCard, type DialogAction } from '../shared/present.mjs'
 import type {
-  ApprovalChoice, AttachmentSummary, ChatItem, ChatItemApproval, ChatItemAssistant, ChatItemQuestion, ChatItemSystem, ChatItemThinking, ChatItemTool, ChatItemTurn, ChatItemUser, Provider
+  ApprovalChoice, AttachmentSummary, ChatItem, ChatItemApproval, ChatItemAssistant, ChatItemDialog, ChatItemQuestion, ChatItemSystem, ChatItemThinking, ChatItemTool, ChatItemTurn, ChatItemUser, Provider
 } from '../shared/chatModel.mjs'
 
 export type PromptAction = 'fork' | 'rewind' | 'fork-rewind'
@@ -26,6 +26,10 @@ export interface RowActions {
   renderText: (text: string) => ReactNode
   onAnswer: (id: string, choice: ApprovalChoice, message?: string) => void
   onAnswerQuestion: (id: string, answers: Record<string, string[]> | null) => void
+  /** One of Claude Code's user dialogs: its result (`null` dismisses), with the button that sent it. */
+  onAnswerDialog?: (id: string, result: string | null, action?: DialogAction) => void
+  /** Open a web page outside the app (a dialog's *Learn more*). */
+  openUrl?: (url: string) => void
   copyText: (text: string) => void
   provider: Provider
   cwd: string
@@ -91,6 +95,8 @@ export const Row = memo(function Row({ item, actions, nested, comments, below, f
       return <ApprovalRow item={item} actions={actions} comments={comments} />
     case 'question':
       return <QuestionRow item={item} actions={actions} />
+    case 'dialog':
+      return <DialogRow item={item} actions={actions} />
     case 'system':
       return <SystemRow item={item} actions={actions} />
     case 'turn':
@@ -290,6 +296,7 @@ export function ToolRow({ item, actions, nested }: { item: ChatItemTool; actions
       <span className="chat-tool-name">{label}</span>
       {detailNode ? <span className={`chat-tool-detail ${item.detailMono ? 'is-mono' : ''}`} title={detail}>{detailNode}</span> : null}
       {item.elapsedMs !== undefined && item.elapsedMs >= 1000 && !running ? <span className="chat-tool-elapsed">in {formatElapsed(item.elapsedMs)}</span> : null}
+      {running && item.progress && !toCard ? <span className="chat-tool-elapsed" title={item.progress}>{item.progress}</span> : null}
       {item.background ? <span className="chat-tag">In background</span> : null}
       {toCard && stepCount ? <span className="chat-tool-elapsed">{stepCount} step{stepCount === 1 ? '' : 's'}</span> : null}
       {toCard ? <ChevronRight className="chat-ic chat-step-chev" /> : toggles ? (open ? <ChevronDown className="chat-ic chat-step-chev" /> : <ChevronRight className="chat-ic chat-step-chev" />) : null}
@@ -480,6 +487,50 @@ function numberKeys(pick: (n: number) => void) {
       pick(n)
     }
   }
+}
+
+/**
+ * One of Claude Code's user dialogs, as the extension's card (`dialogCard` words it): a title, its paragraphs
+ * and *Learn more*, then its buttons; the refusal and the Fable cards can be dismissed. Waiting, it is a red-edged
+ * card like an approval; answered, it says what was chosen. A kind the card cannot read is dismissed at once.
+ */
+function DialogRow({ item, actions }: { item: ChatItemDialog; actions: RowActions }) {
+  const card = useMemo(() => dialogCard(item), [item])
+  const done = !!item.result || !!item.cancelled
+  const [ready, setReady] = useState(!card?.delayMs)
+  useEffect(() => {
+    if (!card?.delayMs || done) return
+    const timer = window.setTimeout(() => setReady(true), card.delayMs)
+    return () => window.clearTimeout(timer)
+  }, [card, done])
+  useEffect(() => { if (!card && !done) actions.onAnswerDialog?.(item.id, null) }, [card, done, item.id, actions])
+  if (!card) return null
+  const chosen = item.result ? card.actions.find((a) => a.result === item.result)?.label ?? item.result : null
+  return (
+    <Timeline tone={done ? 'idle' : 'wait'} testid="chat-row:dialog" className={`is-question ${done ? 'is-decided' : 'is-waiting'}`}>
+      <div className="chat-card" data-testid={`chat-dialog:${item.dialogKind}`}>
+        <div className="chat-approval-title chat-dialog-title">
+          <span>{card.title}</span>
+          {!done && card.dismissable ? <button className="chat-iconbtn chat-dialog-x" aria-label="Dismiss" title="Dismiss" onClick={() => actions.onAnswerDialog?.(item.id, null)} data-testid="chat-dialog:dismiss"><X className="chat-ic" /></button> : null}
+        </div>
+        {card.body.map((p, i) => (
+          <p key={i} className="chat-dialog-body">
+            {p}
+            {i === card.body.length - 1 && card.learnMore ? <> <a className="chat-dialog-link" href={card.learnMore} onClick={(e) => { e.preventDefault(); actions.openUrl?.(card.learnMore!) }}>Learn more</a></> : null}
+          </p>
+        ))}
+        {done ? (
+          <div className="chat-approval-decided">{item.cancelled ? 'Dismissed' : chosen}</div>
+        ) : (
+          <div className="chat-approval-actions">
+            {card.actions.map((a) => (
+              <button key={a.result} className={`chat-btn ${a.primary ? 'is-allow' : ''}`} disabled={!ready} onClick={() => actions.onAnswerDialog?.(item.id, a.result, a)} data-testid={`chat-dialog:${a.result}`}>{a.label}</button>
+            ))}
+          </div>
+        )}
+      </div>
+    </Timeline>
+  )
 }
 
 function ApprovalRow({ item, actions, comments }: { item: ChatItemApproval; actions: RowActions; comments?: PlanComment[] }) {

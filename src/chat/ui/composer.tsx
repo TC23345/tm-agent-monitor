@@ -18,6 +18,14 @@ import {
 } from 'lucide-react'
 import { MAX_DESCRIPTION, MAX_LABEL, defaultFor, labelFor, withDefault, withLabel, type ChatPrefs, type PrefKind } from '../shared/chatPrefs.mjs'
 import { savePrefs, useChatPrefs } from './prefs'
+import { readDraft, writeDraft } from './drafts'
+import type { Draft, DraftAttachment } from '../shared/drafts.mjs'
+
+/** An attachment as a draft keeps it: an image's bytes (a marked-up one as its PNG), a file's path. */
+function draftAttachment(a: Attachment): DraftAttachment {
+  if (a.kind === 'file') return { kind: 'file', path: a.path, ...(a.name ? { name: a.name } : {}) }
+  return { kind: 'image', name: a.name, mime: a.mime, data: a.data, ...(a.width && a.height ? { width: a.width, height: a.height } : {}) }
+}
 import { cardInsertion, cardTitle, composeMessage, effortLabel, fmtTokens, formatElapsed, isLongPaste, latestModels, matchFiles, modelLabel } from '../shared/present.mjs'
 import type { Attachment, ChatConfigPatch, ChatOptions, CommandOption, ContextUsage, ModeOption, ModelOption, Provider, Transcript } from '../shared/chatModel.mjs'
 import { runningLabel, type AgentCard } from '../shared/agents.mjs'
@@ -69,7 +77,12 @@ interface Props {
   agentsOpen?: boolean
   /** Scroll the transcript to a row (the menu's entries). */
   onShowRow?: (rowId: string) => void
+  /** Where the unsent draft is kept (claude-watch: the pane's id), so an Update, a crash or a reload gives it back. */
+  draftKey?: string
 }
+
+/** How long typing rests before the draft is written. */
+const DRAFT_SAVE_MS = 400
 
 type Menu = 'add' | 'model' | 'mode' | 'slash' | 'mention' | 'background' | null
 
@@ -80,16 +93,40 @@ function mentionAt(text: string, caret: number): { start: number; query: string 
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(props, ref) {
-  const { provider, transcript, chatId, options, onRefreshOptions, onSend, onInterrupt, onConfigure, onNotice, listFiles, onSideQuestion, onMcp, loadContext, onCompact, onStopTask, onPreview, onPlanMode, agents, onAgents, agentsOpen, onShowRow } = props
-  const [text, setText] = useState('')
+  const { provider, transcript, chatId, options, onRefreshOptions, onSend, onInterrupt, onConfigure, onNotice, listFiles, onSideQuestion, onMcp, loadContext, onCompact, onStopTask, onPreview, onPlanMode, agents, onAgents, agentsOpen, onShowRow, draftKey } = props
+  // The draft this pane left unsent, read once when it mounts.
+  const restored = useRef<Draft | null | undefined>(undefined)
+  if (restored.current === undefined) restored.current = readDraft(draftKey)
+  const [text, setText] = useState(() => restored.current?.text ?? '')
   const [caret, setCaret] = useState(0)
-  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [attachments, setAttachments] = useState<Attachment[]>(() => (restored.current?.attachments ?? []) as Attachment[])
   /**
    * Text waiting above the box as cards (the user's call, 2026-10-20): a selection's Quote, and a paste of ten
    * lines or 1,000 characters (`isLongPaste`). Sent as they stand, by `composeMessage`.
    */
-  const [cards, setCards] = useState<Card[]>([])
   const cardId = useRef(0)
+  const [cards, setCards] = useState<Card[]>(() => (restored.current?.cards ?? []).map((c) => ({ ...c, id: ++cardId.current })))
+  // The draft follows every change a beat after it rests, and is written at once when the pane goes away.
+  const pendingDraft = useRef<(() => void) | null>(null)
+  useEffect(() => {
+    if (!draftKey) return
+    const write = () => {
+      pendingDraft.current = null
+      writeDraft(draftKey, { text, cards: cards.map(({ kind, text: t }) => ({ kind, text: t })), attachments: attachments.map(draftAttachment) })
+    }
+    pendingDraft.current = write
+    const timer = window.setTimeout(write, DRAFT_SAVE_MS)
+    return () => window.clearTimeout(timer)
+  }, [draftKey, text, cards, attachments])
+  useEffect(() => {
+    // A reload or a crash never unmounts the pane, so the page's own end writes it too.
+    const flush = () => pendingDraft.current?.()
+    window.addEventListener('pagehide', flush)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      flush()
+    }
+  }, [])
   /**
    * Cards put into the text by *Show in text field*, newest last. The move goes through the box's own editing, so
    * Ctrl+Z takes it out of the text again, and once the text is back to how it was the card returns to its place;
@@ -273,7 +310,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
         if (!result) return
         let next: Attachment = orig
         if (result.marks.length) {
-          next = { ...orig, name: pngName(orig.name), mime: 'image/png', data: result.src.slice(result.src.indexOf(',') + 1) }
+          next = {
+            ...orig, name: pngName(orig.name), mime: 'image/png', data: result.src.slice(result.src.indexOf(',') + 1),
+            ...(result.width && result.height ? { width: result.width, height: result.height } : {})
+          }
           edits.current.set(next, { orig, marks: result.marks })
         }
         setAttachments((list) => list.map((x) => (x === a ? next : x)))
@@ -286,6 +326,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
     const body = composeMessage(cards, text)
     if (!chatId || (!body && attachments.length === 0)) return
     onSend(body, attachments)
+    writeDraft(draftKey, null)
     setText('')
     setAttachments([])
     setCards([])
@@ -674,7 +715,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
               <ModeIcon id={transcript.permissionMode} />
               <StableText
                 value={transcript.permissionMode === 'custom' ? 'Custom' : modeRow ? named('mode', modeRow.id, modeRow) : modeLabel(transcript.permissionMode, options)}
-                options={modes.map((m) => named('mode', m.id, m))}
+                // The chip says *Custom* for Codex's config.toml mode, so that is the word it makes room for.
+                options={modes.map((m) => (m.id === 'custom' ? 'Custom' : named('mode', m.id, m)))}
               />
             </button>
           ) : null}

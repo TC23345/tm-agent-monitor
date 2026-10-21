@@ -1,15 +1,15 @@
 // The image viewer with markup, for an image in the composer (the user's call,
 // 2026-10-20: "similar to Windows' snipping tool"): the image as large as the
 // workspace allows, with a toolbar under it — pen, highlighter, box, arrow,
-// text, eraser, six colours, undo, redo and clear. The marks are drawn on a
+// text, eraser, crop (0.4.68), six colours, undo, redo and clear. The marks are drawn on a
 // canvas over the image in the image's own pixels (shared/markup.mjs) and only
 // flattened into a PNG when the viewer closes, so reopening the image brings
 // them back as marks to undo or erase. Closing keeps the marks (the X, Done,
 // Escape or a click outside); undo or clear takes them off.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { Check, Eraser, Highlighter, MoveUpRight, Pen, Redo2, Square, Trash, Type, Undo2, X, type LucideIcon } from 'lucide-react'
+import { Check, Crop, Eraser, Highlighter, MoveUpRight, Pen, Redo2, Square, Trash, Type, Undo2, X, type LucideIcon } from 'lucide-react'
 import {
-  HIGHLIGHT_ALPHA, MARK_COLORS, TEXT_LINE, addPoint, arrowHead, commitMarks, fitSize, historyOf, keepMark, markAt, markWidth, normRect, redoMarks, sameMarks, undoMarks,
+  HIGHLIGHT_ALPHA, MARK_COLORS, TEXT_LINE, addPoint, arrowHead, commitMarks, cropOf, cropRect, fitSize, historyOf, keepMark, markAt, markWidth, normRect, redoMarks, sameMarks, undoMarks, withCrop,
   type Mark, type MarkHistory, type MarkupTool
 } from '../shared/markup.mjs'
 import { useEscape } from './extras'
@@ -19,8 +19,8 @@ export interface ImageEdit {
   /** The image as attached, before any marks (a data URL). */
   base: string
   marks: Mark[]
-  /** The marked-up PNG and its marks, or null when nothing changed. No marks left means the image as attached. */
-  onDone: (result: { src: string; marks: Mark[] } | null) => void
+  /** The marked-up PNG, its size (a crop changes it) and its marks, or null when nothing changed. No marks left means the image as attached. */
+  onDone: (result: { src: string; marks: Mark[]; width?: number; height?: number } | null) => void
 }
 
 const TOOLS: { id: MarkupTool; label: string; key: string; icon: LucideIcon }[] = [
@@ -29,7 +29,8 @@ const TOOLS: { id: MarkupTool; label: string; key: string; icon: LucideIcon }[] 
   { id: 'box', label: 'Box', key: 'b', icon: Square },
   { id: 'arrow', label: 'Arrow', key: 'a', icon: MoveUpRight },
   { id: 'text', label: 'Text', key: 't', icon: Type },
-  { id: 'eraser', label: 'Eraser', key: 'e', icon: Eraser }
+  { id: 'eraser', label: 'Eraser', key: 'e', icon: Eraser },
+  { id: 'crop', label: 'Crop', key: 'c', icon: Crop }
 ]
 const COLOR_NAMES = ['Red', 'Yellow', 'Green', 'Blue', 'White', 'Black']
 const TEXT_FONT = '"Segoe UI", system-ui, sans-serif'
@@ -81,7 +82,23 @@ export function MarkupViewer({ src, name, marks: initial, onDone }: { src: strin
     if (!el || !ctx || !natural) return
     ctx.clearRect(0, 0, el.width, el.height)
     for (const m of shown) paintMark(ctx, m)
-  }, [shown, natural])
+    // A crop dims what it leaves out and outlines what it keeps, the way the Snipping Tool shows one.
+    const crop = cropOf(shown)
+    if (crop) {
+      const r = cropRect(shown, el.width, el.height)
+      ctx.save()
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
+      ctx.beginPath()
+      ctx.rect(0, 0, el.width, el.height)
+      ctx.rect(r.x, r.y, r.w, r.h)
+      ctx.fill('evenodd')
+      ctx.setLineDash([6 / scale, 4 / scale])
+      ctx.lineWidth = Math.max(1, 1.5 / scale)
+      ctx.strokeStyle = '#ffffff'
+      ctx.strokeRect(r.x, r.y, r.w, r.h)
+      ctx.restore()
+    }
+  }, [shown, natural, scale])
 
   // The text being typed is read from a ref too: Enter, a click elsewhere and the field's blur may all commit it
   // in one go, and only the first may.
@@ -116,14 +133,17 @@ export function MarkupViewer({ src, name, marks: initial, onDone }: { src: strin
     const marks = commitText()
     if (sameMarks(marks, initial)) return onDone(null)
     if (!marks.length || !natural || !img.current) return onDone({ src, marks: [] })
+    // The PNG is the crop's region (the whole image without one), with the marks moved to match.
+    const r = cropRect(marks, natural.width, natural.height)
     const out = document.createElement('canvas')
-    out.width = natural.width
-    out.height = natural.height
+    out.width = r.w
+    out.height = r.h
     const ctx = out.getContext('2d')
     if (!ctx) return onDone(null)
+    ctx.translate(-r.x, -r.y)
     ctx.drawImage(img.current, 0, 0)
     for (const m of marks) paintMark(ctx, m)
-    onDone({ src: out.toDataURL('image/png'), marks })
+    onDone({ src: out.toDataURL('image/png'), marks, width: r.w, height: r.h })
   }
 
   // Escape drops a text being typed first; otherwise it closes, keeping the marks.
@@ -172,6 +192,7 @@ export function MarkupViewer({ src, name, marks: initial, onDone }: { src: strin
     } else if (tool === 'pen' || tool === 'highlight') putDraft({ mark: { kind: tool, color, width, points: [x, y] } })
     else if (tool === 'box') putDraft({ mark: { kind: 'box', color, width, x, y, w: 0, h: 0 } })
     else if (tool === 'arrow') putDraft({ mark: { kind: 'arrow', color, width, x1: x, y1: y, x2: x, y2: y } })
+    else if (tool === 'crop') putDraft({ mark: { kind: 'crop', x, y, w: 0, h: 0 } })
     anchor.current = { x, y }
   }
   const anchor = useRef({ x: 0, y: 0 })
@@ -191,7 +212,7 @@ export function MarkupViewer({ src, name, marks: initial, onDone }: { src: strin
     }
     const m = draft.mark
     if (m.kind === 'pen' || m.kind === 'highlight') putDraft({ mark: { ...m, points: addPoint(m.points, x, y, 1 / scale) } })
-    else if (m.kind === 'box') putDraft({ mark: { ...m, ...normRect(anchor.current.x, anchor.current.y, x, y) } })
+    else if (m.kind === 'box' || m.kind === 'crop') putDraft({ mark: { ...m, ...normRect(anchor.current.x, anchor.current.y, x, y) } })
     else if (m.kind === 'arrow') putDraft({ mark: { ...m, x2: x, y2: y } })
   }
 
@@ -200,11 +221,15 @@ export function MarkupViewer({ src, name, marks: initial, onDone }: { src: strin
     if (!draft) return
     if ('erasing' in draft) {
       if (draft.erasing.length !== history.present.length) setHistory((h) => commitMarks(h, draft.erasing))
+    } else if (draft.mark.kind === 'crop') {
+      const crop = draft.mark
+      if (keepMark(crop, 4 / scale)) setHistory((h) => commitMarks(h, withCrop(h.present, crop)))
     } else if (keepMark(draft.mark, 4 / scale)) setHistory((h) => commitMarks(h, [...h.present, draft.mark]))
     putDraft(null)
   }
 
-  const size = natural ? `${natural.width}×${natural.height}` : null
+  const kept = natural && cropOf(history.present) ? cropRect(history.present, natural.width, natural.height) : null
+  const size = natural ? (kept ? `${kept.w}×${kept.h} of ${natural.width}×${natural.height}` : `${natural.width}×${natural.height}`) : null
   const cursor = tool === 'text' ? 'text' : 'crosshair'
   return (
     <div ref={root} className="chat-preview is-markup" tabIndex={-1} data-escape-close="" onClick={finish} onKeyDown={onKeyDown} role="dialog" aria-label={name} data-testid="chat-image-preview">
@@ -273,6 +298,8 @@ function textFont(size: number): string {
 
 /** One mark on a canvas the image's size. */
 export function paintMark(ctx: CanvasRenderingContext2D, m: Mark): void {
+  // A crop is not drawn: it says which part of the image the PNG keeps.
+  if (m.kind === 'crop') return
   ctx.save()
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'

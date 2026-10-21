@@ -13,16 +13,20 @@
  * @typedef {{ kind: 'pen' | 'highlight', color: string, width: number, points: number[] }
  *   | { kind: 'box', color: string, width: number, x: number, y: number, w: number, h: number }
  *   | { kind: 'arrow', color: string, width: number, x1: number, y1: number, x2: number, y2: number }
- *   | { kind: 'text', color: string, size: number, x: number, y: number, w: number, text: string }} Mark
+ *   | { kind: 'text', color: string, size: number, x: number, y: number, w: number, text: string }
+ *   | { kind: 'crop', x: number, y: number, w: number, h: number }} Mark
+ *
+ * A `crop` is not drawn: the newest one is the part of the image the PNG keeps (0.4.68), and a new one
+ * replaces the old (`withCrop`), so undo takes it back like any mark.
  */
 
-/** @typedef {'pen' | 'highlight' | 'box' | 'arrow' | 'text' | 'eraser'} MarkupTool */
+/** @typedef {'pen' | 'highlight' | 'box' | 'arrow' | 'text' | 'eraser' | 'crop'} MarkupTool */
 
 /** The swatches, Snipping Tool's set: red first, the default. */
 export const MARK_COLORS = ['#ef4444', '#facc15', '#22c55e', '#3b82f6', '#ffffff', '#111111']
 
 /** Widths as they look on screen, in CSS pixels; `markWidth` turns them into image pixels. */
-export const TOOL_WIDTH = { pen: 3, highlight: 18, box: 3, arrow: 3, text: 18, eraser: 10 }
+export const TOOL_WIDTH = { pen: 3, highlight: 18, box: 3, arrow: 3, text: 18, eraser: 10, crop: 1 }
 
 /** A highlighter stroke's opacity. */
 export const HIGHLIGHT_ALPHA = 0.4
@@ -114,9 +118,33 @@ export function hitMark(mark, x, y, tolerance) {
       return segmentDistance(x, y, mark.x1, mark.y1, mark.x2, mark.y2) <= tolerance + mark.width / 2 + 2
     case 'text':
       return x >= mark.x - tolerance && x <= mark.x + mark.w + tolerance && y >= mark.y - tolerance && y <= mark.y + mark.size * TEXT_LINE + tolerance
+    // The eraser takes marks, not the crop (undo or Clear does).
     default:
       return false
   }
+}
+
+/** The crop in force: the newest `crop` mark, or null. @param {Mark[]} marks */
+export function cropOf(marks) {
+  for (let i = marks.length - 1; i >= 0; i--) if (marks[i].kind === 'crop') return marks[i]
+  return null
+}
+
+/** Marks with a new crop in place of any earlier one. @param {Mark[]} marks */
+export function withCrop(marks, crop) {
+  return [...marks.filter((m) => m.kind !== 'crop'), crop]
+}
+
+/**
+ * The region a crop keeps, inside the image and in whole pixels; the whole image without one.
+ * @param {Mark[]} marks
+ */
+export function cropRect(marks, width, height) {
+  const c = cropOf(marks)
+  if (!c) return { x: 0, y: 0, w: width, h: height }
+  const x = Math.max(0, Math.min(width - 1, Math.round(c.x)))
+  const y = Math.max(0, Math.min(height - 1, Math.round(c.y)))
+  return { x, y, w: Math.max(1, Math.min(width - x, Math.round(c.w))), h: Math.max(1, Math.min(height - y, Math.round(c.h))) }
 }
 
 /** The topmost mark a point touches, or -1. @param {Mark[]} marks */
@@ -137,6 +165,7 @@ export function keepMark(mark, minSize) {
     case 'box': return mark.w >= minSize && mark.h >= minSize
     case 'arrow': return Math.hypot(mark.x2 - mark.x1, mark.y2 - mark.y1) >= minSize * 2
     case 'text': return mark.text.trim() !== ''
+    case 'crop': return mark.w >= minSize * 3 && mark.h >= minSize * 3
     default: return false
   }
 }

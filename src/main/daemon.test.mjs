@@ -366,3 +366,72 @@ test('wait long-polls until a session reaches the state, and times out honestly'
   const short = await (await get('/v1/agents/claude:in-proj/wait?until=complete&timeout=600')).json()
   assert.deepEqual(short, { id: 'claude:in-proj', until: 'complete', state: 'waiting', satisfied: false })
 })
+
+// ---- chat routes (0.4.68) ----
+
+test('chat routes are absent without a chats adapter', async () => {
+  assert.equal((await fetch(`${base}/v1/chats`, { headers: auth })).status, 404)
+  assert.equal((await fetch(`${base}/v1/chats/${MISSING}/output`, { headers: auth })).status, 404)
+})
+
+test('chat routes: start, send, read, wait and interrupt, validated like every route', async () => {
+  const CHAT = '1a2b3c4d-1111-4222-8333-444455556666'
+  const calls = []
+  let status = 'idle'
+  const adapter = {
+    list: async () => [{ id: CHAT, provider: 'claude', cwd: 'C:\\p', sessionId: 's1', status, title: null }],
+    create: async (req) => { calls.push(['create', req]); return req.cwd === 'C:\\nope' ? { error: 'cwd is not an existing directory' } : { id: CHAT, provider: req.provider, cwd: req.cwd ?? 'C:\\home' } },
+    send: async (id, text) => { calls.push(['send', id, text]); if (id !== CHAT) return 'missing'; status = 'running'; setTimeout(() => { status = 'idle' }, 700); return 'ok' },
+    read: async (id, items) => (id === CHAT ? { status, waitingFor: null, items: [{ kind: 'assistant', text: 'done' }].slice(0, items), total: 1 } : null),
+    status: async (id) => (id === CHAT ? status : null),
+    interrupt: async (id) => { calls.push(['interrupt', id]); return id === CHAT ? 'ok' : 'missing' }
+  }
+  const d = new Daemon(0, { token: 'chat-token', chats: adapter })
+  assert.equal(await d.start(), true)
+  const b = `http://127.0.0.1:${d.getPort()}`
+  const h = { authorization: 'Bearer chat-token' }
+  const postC = (path, body) => fetch(`${b}${path}`, { method: 'POST', headers: { ...h, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const getC = (path) => fetch(`${b}${path}`, { headers: h })
+  try {
+    assert.equal((await fetch(`${b}/v1/chats`)).status, 401)
+    const list = await (await getC('/v1/chats')).json()
+    assert.equal(list.chats[0].id, CHAT)
+
+    let r = await postC('/v1/chats', { provider: 'codex', cwd: 'C:\\p', model: 'gpt-6-luna', prompt: 'hi' })
+    assert.equal(r.status, 201)
+    assert.deepEqual(calls.at(-1), ['create', { provider: 'codex', cwd: 'C:\\p', model: 'gpt-6-luna', prompt: 'hi' }])
+    assert.equal((await postC('/v1/chats', { provider: 'gemini' })).status, 400)
+    assert.equal((await postC('/v1/chats', { model: 'rm -rf /' })).status, 400)
+    assert.equal((await postC('/v1/chats', { extra: 1 })).status, 400)
+    r = await postC('/v1/chats', { cwd: 'C:\\nope' })
+    assert.equal(r.status, 400)
+    assert.match((await r.json()).error, /existing directory/)
+
+    assert.equal((await postC(`/v1/chats/${CHAT}/input`, { text: '   ' })).status, 400)
+    assert.equal((await postC(`/v1/chats/${CHAT}/input`, { text: 'go', enter: true })).status, 400)
+    assert.equal((await postC(`/v1/chats/${MISSING}/input`, { text: 'go' })).status, 404)
+    assert.equal((await postC(`/v1/chats/${CHAT}/input`, { text: 'go' })).status, 202)
+
+    // The wait holds until the chat is idle again.
+    const t0 = Date.now()
+    const w = await (await getC(`/v1/chats/${CHAT}/wait?until=idle&timeout=5000`)).json()
+    assert.deepEqual(w, { id: CHAT, status: 'idle', satisfied: true })
+    assert.ok(Date.now() - t0 >= 400)
+    assert.equal((await getC(`/v1/chats/${CHAT}/wait?until=complete`)).status, 400)
+    assert.equal((await getC(`/v1/chats/${MISSING}/wait`)).status, 404)
+
+    const out = await (await getC(`/v1/chats/${CHAT}/output?items=1`)).json()
+    assert.equal(out.id, CHAT)
+    assert.equal(out.items.length, 1)
+    assert.equal((await getC(`/v1/chats/${CHAT}/output?items=0`)).status, 400)
+    assert.equal((await getC(`/v1/chats/${CHAT}/output?lines=5`)).status, 400)
+    assert.equal((await getC(`/v1/chats/${MISSING}/output`)).status, 404)
+
+    assert.equal((await postC(`/v1/chats/${CHAT}/interrupt`, { now: true })).status, 400)
+    assert.equal((await postC(`/v1/chats/${CHAT}/interrupt`, {})).status, 202)
+    assert.equal((await postC(`/v1/chats/${MISSING}/interrupt`, {})).status, 404)
+    assert.equal((await getC(`/v1/chats/not-a-uuid/output`)).status, 404)
+  } finally {
+    d.stop()
+  }
+})

@@ -9,6 +9,14 @@
 import { spawnSync } from 'node:child_process'
 
 /**
+ * A host's way to keep everything a CLI starts together, called with the CLI's pid as it starts; what it
+ * returns ends them all (claude-watch: a Windows job object, `createKillJob` in its win32.mjs). The tree kill
+ * below cannot find a process whose parent has already exited: an `npx`/`cmd` shim starts an MCP server and
+ * exits, and the server outlived its chat (`railway mcp`, reproduced 2026-10-21). A job keeps it.
+ * @typedef {(pid: number) => (() => void) | null} AdoptProcess
+ */
+
+/**
  * End `pid` and every process it started (Windows); a no-op without a pid or
  * off Windows. Synchronous, so a caller that kills the parent next cannot win
  * the race and leave the children unfindable.

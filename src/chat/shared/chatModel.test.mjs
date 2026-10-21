@@ -3,8 +3,7 @@ import assert from 'node:assert/strict'
 import {
   MAX_ITEMS, addUsage, answerQuestion, appendDelta, appendItem, clip, decideApproval, emptyTranscript, firstLine, pendingApprovals,
   beginTurn, pendingQuestions, pendingRequests, setStatus, settleStreams, sortSessions, summarizeAttachments, transcriptSummary, updateItem,
-  closeTurn, removeItem, turnFiles, enqueue, dequeue, unqueue
-} from './chatModel.mjs'
+  closeTurn, removeItem, turnFiles, enqueue, dequeue, unqueue, settleDialog } from './chatModel.mjs'
 
 test('a queued prompt waits outside the transcript, joins it when read, or is taken back', () => {
   const running = setStatus(appendItem(t0, { kind: 'user', id: 'u1', text: 'first', at: 1 }), 'running')
@@ -168,4 +167,17 @@ test('sortSessions is newest first and bounded', () => {
   const list = [{ id: 'a', updatedAt: 1 }, { id: 'b', updatedAt: 3 }, { id: 'c', updatedAt: 2 }]
   assert.deepEqual(sortSessions(list).map((s) => s.id), ['b', 'c', 'a'])
   assert.equal(sortSessions(list, 2).length, 2)
+})
+
+test('a dialog waits like a question until it is answered or dismissed', () => {
+  const dialog = { kind: 'dialog', id: 'dialog:1', dialogKind: 'auto_mode_server_fallback', payload: {}, at: 1 }
+  let t = { ...emptyTranscript('claude', { cwd: 'C:\\p' }), status: 'waiting', items: [dialog] }
+  assert.equal(pendingRequests(t).length, 1)
+  t = settleDialog(t, 'dialog:1', 'continue')
+  assert.equal(t.items[0].result, 'continue')
+  assert.equal(t.status, 'running')
+  assert.equal(pendingRequests(t).length, 0)
+  assert.equal(settleDialog(t, 'dialog:1', null), t)
+  const dismissed = settleDialog({ ...t, status: 'waiting', items: [dialog] }, 'dialog:1', null)
+  assert.equal(dismissed.items[0].cancelled, true)
 })

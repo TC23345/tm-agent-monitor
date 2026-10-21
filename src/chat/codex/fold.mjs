@@ -5,7 +5,7 @@
 // the shapes the probes observed (docs/rea/codex-samples,
 // scripts/probe-codex-features.mjs), and the Codex extension's own wording
 // (docs/rea-findings.md, "Codex pass").
-import { addUsage, answerQuestion, appendDelta, appendItem, clip, closeTurn, decideApproval, emptyTranscript, MAX_TOOL_OUTPUT, setStatus, settleStreams, updateItem } from '../shared/chatModel.mjs'
+import { addUsage, answerQuestion, appendDelta, appendItem, clip, closeTurn, decideApproval, emptyTranscript, firstLine, MAX_TOOL_OUTPUT, setStatus, settleStreams, updateItem } from '../shared/chatModel.mjs'
 import { argDetail, formatElapsed, mcpTitle } from '../shared/present.mjs'
 
 /** Codex server-request methods the pane answers as approvals. */
@@ -89,8 +89,14 @@ export function itemToChat(item, at, live = false) {
   if (!item || typeof item !== 'object') return null
   switch (item.type) {
     case 'userMessage': {
-      const text = (item.content ?? []).map((c) => (c.type === 'text' ? c.text : c.type === 'mention' || c.type === 'skill' ? `@${c.name}` : `[${c.type}]`)).join('')
-      return { kind: 'user', id: item.id, text, at }
+      // An image is an attachment on the row, not text: as "[localImage]" it doubled every message sent with one,
+      // because the echo no longer matched the row the client drew when it sent (seen live 2026-10-21).
+      const parts = item.content ?? []
+      const text = parts.map((c) => (c.type === 'text' ? c.text : c.type === 'mention' || c.type === 'skill' ? `@${c.name}` : c.type === 'localImage' || c.type === 'image' ? '' : `[${c.type}]`)).join('')
+      const images = parts.filter((c) => c.type === 'localImage' || c.type === 'image').map((c) => ({
+        kind: 'image', name: c.type === 'localImage' && typeof c.path === 'string' ? c.path.replace(/^.*[\\/]/, '') : 'image', ...(typeof c.path === 'string' ? { path: c.path } : {})
+      }))
+      return { kind: 'user', id: item.id, text, at, ...(images.length ? { attachments: images } : {}) }
     }
     case 'agentMessage':
       return { kind: 'assistant', id: item.id, text: item.text ?? '', streaming: false, at, ...(item.phase === 'commentary' ? { phase: 'commentary' } : item.phase === 'final_answer' ? { phase: 'final' } : {}) }
@@ -456,6 +462,22 @@ export function foldNotification(t, n) {
       return p.message ? noticeOnce(t, `warn:${p.message}`, p.message, at) : t
     case 'configWarning':
       return p.summary ? noticeOnce(t, `config:${p.summary}`, p.summary, at, p.details) : t
+    case 'deprecationNotice':
+      return p.summary ? noticeOnce(t, `deprecated:${p.summary}`, p.summary, at, p.details ?? undefined) : t
+    case 'windows/worldWritableWarning': {
+      // Folders any user can write defeat the Windows sandbox: Codex says so once per session.
+      const paths = Array.isArray(p.samplePaths) ? p.samplePaths.filter((x) => typeof x === 'string') : []
+      const more = typeof p.extraCount === 'number' && p.extraCount > 0 ? [`and ${p.extraCount} more`] : []
+      const text = p.failedScan ? "Codex couldn't check which folders here other users can change." : 'Some folders here can be changed by any user on this PC, so the sandbox cannot protect them.'
+      return noticeOnce(t, 'worldwritable', text, at, [...paths, ...more].join('\n') || undefined)
+    }
+    case 'item/mcpToolCall/progress':
+      return typeof p.message === 'string' && p.message.trim() ? updateItem(t, p.itemId, (item) => (item.kind === 'tool' ? { ...item, progress: firstLine(p.message.trim(), 160) } : item)) : t
+    case 'thread/status/changed':
+      if (p.status?.type !== 'systemError') return t
+      return setStatus(appendItem({ ...t, retry: null }, { kind: 'system', id: `syserr:${at}`, text: 'Codex hit an internal error on this thread.', level: 'error', at }), 'error', 'Codex hit an internal error on this thread.')
+    case 'thread/closed':
+      return setStatus(noticeOnce(t, `closed:${p.threadId ?? ''}`, 'Codex closed this thread. Start a new session to keep going.', at), 'idle')
     case 'error': {
       if (p.willRetry) {
         // Codex is reconnecting on its own (localConversation.streamError.*): the working line counts the attempts.

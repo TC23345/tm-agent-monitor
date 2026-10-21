@@ -31,7 +31,7 @@ import { MarkupViewer, type ImageEdit } from './markup'
 import { readPrefs } from './prefs'
 import { defaultFor } from '../shared/chatPrefs.mjs'
 import { AgentsPanel } from './agents'
-import { CODEX_INIT_PROMPT, cardSteps, transcriptMarkdown } from '../shared/present.mjs'
+import { CODEX_INIT_PROMPT, cardSteps, transcriptMarkdown, type DialogAction } from '../shared/present.mjs'
 import { agentCards } from '../shared/agents.mjs'
 import {
   pendingRequests, sortSessions,
@@ -82,6 +82,10 @@ interface Props {
   onFocus?: () => void
   /** The host raises attention (pane bell, tray) while an approval or question waits. */
   onAttention?: (waiting: boolean) => void
+  /** Where the composer keeps its unsent draft (claude-watch: the pane's id); without it nothing is kept. */
+  draftKey?: string
+  /** Open a web page outside the app (a dialog's *Learn more*); a new browser window by default. */
+  openUrl?: (url: string) => void
 }
 
 const PROVIDER_LABEL: Record<Provider, string> = { claude: 'Claude Code', codex: 'Codex' }
@@ -119,7 +123,7 @@ function edgeChar(range: Range, last: boolean): DOMRect | null {
 }
 
 export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(props, ref) {
-  const { bridge, config, onConfig, renderText, copyText, openFile, listFiles, saveText, pathForFile, onFocus, onAttention } = props
+  const { bridge, config, onConfig, renderText, copyText, openFile, listFiles, saveText, pathForFile, onFocus, onAttention, draftKey, openUrl } = props
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [chatId, setChatId] = useState<string | null>(config.chatId ?? null)
   const [options, setOptions] = useState<ChatOptions | null>(null)
@@ -379,10 +383,25 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
     if (chatId) void bridge.stopTask(chatId, taskId).catch((err) => setNotice((err as Error).message))
   }, [bridge, chatId])
 
+  // A web page outside the app: the host's way (claude-watch: main's openExternal), else a new browser window.
+  const openPage = useCallback((url: string) => {
+    if (!/^https:\/\//i.test(url)) return
+    if (openUrl) openUrl(url)
+    else window.open(url, '_blank', 'noopener')
+  }, [openUrl])
+
   const actions = useMemo<RowActions>(() => ({
     renderText: (text) => (renderRef.current ? renderRef.current(text) : plain(text)),
     onAnswer: (approvalId: string, choice: ApprovalChoice, message?: string) => { if (chatId) void bridge.answer(chatId, approvalId, choice, message) },
     onAnswerQuestion: (questionId: string, answers: Record<string, string[]> | null) => { if (chatId) void bridge.answerQuestion(chatId, questionId, answers) },
+    onAnswerDialog: (dialogId: string, result: string | null, action?: DialogAction) => {
+      // As the extension: *Edit prompt and retry* puts the last prompt back in the box; a blocked Fable card's
+      // button opens the page where credits are bought.
+      if (action?.editPrompt && lastPrompt?.kind === 'user' && lastPrompt.text) composer.current?.setText(lastPrompt.text)
+      if (action?.openUrl) openPage(action.openUrl)
+      if (chatId) void bridge.answerDialog?.(chatId, dialogId, result)
+    },
+    openUrl: openPage,
     copyText: copy,
     provider,
     cwd: config.cwd,
@@ -411,7 +430,7 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
     onRetry: lastPrompt?.kind === 'user' && lastPrompt.text ? () => send(lastPrompt.text, []) : undefined,
     onRemoveComment: (approvalId: string, commentId: string) => setComments((c) => ({ ...c, [approvalId]: (c[approvalId] ?? []).filter((x) => x.id !== commentId) })),
     openAgent: wide ? openAgent : undefined
-  }), [bridge, chatId, copy, provider, config.cwd, openFile, promptAction, canRewind, lastPrompt, send, pendingPlan, stopTask, wide, openAgent])
+  }), [bridge, chatId, copy, provider, config.cwd, openFile, promptAction, canRewind, lastPrompt, send, pendingPlan, stopTask, wide, openAgent, openPage])
 
   // The rows: a subagent's steps under its Agent row, and in focus view each run of steps folded to one line.
   const { blocks, nested } = useMemo(() => {
@@ -722,6 +741,7 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
         onAgents={wide && cards.length ? toggleAgents : undefined}
         agentsOpen={agentsShown}
         onShowRow={showRow}
+        draftKey={draftKey}
       />
       {dragging ? <div className="chat-drop" data-testid="chat-drop"><span>Drop to attach as context</span></div> : null}
       {preview?.edit ? (

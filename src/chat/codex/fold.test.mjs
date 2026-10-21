@@ -3,6 +3,19 @@ import assert from 'node:assert/strict'
 import { emptyTranscript } from '../shared/chatModel.mjs'
 import { approvalResponse, codexModeId, commandOptions, foldNotification, foldServerRequest, innerCommand, itemToChat, mergeLimits, questionResponse, threadSummary, threadToTranscript } from './fold.mjs'
 
+test('a message sent with an image is one row: the image an attachment, the echo landing on the local row', () => {
+  const echo = { type: 'userMessage', id: 'um9', clientId: null, content: [{ type: 'text', text: 'What colour is the box?', text_elements: [] }, { type: 'localImage', path: 'C:\\Temp\\tm-chat-panes\\abc.png' }] }
+  const row = itemToChat(echo, 1)
+  assert.equal(row.text, 'What colour is the box?')
+  assert.deepEqual(row.attachments, [{ kind: 'image', name: 'abc.png', path: 'C:\\Temp\\tm-chat-panes\\abc.png' }])
+  let t = { ...emptyTranscript('codex', { cwd: 'C:\\p', sessionId: 'th' }), items: [{ kind: 'user', id: 'local:5', text: 'What colour is the box?', attachments: [{ kind: 'image', name: 'plain.png', width: 400, height: 300 }], at: 5 }] }
+  t = foldNotification(t, { method: 'item/completed', params: { threadId: 'th', turnId: 't9', item: echo } })
+  const users = t.items.filter((x) => x.kind === 'user')
+  assert.equal(users.length, 1)
+  assert.equal(users[0].id, 'um9')
+  assert.equal(users[0].attachments[0].name, 'plain.png')
+})
+
 // Item shapes as thread/read returned them on 2026-10-17 (docs/rea/codex-samples), with synthetic content.
 const USER = { type: 'userMessage', id: 'u1', clientId: 'c', content: [{ type: 'text', text: 'find the parser\n', text_elements: [] }] }
 const AGENT = { type: 'agentMessage', id: 'msg_1', text: 'I’ll look for it.', phase: 'commentary', memoryCitation: null, delivery: null, questions: null }
@@ -306,4 +319,22 @@ test('another thread starting on the shared server never takes over the pane', (
   assert.equal(foldNotification(t, { method: 'thread/started', params: { thread: { id: 'side-fork', model: 'x', cwd: 'C:\q' } } }), t)
   assert.equal(foldNotification({ ...t, sessionId: null }, { method: 'thread/started', params: { thread: { id: 'other' } } }).sessionId, null, 'an unknown thread is not adopted')
   assert.equal(foldNotification(t, { method: 'thread/started', params: { thread: { id: 'mine', model: 'gpt-6-luna' } } }).model, 'gpt-6-luna')
+})
+
+test('deprecations, world-writable folders, MCP progress and thread errors', () => {
+  let t = emptyTranscript('codex', { cwd: 'C:\\p' })
+  t = foldNotification(t, { method: 'deprecationNotice', params: { summary: 'Old flag', details: 'Use the new one' } })
+  t = foldNotification(t, { method: 'deprecationNotice', params: { summary: 'Old flag', details: 'Use the new one' } })
+  t = foldNotification(t, { method: 'windows/worldWritableWarning', params: { samplePaths: ['C:\\p\\tmp'], extraCount: 2, failedScan: false } })
+  assert.deepEqual(t.items.map((x) => [x.text, x.detail]), [['Old flag', 'Use the new one'], ['Some folders here can be changed by any user on this PC, so the sandbox cannot protect them.', 'C:\\p\\tmp\nand 2 more']])
+  t = foldNotification(t, { method: 'item/started', params: { threadId: 'th', turnId: 't1', item: { ...MCP, status: 'inProgress', result: null } } })
+  t = foldNotification(t, { method: 'item/mcpToolCall/progress', params: { threadId: 'th', turnId: 't1', itemId: MCP.id, message: 'Fetched 3 of 9' } })
+  assert.equal(t.items.find((x) => x.id === MCP.id).progress, 'Fetched 3 of 9')
+  t = foldNotification(t, { method: 'thread/status/changed', params: { threadId: 'th', status: { type: 'idle' } } })
+  assert.notEqual(t.status, 'error')
+  t = foldNotification(t, { method: 'thread/status/changed', params: { threadId: 'th', status: { type: 'systemError' } } })
+  assert.equal(t.status, 'error')
+  t = foldNotification(t, { method: 'thread/closed', params: { threadId: 'th' } })
+  assert.equal(t.status, 'idle')
+  assert.equal(t.items.at(-1).text, 'Codex closed this thread. Start a new session to keep going.')
 })

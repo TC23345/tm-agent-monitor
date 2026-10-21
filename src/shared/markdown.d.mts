@@ -3,6 +3,9 @@ export type InlineNode =
   | { type: 'code'; text: string }
   | { type: 'strong' | 'em' | 'del'; children: InlineNode[] }
   | { type: 'link'; href: string; children: InlineNode[] }
+  | { type: 'math'; tex: string; display: boolean }
+  | { type: 'path'; path: string; text: string; code: boolean; relative: boolean }
+  | { type: 'image'; src: string; alt: string }
 
 export type BlockNode =
   | { type: 'heading'; level: number; children: InlineNode[] }
@@ -12,6 +15,9 @@ export type BlockNode =
   | { type: 'quote'; children: BlockNode[] }
   | { type: 'hr' }
   | { type: 'table'; align: ('left' | 'center' | 'right' | null)[]; head: InlineNode[][]; rows: InlineNode[][][] }
+  | { type: 'math'; tex: string; display: true }
 
-export function parseMarkdown(source: string): BlockNode[]
-export function parseInline(text: string): InlineNode[]
+export interface MarkdownOptions { breaks?: boolean; math?: boolean; paths?: boolean }
+
+export function parseMarkdown(source: string, opts?: MarkdownOptions): BlockNode[]
+export function parseInline(text: string, opts?: MarkdownOptions): InlineNode[]

@@ -80,8 +80,11 @@ export function isWorkspaceCommand(value) {
     case 'clipboard': return Object.keys(c).every((k) => k === 'kind')
     case 'chat':
       return CHAT_PROVIDERS.has(c.provider)
-        && Object.keys(c).every((k) => k === 'kind' || k === 'provider' || k === 'cwd')
+        && Object.keys(c).every((k) => k === 'kind' || k === 'provider' || k === 'cwd' || k === 'chatId')
         && (c.cwd === undefined || (typeof c.cwd === 'string' && c.cwd.length > 0 && c.cwd.length <= MAX_PATH && !/[\r\n\0]/.test(c.cwd)))
+        // Only main sets this: a chat the daemon already started for an agent
+        // (`POST /v1/chats`), which the pane attaches to. The CLI parser never produces it.
+        && (c.chatId === undefined || (typeof c.chatId === 'string' && UUID.test(c.chatId)))
     case 'open':
       return LAUNCHES.has(c.launch)
         && (c.cwd === undefined || (typeof c.cwd === 'string' && c.cwd.length > 0 && c.cwd.length <= MAX_PATH && !/[\r\n\0]/.test(c.cwd)))

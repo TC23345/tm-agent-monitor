@@ -44,8 +44,8 @@ export const WEB_LINKS: { label: string; url: string }[] = [
 
 /** What a badge starts: Claude Code and Codex as chat panes, a shell as a terminal pane (no CLI terminal launches since 0.4.63). */
 const LAUNCHES: { kind: TerminalLaunch; label: string; icon: ReactNode; what: string; keys?: string }[] = [
-  { kind: 'claude', label: 'New Claude Code chat', icon: <ProviderBadge provider="claude" />, what: 'a Claude Code chat' },
-  { kind: 'codex', label: 'New Codex chat', icon: <ProviderBadge provider="codex" />, what: 'a Codex chat' },
+  { kind: 'claude', label: 'New TaylorMade CC', icon: <ProviderBadge provider="claude" />, what: 'TaylorMade CC' },
+  { kind: 'codex', label: 'New TaylorMade Codex', icon: <ProviderBadge provider="codex" />, what: 'TaylorMade Codex' },
   { kind: 'shell', label: 'New terminal', icon: <SquareTerminal strokeWidth={2} />, what: 'a PowerShell terminal', keys: 'Ctrl+Shift+`' }
 ]
 
@@ -216,14 +216,14 @@ export function ProjectStrip({ projects, selected, treeFor, openMenu, onOpenMenu
         aria-pressed={isSelected}
         aria-haspopup="menu"
         aria-expanded={isSelected && menuOpen}
-        title={`${p.cwd}\n${status} · ${when}\n${showsTree ? 'Click to go back to the activity stream' : 'Click for its files'} · right-click to start a Claude Code or Codex chat, or a terminal, here`}
+        title={`${p.cwd}\n${status} · ${when}\n${showsTree ? 'Click to go back to the activity stream' : 'Click for its files'} · right-click to start TaylorMade CC, TaylorMade Codex or a terminal here`}
         data-testid={tid('project', p.label)}
         // Left-click: the launch target, and the head shows this project's files (the same badge again: the stream).
         onClick={() => {
           if (menuOpen) onOpenMenu(null)
           onSelect({ cwd: p.cwd, label: p.label }, 'click')
         }}
-        // Right-click: the launch target, and its menu — a Claude Code or Codex chat, or a terminal, here.
+        // Right-click: the launch target, and its menu — TaylorMade CC, TaylorMade Codex or a terminal, here.
         onContextMenu={(event) => {
           event.preventDefault()
           if (isSelected && menuOpen) { onOpenMenu(null); return }

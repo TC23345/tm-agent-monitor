@@ -20,7 +20,7 @@ import { argDetail, clockTime, imageSize, mcpTitle, splitMcpName } from '../shar
 
 /** @returns {ClaudeFold} */
 export function startFold(transcript) {
-  return { transcript, streams: {}, compactId: null }
+  return { transcript, streams: {}, compactId: null, wire: {} }
 }
 
 const NO_STREAM = { messageId: null, blocks: {} }
@@ -223,7 +223,7 @@ function blockTarget(t, messageId, kind, text) {
  * thinking rows are finalised (`blockTarget`), tool rows matched by the
  * tool_use id, unseen blocks appended.
  */
-function foldAssistantBlocks(t, messageId, content, at, parentToolUseId) {
+function foldAssistantBlocks(t, messageId, content, at, parentToolUseId, touched) {
   for (const block of content ?? []) {
     if (!block || typeof block !== 'object') continue
     if (block.type === 'text' || block.type === 'thinking' || block.type === 'redacted_thinking') {
@@ -231,10 +231,12 @@ function foldAssistantBlocks(t, messageId, content, at, parentToolUseId) {
       const text = block.type === 'text' ? block.text ?? '' : block.type === 'thinking' ? block.thinking ?? '' : '[redacted]'
       if (!text) continue
       const id = blockTarget(t, messageId, kind, text)
+      touched?.push(id)
       // A subagent's text and thinking nest under its Agent row, like its tools; without the parent they ran down the session's own timeline.
       t = t.items.some((x) => x.id === id) ? updateItem(t, id, { text, streaming: false }) : appendItem(t, { kind, id, text, streaming: false, at, ...(parentToolUseId ? { parent: parentToolUseId } : {}) })
     } else if (block.type === 'tool_use') {
       const view = toolView(block.name, block.input)
+      touched?.push(block.id)
       const row = { kind: 'tool', id: block.id, name: block.name, title: toolTitle(block.name, block.input), input: toolInput(block.name, block.input), status: 'running', at, parent: parentToolUseId ?? undefined, ...view }
       t = t.items.some((x) => x.id === block.id) ? updateItem(t, block.id, (item) => ({ ...item, name: row.name, title: row.title, input: row.input, ...view })) : appendItem(t, row)
     }
@@ -331,6 +333,41 @@ export function foldSdkMessage(f, msg, opts = {}) {
         const level = msg.level === 'warning' ? 'warning' : 'info'
         return keep(appendItem(t, { kind: 'system', id: `note:${msg.uuid ?? at}`, text: msg.content, level, at, variant: 'notice' }))
       }
+      if (msg.subtype === 'model_refusal_fallback') {
+        // The refused reply is retracted: the CLI names its messages (and tombstoned tool results) by wire uuid, after the fact.
+        const gone = new Set((Array.isArray(msg.retracted_message_uuids) ? msg.retracted_message_uuids : []).flatMap((u) => f.wire?.[u] ?? []))
+        const local = msg.scope === 'local'
+        // A reply refused mid-stream never got its assistant message: on the session's thread its live rows are the refused partial.
+        const items = t.items.filter((x) => !gone.has(x.id) && !(!local && !x.parent && (x.kind === 'assistant' || x.kind === 'thinking') && x.streaming))
+        if (items.length !== t.items.length) t = { ...t, items }
+        if (!local && typeof msg.fallback_model === 'string') t = { ...t, model: msg.fallback_model }
+        const text = typeof msg.content === 'string' && msg.content.trim() ? msg.content.trim() : `Switched to ${msg.fallback_model} after ${msg.original_model} declined`
+        const explanation = typeof msg.api_refusal_explanation === 'string' ? msg.api_refusal_explanation.trim() : ''
+        const next = appendItem(t, { kind: 'system', id: `refusal:${msg.uuid ?? at}`, text, level: 'warning', at, variant: 'model', ...(explanation ? { detail: explanation } : {}) })
+        return local ? keep(next) : { ...keep(next), streams: omit(f.streams, '') }
+      }
+      if (msg.subtype === 'model_refusal_no_fallback') {
+        const text = typeof msg.content === 'string' && msg.content.trim() ? msg.content.trim() : `${msg.original_model} declined this request`
+        const explanation = typeof msg.api_refusal_explanation === 'string' ? msg.api_refusal_explanation.trim() : ''
+        return keep(appendItem(t, { kind: 'system', id: `refusal:${msg.uuid ?? at}`, text, level: 'error', at, variant: 'model', ...(explanation ? { detail: explanation } : {}) }))
+      }
+      if (msg.subtype === 'task_progress') {
+        // A running agent's one-line status (agentProgressSummaries), else the tool it is on.
+        const row = t.items.find((x) => x.kind === 'tool' && ((msg.tool_use_id && x.id === msg.tool_use_id) || (msg.task_id && x.taskId === msg.task_id)))
+        const progress = typeof msg.summary === 'string' && msg.summary.trim() ? firstLineOf(msg.summary.trim(), 160) : typeof msg.last_tool_name === 'string' ? `Using ${msg.last_tool_name}` : ''
+        return row && progress && row.progress !== progress ? keep(updateItem(t, row.id, { progress })) : f
+      }
+      if (msg.subtype === 'memory_recall' && Array.isArray(msg.memories) && msg.memories.length) {
+        const n = msg.memories.length
+        const names = msg.memories.map((m) => (typeof m?.path === 'string' && !m.path.startsWith('<') ? baseName(m.path) : 'a summary of several memories'))
+        return keep(appendItem(t, { kind: 'system', id: `memory:${msg.uuid ?? at}`, text: msg.mode === 'synthesize' ? 'Recalled memories' : `Recalled ${n} ${n === 1 ? 'memory' : 'memories'}`, level: 'info', at, variant: 'notice', detail: names.join('\n') }))
+      }
+      if (msg.subtype === 'notification' && typeof msg.text === 'string' && msg.text.trim() && msg.priority !== 'low') {
+        // One row per key: the CLI re-sends a notification under its key when its text changes.
+        const id = `notify:${msg.key ?? msg.text}`
+        const row = { kind: 'system', id, text: msg.text.trim(), level: msg.priority === 'high' || msg.priority === 'immediate' ? 'warning' : 'info', at, variant: 'notice' }
+        return keep(t.items.some((x) => x.id === id) ? updateItem(t, id, { text: row.text, level: row.level }) : appendItem(t, row))
+      }
       if (msg.subtype === 'task_started' && msg.tool_use_id) {
         return keep(updateItem(t, msg.tool_use_id, (x) => (x.kind === 'tool' ? { ...x, taskId: msg.task_id, ...(msg.is_backgrounded ? { background: true } : {}) } : x)))
       }
@@ -362,9 +399,24 @@ export function foldSdkMessage(f, msg, opts = {}) {
       return typeof msg.suggestion === 'string' && msg.suggestion.trim() ? keep({ ...t, suggestion: msg.suggestion.trim() }) : f
     case 'rate_limit_event': {
       const info = msg.rate_limit_info ?? {}
+      if (info.status === 'allowed_warning') {
+        const id = `limitwarn:${info.rateLimitType ?? ''}:${info.surpassedThreshold ?? info.resetsAt ?? ''}`
+        if (t.items.some((x) => x.id === id)) return f
+        return keep(appendItem(t, { kind: 'system', id, text: limitWarning(info), level: 'warning', at, variant: 'limit' }))
+      }
       if (info.status !== 'rejected') return f
       const resets = typeof info.resetsAt === 'number' ? ` It resets at ${clockTime(info.resetsAt < 1e12 ? info.resetsAt * 1000 : info.resetsAt)}.` : ''
       return keep(appendItem(t, { kind: 'system', id: `limit:${info.rateLimitType ?? ''}:${info.resetsAt ?? at}`, text: `You've reached your usage limit.${resets}`, level: 'warning', at, variant: 'limit' }))
+    }
+    case 'auth_status': {
+      // Claude Code signing in mid-session (an expired login): one row, updated as it goes.
+      const output = Array.isArray(msg.output) ? msg.output.filter((x) => typeof x === 'string').join('\n').trim() : ''
+      const error = typeof msg.error === 'string' && msg.error.trim() ? msg.error.trim() : ''
+      const row = error
+        ? { text: `Sign-in failed: ${firstLineOf(error, 140)}`, level: 'error' }
+        : msg.isAuthenticating ? { text: 'Signing in to Claude…', level: 'info' } : { text: 'Signed in', level: 'info' }
+      const patch = { ...row, ...(output ? { detail: clip(output, MAX_TOOL_OUTPUT) } : {}) }
+      return keep(t.items.some((x) => x.id === 'auth') ? updateItem(t, 'auth', patch) : appendItem(t, { kind: 'system', id: 'auth', at, variant: 'notice', ...patch }))
     }
     case 'conversation_reset':
       return keep(appendItem({ ...t, sessionId: msg.new_conversation_id ?? t.sessionId }, { kind: 'system', id: `reset:${msg.uuid ?? at}`, text: 'Conversation cleared', level: 'info', at, variant: 'cleared' }))
@@ -411,14 +463,15 @@ export function foldSdkMessage(f, msg, opts = {}) {
     case 'assistant': {
       const m = msg.message ?? {}
       const messageId = m.id ?? stream.messageId ?? msg.uuid
-      t = foldAssistantBlocks(t, messageId, m.content, at, msg.parent_tool_use_id)
+      const touched = []
+      t = foldAssistantBlocks(t, messageId, m.content, at, msg.parent_tool_use_id, touched)
       // Each API call's own usage is what the window holds now; a subagent's calls fill its own window, not this one.
       const context = msg.parent_tool_use_id ? undefined : contextOf(m.usage)
       if (context) t = addUsage(t, { contextTokens: context })
       if (msg.error) t = appendItem(t, { kind: 'system', id: `aerr:${msg.uuid ?? at}`, text: String(msg.error), level: 'error', at })
       // The stream cursor stays: this may be one block of a message still
       // streaming its next block. `message_start` and `result` reset it.
-      return keep(t)
+      return msg.uuid && touched.length ? { ...keep(t), wire: remember(f.wire, msg.uuid, touched) } : keep(t)
     }
     case 'user': {
       const content = msg.message?.content
@@ -443,9 +496,16 @@ export function foldSdkMessage(f, msg, opts = {}) {
       if (opts.interrupted) {
         t = setStatus(appendItem(t, { kind: 'system', id: `interrupt:${msg.uuid ?? at}`, text: 'Interrupted', level: 'info', at, variant: 'interrupt' }), 'idle')
       } else if (msg.is_error || msg.subtype !== 'success') {
-        const text = msg.result || msg.errors?.join?.('\n') || msg.subtype || 'The turn failed'
-        t = setStatus(appendItem(t, { kind: 'system', id: `result:${msg.uuid ?? at}`, text: String(text), level: 'error', at }), 'error', String(text))
-      } else t = setStatus(t, 'idle')
+        const raw = String(msg.result || msg.errors?.join?.('\n') || msg.subtype || 'The turn failed')
+        const reason = END_WORDS[msg.terminal_reason]
+        const text = reason ?? raw
+        t = setStatus(appendItem(t, { kind: 'system', id: `result:${msg.uuid ?? at}`, text, level: 'error', at, ...(reason && raw !== reason ? { detail: clip(raw, MAX_TOOL_OUTPUT) } : {}) }), 'error', text)
+      } else {
+        // A turn can end "successfully" because something stopped it; say what.
+        const reason = STOPPED_WORDS[msg.terminal_reason]
+        if (reason) t = appendItem(t, { kind: 'system', id: `stopped:${msg.uuid ?? at}`, text: reason, level: 'warning', at, variant: 'notice' })
+        t = setStatus(t, 'idle')
+      }
       t = closeTurn(t, { at, durationMs: num(msg.duration_ms), outputTokens: num(u.output_tokens), id: `turn:${msg.uuid ?? at}` })
       // The session's turn is over; a background agent may still be mid-message, so its cursor stays.
       const { '': _session, ...agents } = f.streams
@@ -457,6 +517,55 @@ export function foldSdkMessage(f, msg, opts = {}) {
 }
 
 const num = (v, fallback) => (typeof v === 'number' ? v : fallback)
+
+/** @template T @param {Record<string, T>} o @param {string} key */
+const omit = (o, key) => {
+  if (!(key in o)) return o
+  const { [key]: _gone, ...rest } = o
+  return rest
+}
+
+/** How many assistant messages' rows the fold remembers for a retraction (a refusal retracts the reply in flight). */
+const MAX_WIRE = 200
+
+/** @param {Record<string, string[]> | undefined} wire @param {string} uuid @param {string[]} ids */
+function remember(wire, uuid, ids) {
+  const next = { ...(wire ?? {}), [uuid]: [...new Set([...(wire?.[uuid] ?? []), ...ids])] }
+  const keys = Object.keys(next)
+  return keys.length > MAX_WIRE ? Object.fromEntries(keys.slice(-MAX_WIRE).map((k) => [k, next[k]])) : next
+}
+
+/** `result.terminal_reason` on a failed turn, in words (the raw error stays as the row's detail). */
+const END_WORDS = {
+  prompt_too_long: 'The conversation is too long for the model. Compact it or start a new session.',
+  image_error: "An image in the conversation couldn't be read.",
+  blocking_limit: "You've reached your usage limit.",
+  max_turns: 'Claude stopped after the most turns it may take.',
+  budget_exhausted: "The turn's budget ran out.",
+  malformed_tool_use_exhausted: 'Claude kept sending a tool call it could not finish, so the turn stopped.',
+  turn_setup_failed: "The turn couldn't start."
+}
+
+/** A turn that ended without an error, but not because Claude was done. */
+const STOPPED_WORDS = {
+  stop_hook_prevented: 'A hook stopped Claude from finishing.',
+  hook_stopped: 'A hook stopped the turn.',
+  max_turns: 'Claude stopped after the most turns it may take.',
+  budget_exhausted: "The turn's budget ran out."
+}
+
+/** The window a rate limit covers, as the extension names it. */
+const LIMIT_NAMES = { five_hour: '5-hour', seven_day: 'weekly', seven_day_opus: 'weekly Opus', seven_day_sonnet: 'weekly Sonnet', seven_day_overage_included: 'weekly', overage: 'extra usage' }
+
+/** A warning before the limit: how much is used and when the window resets. */
+export function limitWarning(info) {
+  const name = LIMIT_NAMES[info?.rateLimitType] ?? ''
+  const u = typeof info?.utilization === 'number' ? info.utilization : typeof info?.surpassedThreshold === 'number' ? info.surpassedThreshold : null
+  const pct = u === null ? null : Math.round(u <= 1 ? u * 100 : u)
+  const resets = typeof info?.resetsAt === 'number' ? ` It resets at ${clockTime(info.resetsAt < 1e12 ? info.resetsAt * 1000 : info.resetsAt)}.` : ''
+  const used = pct !== null ? `You've used ${pct}% of your ${name ? `${name} ` : ''}limit.` : `You're close to your ${name ? `${name} ` : ''}usage limit.`
+  return used + resets
+}
 
 /** The session model's context window from a result's `modelUsage` (the largest one when the model is not named there). */
 function contextWindowOf(modelUsage, model) {

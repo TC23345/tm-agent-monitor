@@ -24,6 +24,7 @@ const chat: ChatBridge = {
   interrupt: (id) => ipcRenderer.invoke('chat:interrupt', id),
   answer: (id, approvalId, choice, message) => ipcRenderer.invoke('chat:answer', id, approvalId, choice, message ?? null),
   answerQuestion: (id, questionId, answers) => ipcRenderer.invoke('chat:answer-question', id, questionId, answers),
+  answerDialog: (id, dialogId, result) => ipcRenderer.invoke('chat:answer-dialog', id, dialogId, result),
   configure: async (id, patch) => {
     const problem = (await ipcRenderer.invoke('chat:configure', id, patch)) as string | null
     if (problem) throw new Error(problem)

@@ -17,6 +17,10 @@ test('verbs parse from a packaged or dev argv, flags before them ignored', () =>
   assert.deepEqual(parseWorkspaceArgs([EXE, 'chat', '--provider', 'codex', '--cwd', 'C:\\proj']), { kind: 'chat', provider: 'codex', cwd: 'C:\\proj' })
   assert.equal(parseWorkspaceArgs([EXE, 'chat', '--provider', 'gemini']), null)
   assert.equal(isWorkspaceCommand({ kind: 'chat', provider: 'codex' }), true)
+  // A chat the daemon started for an agent: only a real id attaches.
+  assert.equal(isWorkspaceCommand({ kind: 'chat', provider: 'claude', cwd: 'C:\\p', chatId: '0f3b1c2d-1111-4222-8333-444455556666' }), true)
+  assert.equal(isWorkspaceCommand({ kind: 'chat', provider: 'claude', chatId: '../x' }), false)
+  assert.equal(parseWorkspaceArgs([EXE, 'chat', '--chatId', '0f3b1c2d-1111-4222-8333-444455556666'])?.chatId, undefined)
   assert.equal(isWorkspaceCommand({ kind: 'chat', provider: 'codex', launch: 'shell' }), false)
 })
 

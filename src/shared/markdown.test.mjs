@@ -85,3 +85,51 @@ test('nothing in a note becomes markup: tags are text', () => {
   const tree = parseMarkdown('<script>alert(1)</script> and <b>bold</b>')
   assert.deepEqual(tree, [{ type: 'paragraph', children: [t('<script>alert(1)</script> and <b>bold</b>')] }])
 })
+
+// ---- a chat reply's options (0.4.68) ----
+const CHAT = { breaks: true, math: true, paths: true }
+
+test('breaks: a reply keeps its line breaks; a note still joins them', () => {
+  assert.deepEqual(parseMarkdown('line one\nline two', CHAT), [{ type: 'paragraph', children: [t('line one\nline two')] }])
+  assert.deepEqual(parseMarkdown('line one\nline two'), [{ type: 'paragraph', children: [t('line one line two')] }])
+})
+
+test('paths: a Windows path in text, and a path in inline code, open; commands and notes do not', () => {
+  const nodes = parseInline('see C:\\Users\\TC\\app.ts and C:\\p\\x.ts:12, ok', CHAT)
+  assert.deepEqual(nodes[1], { type: 'path', path: 'C:\\Users\\TC\\app.ts', text: 'C:\\Users\\TC\\app.ts', code: false, relative: false })
+  assert.deepEqual(nodes[3], { type: 'path', path: 'C:\\p\\x.ts', text: 'C:\\p\\x.ts:12', code: false, relative: false })
+  assert.deepEqual(nodes[4], t(', ok'))
+  const code = parseInline('open `src/ui/App.tsx:42` and `npm test` and `C:/a/b.md`', CHAT)
+  assert.deepEqual(code[1], { type: 'path', path: 'src/ui/App.tsx', text: 'src/ui/App.tsx:42', code: true, relative: true })
+  assert.deepEqual(code[3], { type: 'code', text: 'npm test' })
+  assert.equal(code[5].type, 'path')
+  assert.deepEqual(parseInline('`App.tsx`', CHAT), [{ type: 'code', text: 'App.tsx' }])
+  assert.ok(parseInline('C:\\x\\y.ts').every((n) => n.type !== 'path'))
+  assert.ok(parseInline('ratio 3:4 or a:b', CHAT).every((n) => n.type !== 'path'))
+  // A Markdown link to a file opens it, under its label.
+  assert.deepEqual(parseInline('[the readme](C:\\p\\README.md)', CHAT), [{ type: 'path', path: 'C:\\p\\README.md', text: 'the readme', code: false, relative: false }])
+  assert.deepEqual(parseInline('[the readme](C:\\p\\README.md)'), [t('the readme')])
+})
+
+test('math: \\(…\\), $$…$$ and display blocks are TeX; a single $…$ and money are not', () => {
+  const nodes = parseInline('area $a^2$ and \\(x+1\\) and $$y$$ costs $5 and $10', CHAT)
+  assert.deepEqual(nodes.filter((n) => n.type === 'math'), [{ type: 'math', tex: 'x+1', display: false }, { type: 'math', tex: 'y', display: false }])
+  assert.ok(nodes.some((n) => n.type === 'text' && n.text.includes('area $a^2$ and ')))
+  assert.ok(nodes.some((n) => n.type === 'text' && n.text.includes('$5 and $10')))
+  assert.deepEqual(parseMarkdown('$$\nE=mc^2\n$$', CHAT), [{ type: 'math', tex: 'E=mc^2', display: true }])
+  assert.deepEqual(parseMarkdown('$$a+b$$', CHAT), [{ type: 'math', tex: 'a+b', display: true }])
+  assert.deepEqual(parseMarkdown('\\[\n\\int_0^1 x\\,dx\n\\]', CHAT), [{ type: 'math', tex: '\\int_0^1 x\\,dx', display: true }])
+  assert.equal(parseMarkdown('$ never closed', CHAT)[0].type, 'paragraph')
+  // A math block interrupts a paragraph, as a reply writes it with no blank line before it.
+  assert.deepEqual(parseMarkdown('Einstein:\n$$\nE=mc^2\n$$\nThat is all.', CHAT).map((b) => b.type), ['paragraph', 'math', 'paragraph'])
+  assert.ok(parseInline('$a$').every((n) => n.type !== 'math'))
+  assert.deepEqual(parseInline('\\$5', CHAT), [t('$5')])
+})
+
+test('images are placeholders: web and local sources only, nothing else', () => {
+  const nodes = parseInline('![shot](https://x.io/a.png) ![bad](javascript:alert(1)) ![l](C:\\a\\b.png)', CHAT)
+  assert.deepEqual(nodes[0], { type: 'image', src: 'https://x.io/a.png', alt: 'shot' })
+  assert.deepEqual(nodes[1], t(' bad '))
+  assert.deepEqual(nodes[2], { type: 'image', src: 'C:\\a\\b.png', alt: 'l' })
+  assert.deepEqual(parseInline('![l](C:\\a\\b.png)')[0], t('l'))
+})

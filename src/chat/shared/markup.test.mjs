@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  addPoint, arrowHead, commitMarks, fitSize, historyOf, hitMark, keepMark, markAt, markWidth, normRect, pngName, redoMarks, sameMarks, segmentDistance, undoMarks
+  addPoint, arrowHead, commitMarks, cropOf, cropRect, withCrop, fitSize, historyOf, hitMark, keepMark, markAt, markWidth, normRect, pngName, redoMarks, sameMarks, segmentDistance, undoMarks
 } from './markup.mjs'
 
 const pen = { kind: 'pen', color: '#ef4444', width: 4, points: [0, 0, 100, 0] }
@@ -110,4 +110,18 @@ test('pngName renames another image type to .png', () => {
   assert.equal(pngName('photo.JPEG'), 'photo.png')
   assert.equal(pngName('image.png'), 'image.png')
   assert.equal(pngName('notes'), 'notes')
+})
+
+test('a crop: the newest one is in force, a new one replaces it, and its region stays inside the image', () => {
+  const a = { kind: 'crop', x: 10, y: 10, w: 100, h: 50 }
+  const b = { kind: 'crop', x: -20, y: 5.4, w: 1000, h: 30.6 }
+  let marks = withCrop([pen], a)
+  assert.equal(cropOf(marks), a)
+  marks = withCrop([...marks, box], b)
+  assert.deepEqual(marks.map((m) => m.kind), ['pen', 'box', 'crop'])
+  assert.deepEqual(cropRect(marks, 640, 400), { x: 0, y: 5, w: 640, h: 31 })
+  assert.deepEqual(cropRect([pen], 640, 400), { x: 0, y: 0, w: 640, h: 400 })
+  assert.ok(!hitMark(a, 50, 30, 5))
+  assert.ok(!keepMark({ kind: 'crop', x: 0, y: 0, w: 5, h: 50 }, 4))
+  assert.ok(keepMark(a, 4))
 })

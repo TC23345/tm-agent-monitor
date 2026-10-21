@@ -40,6 +40,25 @@ export interface ClipsApi {
   addSnippet(input: { name: string; text: string; shortcut?: string }): Promise<{ path: string } | { error: string }>
 }
 
+/**
+ * What the daemon may do with chat panes on an agent's behalf (0.4.68): since
+ * 0.4.63 Claude Code and Codex start as chats, so an agent orchestrating
+ * another session needs these, not the terminal routes. Answering a chat's
+ * approval or question is deliberately not here: those stay with the user.
+ */
+export interface ChatsApi {
+  list(): Promise<{ id: string; provider: 'claude' | 'codex'; cwd: string; sessionId: string | null; status: string; title: string | null }[]>
+  /** Start a chat (a pane attaches when the grid has room), then send `prompt` when given. */
+  create(req: { provider: 'claude' | 'codex'; cwd?: string; model?: string; prompt?: string }): Promise<{ id: string; provider: string; cwd: string } | { error: string }>
+  /** Send a message; one sent while a turn runs is queued as the next. */
+  send(id: string, text: string): Promise<'ok' | 'missing'>
+  /** The chat as another agent reads it (`chatDigest`), or null when there is no such chat. */
+  read(id: string, items: number): Promise<unknown | null>
+  /** The chat's status (idle, running, waiting, error, closed), or null when there is no such chat. */
+  status(id: string): Promise<string | null>
+  interrupt(id: string): Promise<'ok' | 'missing'>
+}
+
 export interface DaemonOptions {
   /** Per-install secret published through the endpoint-discovery file. */
   token?: string
@@ -52,6 +71,8 @@ export interface DaemonOptions {
   terminals?: TerminalApi
   /** Enables the clipboard and snippet routes; without it they answer 404. */
   clips?: ClipsApi
+  /** Enables the chat routes; without it they answer 404. */
+  chats?: ChatsApi
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -75,9 +96,15 @@ const MAX_WAIT_MS = 120_000
 const DEFAULT_WAIT_MS = 60_000
 const WAIT_POLL_MS = 500
 const MAX_WAITS = 32
+const CHAT_ROUTE = /^\/v1\/chats\/([0-9a-f-]{36})\/(input|output|wait|interrupt)$/
+const CHAT_STATES: ReadonlySet<string> = new Set(['running', 'waiting', 'idle'])
+const CHAT_MODEL = /^[\w.:[\]-]{1,100}$/
+const MAX_CHAT_ITEMS = 200
+const DEFAULT_CHAT_ITEMS = 30
 
 interface Route {
   name: 'health' | 'status' | 'v1status' | 'report' | 'events' | 'terminals' | 'terminalInput' | 'terminalOutput' | 'agentWait' | 'clips' | 'clip' | 'clipPaste' | 'snippets'
+    | 'chats' | 'chatInput' | 'chatOutput' | 'chatWait' | 'chatInterrupt'
   methods: string[]
   /** Only these routes accept a query string; everywhere else one is a 404. */
   query?: boolean
@@ -94,6 +121,17 @@ function resolveRoute(pathname: string): Route | null {
     case '/v1/terminals': return { name: 'terminals', methods: ['GET', 'POST'] }
     case '/v1/clips': return { name: 'clips', methods: ['GET', 'POST'], query: true }
     case '/v1/snippets': return { name: 'snippets', methods: ['GET', 'POST'], query: true }
+    case '/v1/chats': return { name: 'chats', methods: ['GET', 'POST'] }
+  }
+  const chat = CHAT_ROUTE.exec(pathname)
+  if (chat) {
+    if (!UUID.test(chat[1])) return null
+    switch (chat[2]) {
+      case 'input': return { name: 'chatInput', methods: ['POST'], id: chat[1] }
+      case 'interrupt': return { name: 'chatInterrupt', methods: ['POST'], id: chat[1] }
+      case 'output': return { name: 'chatOutput', methods: ['GET'], query: true, id: chat[1] }
+      default: return { name: 'chatWait', methods: ['GET'], query: true, id: chat[1] }
+    }
   }
   const clip = CLIP_ROUTE.exec(pathname)
   if (clip) {
@@ -171,6 +209,12 @@ const NOT_FOUND = { error: 'not found' }
  * POST /v1/clips/:id/paste          {terminalId?} → typed into that terminal; without one, copied only
  * GET  /v1/snippets                 the expander list from Notes\Snippets and Notes\Prompts, keys masked; ?full=1 → whole (the host)
  * POST /v1/snippets                 {name, text, shortcut?} → a new note in Notes\Snippets (201)
+ * GET  /v1/chats                    the live chat panes (TaylorMade CC / TaylorMade Codex)
+ * POST /v1/chats                    {provider?, cwd?, model?, prompt?} → start one (a pane attaches if the grid has room) (201)
+ * POST /v1/chats/:id/input          {text} → sent, or queued while a turn runs (202)
+ * GET  /v1/chats/:id/output         ?items=1..200 → status, what waits for the user, the last steps as plain lines
+ * GET  /v1/chats/:id/wait           ?until=running|waiting|idle&timeout=ms → long-poll on the chat's own status
+ * POST /v1/chats/:id/interrupt      {} → stop the turn in flight (202)
  */
 export class Daemon {
   readonly store: AgentStore
@@ -183,6 +227,7 @@ export class Daemon {
   private readonly snapshotProvider?: () => unknown
   private readonly terminals?: TerminalApi
   private readonly clips?: ClipsApi
+  private readonly chats?: ChatsApi
   private readonly waits = new Set<NodeJS.Timeout>()
 
   constructor(private port: number, options: DaemonOptions | string = {}) {
@@ -192,6 +237,7 @@ export class Daemon {
     this.snapshotProvider = normalized.snapshot
     this.terminals = normalized.terminals
     this.clips = normalized.clips
+    this.chats = normalized.chats
     this.store = new AgentStore(normalized.maxAgents)
     this.server = http.createServer((req, res) => this.handle(req, res))
     this.server.on('error', (err) => {
@@ -295,10 +341,119 @@ export class Daemon {
       case 'snippets':
         if (req.method === 'GET') return void this.listSnippets(res, parsed.searchParams)
         return this.withJson(req, res, (value) => { void this.addSnippet(res, value) })
+      case 'chats':
+        if (req.method === 'GET') return void this.listChats(res)
+        return this.withJson(req, res, (value) => { void this.createChat(res, value) })
+      case 'chatInput':
+        return this.withJson(req, res, (value) => { void this.chatInput(res, route.id as string, value) })
+      case 'chatOutput':
+        return void this.chatOutput(res, route.id as string, parsed.searchParams)
+      case 'chatWait':
+        return this.chatWait(req, res, route.id as string, parsed.searchParams)
+      case 'chatInterrupt':
+        return this.withJson(req, res, (value) => { void this.chatInterrupt(res, route.id as string, value) })
       case 'report':
       case 'events':
         return this.withJson(req, res, (value) => this.ingest(res, route.name === 'report', value))
     }
+  }
+
+  // ---- chat panes for agents (0.4.68) ----
+
+  private async listChats(res: http.ServerResponse): Promise<void> {
+    if (!this.chats) return this.json(res, 404, NOT_FOUND)
+    return this.json(res, 200, { chats: await this.chats.list(), schemaVersion: 1 })
+  }
+
+  private async createChat(res: http.ServerResponse, value: unknown): Promise<void> {
+    if (!this.chats) return this.json(res, 404, NOT_FOUND)
+    const shape = { error: 'expected { provider?: "claude"|"codex", cwd?: string, model?: string, prompt?: string (≤ 64 KiB) }' }
+    const body = record(value)
+    const provider = body?.provider ?? 'claude'
+    const valid = body
+      && onlyKeys(Object.keys(body), ['provider', 'cwd', 'model', 'prompt'])
+      && (provider === 'claude' || provider === 'codex')
+      && (body.cwd === undefined || (typeof body.cwd === 'string' && body.cwd.length > 0 && body.cwd.length <= 32_767 && !/[\r\n\0]/.test(body.cwd)))
+      && (body.model === undefined || (typeof body.model === 'string' && CHAT_MODEL.test(body.model)))
+      && (body.prompt === undefined || (typeof body.prompt === 'string' && body.prompt.length > 0 && body.prompt.length <= MAX_INPUT_CHARS && !body.prompt.includes('\0')))
+    if (!valid) return this.json(res, 400, shape)
+    const created = await this.chats.create({
+      provider: provider as 'claude' | 'codex',
+      ...(body.cwd !== undefined ? { cwd: body.cwd as string } : {}),
+      ...(body.model !== undefined ? { model: body.model as string } : {}),
+      ...(body.prompt !== undefined ? { prompt: body.prompt as string } : {})
+    })
+    if ('error' in created) return this.json(res, 400, { error: created.error })
+    return this.json(res, 201, created)
+  }
+
+  private async chatInput(res: http.ServerResponse, id: string, value: unknown): Promise<void> {
+    if (!this.chats) return this.json(res, 404, NOT_FOUND)
+    const body = record(value)
+    const valid = body && onlyKeys(Object.keys(body), ['text'])
+      && typeof body.text === 'string' && body.text.trim().length > 0 && body.text.length <= MAX_INPUT_CHARS && !body.text.includes('\0')
+    if (!valid) return this.json(res, 400, { error: 'expected { text: string (≤ 64 KiB) }' })
+    const result = await this.chats.send(id, body.text as string)
+    if (result === 'missing') return this.json(res, 404, NOT_FOUND)
+    return this.json(res, 202, { ok: true })
+  }
+
+  private async chatOutput(res: http.ServerResponse, id: string, query: URLSearchParams): Promise<void> {
+    if (!this.chats) return this.json(res, 404, NOT_FOUND)
+    const items = onlyKeys(query.keys(), ['items']) ? intParam(query.get('items'), DEFAULT_CHAT_ITEMS, 1, MAX_CHAT_ITEMS) : null
+    if (items === null) return this.json(res, 400, { error: `items must be an integer 1–${MAX_CHAT_ITEMS}` })
+    const digest = await this.chats.read(id, items)
+    if (!digest) return this.json(res, 404, NOT_FOUND)
+    return this.json(res, 200, { id, ...(digest as Record<string, unknown>) })
+  }
+
+  private async chatInterrupt(res: http.ServerResponse, id: string, value: unknown): Promise<void> {
+    if (!this.chats) return this.json(res, 404, NOT_FOUND)
+    const body = record(value)
+    if (!body || Object.keys(body).length) return this.json(res, 400, { error: 'expected {}' })
+    const result = await this.chats.interrupt(id)
+    if (result === 'missing') return this.json(res, 404, NOT_FOUND)
+    return this.json(res, 202, { ok: true })
+  }
+
+  /**
+   * Hold the request until the chat's own status is `until` (or it errors or
+   * closes, which no waiting outlives), or the timeout passes. The chat's
+   * status, not its hooks', so it works the same for both providers.
+   */
+  private chatWait(req: http.IncomingMessage, res: http.ServerResponse, id: string, query: URLSearchParams): void {
+    if (!this.chats) return this.json(res, 404, NOT_FOUND)
+    const chats = this.chats
+    const until = query.get('until') ?? 'idle'
+    const timeout = intParam(query.get('timeout'), DEFAULT_WAIT_MS, 0, MAX_WAIT_MS)
+    if (!onlyKeys(query.keys(), ['until', 'timeout']) || !CHAT_STATES.has(until) || timeout === null) {
+      return this.json(res, 400, { error: `expected ?until=${[...CHAT_STATES].join('|')}&timeout=0..${MAX_WAIT_MS}` })
+    }
+    const settled = (status: string) => status === until || status === 'error' || status === 'closed'
+    void chats.status(id).then((first) => {
+      if (first === null) return this.json(res, 404, NOT_FOUND)
+      if (settled(first) || timeout === 0) return this.json(res, 200, { id, status: first, satisfied: first === until })
+      if (this.waits.size >= MAX_WAITS) return this.json(res, 429, { error: 'too many waits in flight' })
+      const started = Date.now()
+      let busy = false
+      const timer = setInterval(() => {
+        if (busy) return
+        busy = true
+        void chats.status(id).then((status) => {
+          busy = false
+          const done = status === null || settled(status) || Date.now() - started >= timeout
+          if (!done) return
+          clearInterval(timer)
+          this.waits.delete(timer)
+          this.json(res, status === null ? 404 : 200, status === null ? NOT_FOUND : { id, status, satisfied: status === until })
+        })
+      }, WAIT_POLL_MS)
+      this.waits.add(timer)
+      req.on('close', () => {
+        clearInterval(timer)
+        this.waits.delete(timer)
+      })
+    })
   }
 
   private ingest(res: http.ServerResponse, legacy: boolean, value: unknown): void {

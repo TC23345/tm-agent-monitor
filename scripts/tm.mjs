@@ -17,6 +17,10 @@
 //   node scripts/tm.mjs send <terminal-id> git status
 //   node scripts/tm.mjs read <terminal-id> --lines 40
 //   node scripts/tm.mjs wait claude:<session> --until waiting --timeout 90
+//   node scripts/tm.mjs chats new --provider codex --cwd C:\proj --prompt "run the tests"
+//   node scripts/tm.mjs chats send <chat-id> also check the lint
+//   node scripts/tm.mjs chats wait <chat-id> --until idle --timeout 120
+//   node scripts/tm.mjs chats read <chat-id> --items 10
 //   node scripts/tm.mjs clip list [--q text] [--group favorites] [--limit 20]
 //   node scripts/tm.mjs clip show <id> | copy <id> | add <text…> [--title t] | paste <id> [--terminal <id>]
 //   node scripts/tm.mjs skill --install
@@ -156,6 +160,71 @@ if (verb === 'wait') {
   if (json) print(out)
   else process.stdout.write(`${out.id} ${out.state ?? 'ended'}${out.satisfied ? '' : ' (timed out)'}\n`)
   process.exit(out.satisfied ? 0 : 3)
+}
+
+// Chat panes (hooks/SKILL.md → Chats): since 0.4.63 Claude Code and Codex start
+// as chats, so these are how one session starts and drives another.
+if (verb === 'chats') {
+  const sub = userArgs[1] ?? 'list'
+  const id = userArgs[2]
+  const CHATS_USAGE = 'usage: tm chats [list] | new [--provider claude|codex] [--cwd <folder>] [--model <id>] [--prompt <text>] | send <id> <text…> | read <id> [--items <n>] | wait <id> [--until idle|waiting|running] [--timeout <seconds>] | stop <id>'
+  if (sub === 'list') {
+    const { chats } = await call('GET', '/v1/chats')
+    if (json) print(chats)
+    else if (!chats.length) process.stdout.write('no chats\n')
+    else for (const c of chats) process.stdout.write(`  ${c.id}  ${c.provider.padEnd(6)} ${c.status.padEnd(8)} ${c.title ?? ''}  (${c.cwd})\n`)
+    process.exit(0)
+  }
+  if (sub === 'new') {
+    const prompt = option('prompt')
+    const created = await call('POST', '/v1/chats', {
+      provider: option('provider') ?? 'claude',
+      ...(option('cwd') ? { cwd: option('cwd') } : {}),
+      ...(option('model') ? { model: option('model') } : {}),
+      ...(prompt ? { prompt } : {})
+    })
+    if (json) print(created)
+    else process.stdout.write(`${created.id}\n`)
+    process.exit(0)
+  }
+  if (sub === 'send') {
+    const text = userArgs.slice(3).filter((a) => a !== '--json').join(' ')
+    if (!id || !text) fail(CHATS_USAGE, 1)
+    await call('POST', `/v1/chats/${encodeURIComponent(id)}/input`, { text })
+    process.exit(0)
+  }
+  if (sub === 'read') {
+    if (!id) fail(CHATS_USAGE, 1)
+    const items = option('items')
+    const out = await call('GET', `/v1/chats/${encodeURIComponent(id)}/output${items ? `?items=${encodeURIComponent(items)}` : ''}`)
+    if (json) {
+      print(out)
+    } else {
+      process.stdout.write(`[${out.status}${out.waitingFor ? ` — waiting for the user: ${out.waitingFor.text}` : ''}${out.queued ? ` · ${out.queued} queued` : ''}]\n`)
+      for (const x of out.items) process.stdout.write(`${x.kind}: ${x.text}${x.status && x.status !== 'done' ? ` (${x.status})` : ''}\n`)
+    }
+    process.exit(0)
+  }
+  if (sub === 'wait') {
+    if (!id) fail(CHATS_USAGE, 1)
+    const query = new URLSearchParams({ until: option('until') ?? 'idle' })
+    const timeout = option('timeout')
+    if (timeout !== undefined) {
+      const seconds = Number(timeout)
+      if (!Number.isFinite(seconds) || seconds < 0) fail('--timeout is in seconds', 1)
+      query.set('timeout', String(Math.round(seconds * 1000)))
+    }
+    const out = await call('GET', `/v1/chats/${encodeURIComponent(id)}/wait?${query}`)
+    if (json) print(out)
+    else process.stdout.write(`${out.id} ${out.status}${out.satisfied ? '' : ' (not what was waited for)'}\n`)
+    process.exit(out.satisfied ? 0 : 3)
+  }
+  if (sub === 'stop') {
+    if (!id) fail(CHATS_USAGE, 1)
+    await call('POST', `/v1/chats/${encodeURIComponent(id)}/interrupt`, {})
+    process.exit(0)
+  }
+  fail(CHATS_USAGE, 1)
 }
 
 // Clipboard history (hooks/SKILL.md → The clipboard). `add` and `paste` name

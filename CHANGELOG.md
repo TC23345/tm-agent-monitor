@@ -2,6 +2,34 @@
 
 Releases are GitHub Releases on `TC23345/tm-agent-monitor`; installed apps update from `latest.yml` there. Local builds land in `dist/` as `tm-agent-monitor-<version>-x64.exe`.
 
+## 0.4.68 — 2026-10-21
+
+- **Unsent messages survive a restart.** What you've typed in a chat, its waiting cards and its pasted images are kept per pane and come back after an Update, a crash or a reload. Sending clears them. Up to 24 drafts are kept, for two weeks, with about 3 MB of images each; past that the text and cards are still kept.
+- **Agents can start and drive chats.** The daemon gained chat routes, so one session can start a TaylorMade CC or TaylorMade Codex chat (optionally with a first prompt), send it messages, wait for a turn to finish, read what it did and stop it. A pane opens on the new chat when there's room. `tm chats new | send | read | wait | stop | list` wraps them. Approvals and questions in a chat are never answered by another agent; they stay yours.
+- **Replies read like the Claude Code extension's:**
+  - Line breaks inside a paragraph are kept.
+  - File paths are links: a Windows path in the text, a `[label](C:\path)` link, or a path like `src/app.ts:42` in code opens in a file pane.
+  - Math is rendered with KaTeX (`$$…$$`, `\(…\)`, `\[…\]`). As in the extension, a single `$…$` is never math, so "$5 and $10" stays text.
+  - An image in a reply is a placeholder that opens the image; nothing is downloaded into the app.
+  - Notes and file previews render as before.
+- **Closing a chat ends everything it started.** Each chat's CLI runs in a Windows job, so its MCP servers end with it, even ones whose launcher had already exited (a `railway mcp` used to survive). They also end if the app itself dies.
+- **Claude's own dialogs, in the pane.** When Claude Code pauses a session (a refusal it offers to retry on another model, Fable usage credits, or auto mode falling back), the pane shows the extension's card with the same choices. Before, the CLI was told the pane couldn't show them, so a refusal just ended the turn.
+- **Crop in the image markup.** A Crop tool (C) keeps part of the picture; the outside dims while you edit, and the chip gets just that part. Undo or Clear takes it back.
+- **Codex fixes:**
+  - A Codex pane whose thread was never saved (nothing sent before a restart) used to fail to start. It now opens a new thread and says why.
+  - A message sent with an image appeared twice; it is one row now, with the image as an attachment.
+  - The model chip no longer squeezes to "G… H…" in a narrow pane: the mode chip sizes for *Custom*, not *Custom (config.toml)*, and in a narrow footer the effort word gives way.
+- **What Claude Code and Codex report, the panes now show** (the framework pass; Agent SDK updated to 0.3.306 to match Claude Code 2.1.306):
+  - When Claude falls back to another model after a refusal, the refused reply is removed from the conversation, as in the extension, and a row says which model took over.
+  - A running agent's row and card show what it is doing.
+  - New rows: a warning before you hit a usage limit (*You've used 80% of your weekly limit.*), sign-in progress, *Recalled 2 memories*, Claude Code's notifications, and why a turn stopped, in words (*The conversation is too long for the model…*, *A hook stopped Claude from finishing.*).
+  - Codex: deprecation notices, a warning when folders other users can change weaken the sandbox, an MCP call's progress, and a thread that failed or was closed on Codex's side.
+- **Verified live on Codex:** a real turn, text cards, a marked-up image (Codex answered "Red" for the drawn box), Speed, the one-word modes, rename and default, and Auto's blue slider.
+
+## 0.4.67 — 2026-10-21
+
+- **The chats are *TaylorMade CC* and *TaylorMade Codex*.** That is their name everywhere: the pane headers, File → *New TaylorMade CC* / *New TaylorMade Codex*, the palette (typing *claude code* or *codex* still finds them), a project badge's menu, an agent row's *Start in ▸*, the taskbar Jump List and the empty grid's hint.
+
 ## 0.4.66 — 2026-10-20
 
 - **Mark up an image before you send it.** Click an image in the chat box and the viewer has a toolbar under it, like the Snipping Tool's: pen, highlighter, box, arrow, text and eraser, six colours, undo, redo, clear and Done. The keys are P, H, B, A, T and E, plus Ctrl+Z and Ctrl+Y.

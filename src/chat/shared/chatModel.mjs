@@ -168,7 +168,20 @@ import { changeLines, countChanges, splitLines } from './diff.mjs'
  * @property {number} at
  * @property {string} [toolUseId] the AskUserQuestion call it stands in for
  */
-/** @typedef {ChatItemUser | ChatItemAssistant | ChatItemThinking | ChatItemTool | ChatItemApproval | ChatItemQuestion | ChatItemSystem | ChatItemTurn} ChatItem */
+/**
+ * One of Claude Code's user dialogs (`onUserDialog`, 0.4.68): a card the CLI parks a turn on until the user
+ * answers it (`present.mjs` `dialogCard` words it). `result` once answered; `cancelled` once dismissed.
+ * @typedef {Object} ChatItemDialog
+ * @property {'dialog'} kind
+ * @property {string} id
+ * @property {string} dialogKind refusal_fallback_prompt | fable_overage_consent_prompt | auto_mode_server_fallback
+ * @property {Record<string, unknown>} payload
+ * @property {number} at
+ * @property {string} [toolUseId]
+ * @property {string} [result]
+ * @property {boolean} [cancelled]
+ */
+/** @typedef {ChatItemUser | ChatItemAssistant | ChatItemThinking | ChatItemTool | ChatItemApproval | ChatItemQuestion | ChatItemDialog | ChatItemSystem | ChatItemTurn} ChatItem */
 
 /**
  * @typedef {Object} Usage
@@ -415,7 +428,19 @@ export function pendingQuestions(t) {
 
 /** Anything the agent is waiting on the user for. */
 export function pendingRequests(t) {
-  return t.items.filter((x) => (x.kind === 'approval' && !x.decided) || (x.kind === 'question' && !x.answers && !x.cancelled))
+  return t.items.filter((x) => (x.kind === 'approval' && !x.decided) || ((x.kind === 'question' || x.kind === 'dialog') && !x.answers && !x.result && !x.cancelled))
+}
+
+/**
+ * Record a dialog's answer (`null` dismisses it); the status returns to running unless something else still waits.
+ * @param {Transcript} t
+ * @param {string} id
+ * @param {string | null} result
+ */
+export function settleDialog(t, id, result) {
+  const next = updateItem(t, id, (item) => (item.kind === 'dialog' && !item.result && !item.cancelled ? (result === null ? { ...item, cancelled: true } : { ...item, result }) : item))
+  if (next === t) return t
+  return pendingRequests(next).length ? next : setStatus(next, 'running')
 }
 
 /**

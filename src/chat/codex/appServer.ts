@@ -28,7 +28,7 @@ import {
 import { fmtTokens, limitLines } from '../shared/present.mjs'
 import { filePatch, relTo } from '../shared/diff.mjs'
 import { resolveCodex } from '../shared/findCli.mjs'
-import { killProcessTree } from '../shared/processTree.mjs'
+import { killProcessTree, type AdoptProcess } from '../shared/processTree.mjs'
 
 /** The permission menu, in the Codex extension's words; defined with the fold, which maps thread settings back onto it. */
 export { CODEX_MODES } from './fold.mjs'
@@ -51,6 +51,8 @@ export interface CodexServerOptions {
   clientName?: string
   clientVersion?: string
   log?: (line: string) => void
+  /** The host keeps everything the app-server starts together (a Windows job in claude-watch); close ends it. */
+  adoptProcess?: AdoptProcess
 }
 
 export interface StartThreadOptions {
@@ -96,6 +98,8 @@ function pipeSocket(proc: ChildProcessWithoutNullStreams): Duplex {
  */
 export class CodexAppServer extends EventEmitter {
   private proc: ChildProcessWithoutNullStreams | null = null
+  /** Ends what the host keeps of the app-server's processes (`adoptProcess`). */
+  private release: (() => void) | null = null
   private ws: WebSocket | null = null
   private pending = new PendingCalls()
   private splitter = new LineSplitter()
@@ -125,6 +129,7 @@ export class CodexAppServer extends EventEmitter {
     this.log(`[codex] ${exe.file} ${args.join(' ')} (${exe.how}, ${this.transport})`)
     const proc = spawn(exe.file, args, { stdio: ['pipe', 'pipe', 'pipe'], env, windowsHide: true })
     this.proc = proc
+    if (proc.pid) this.release = this.options.adoptProcess?.(proc.pid) ?? null
     proc.stderr.setEncoding('utf8')
     proc.stderr.on('data', (chunk: string) => this.log(`[codex stderr] ${chunk.trimEnd()}`))
     proc.on('exit', (code, signal) => {
@@ -271,7 +276,14 @@ export class CodexAppServer extends EventEmitter {
     const turns: any[] = []
     let cursor: string | null = null
     for (let page = 0; page < 200; page++) {
-      const res: { data: any[]; nextCursor: string | null } = await this.request('thread/turns/list', { threadId, limit: pageSize, cursor, sortDirection: 'asc', itemsView: 'full' })
+      let res: { data: any[]; nextCursor: string | null }
+      try {
+        res = await this.request('thread/turns/list', { threadId, limit: pageSize, cursor, sortDirection: 'asc', itemsView: 'full' })
+      } catch (err) {
+        // A thread with no message yet has no turns to list (codex-cli 0.163: "is not materialized yet").
+        if (page === 0 && /not materialized/i.test(String((err as Error)?.message ?? err))) return []
+        throw err
+      }
       turns.push(...(res.data ?? []))
       cursor = res.nextCursor ?? null
       if (!cursor) break
@@ -349,6 +361,8 @@ export class CodexAppServer extends EventEmitter {
     // behind on Windows (a `railway mcp` outlived the debug app, 0.4.63). The
     // thread store is written as it goes, so there is nothing to flush.
     killProcessTree(proc.pid)
+    this.release?.()
+    this.release = null
     try {
       proc.kill()
     } catch {

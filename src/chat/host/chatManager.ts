@@ -11,6 +11,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ClaudeSession, listClaudeSessions, loadClaudeTranscript } from '../claude/session'
+import type { AdoptProcess } from '../shared/processTree.mjs'
 import { CodexAppServer, CodexThread, type CodexServerMode } from '../codex/appServer'
 import {
   emptyTranscript,
@@ -28,6 +29,8 @@ export interface ChatManagerOptions {
   claudePath?: string | null
   /** Where pasted images are written for Codex (`localImage` takes a path). Default: the OS temp dir. */
   scratchDir?: string
+  /** Keep everything each CLI starts together, so closing a chat ends its MCP servers too (claude-watch: a Windows job). */
+  adoptProcess?: AdoptProcess
 }
 
 interface Live {
@@ -58,7 +61,7 @@ export class ChatManager extends EventEmitter implements ChatBridge {
 
   private server(): CodexAppServer {
     if (this.codex?.alive) return this.codex
-    const server = new CodexAppServer({ codexPath: this.config.codexPath, mode: this.config.codexMode ?? 'own', log: this.config.log })
+    const server = new CodexAppServer({ codexPath: this.config.codexPath, mode: this.config.codexMode ?? 'own', log: this.config.log, adoptProcess: this.config.adoptProcess })
     server.on('exit', () => {
       if (this.codex === server) this.codex = null
     })
@@ -77,7 +80,7 @@ export class ChatManager extends EventEmitter implements ChatBridge {
     if (req.provider === 'claude') {
       const transcript = req.resume ? await loadClaudeTranscript(req.resume, req.cwd).catch(() => undefined) : undefined
       const permissionMode = req.permissionMode ? (req.permissionMode as ConstructorParameters<typeof ClaudeSession>[0]['permissionMode']) : undefined
-      const session = new ClaudeSession({ cwd: req.cwd, resume: req.resume ?? null, model: req.model ?? null, permissionMode, env, claudePath: this.config.claudePath, log: this.config.log }, transcript)
+      const session = new ClaudeSession({ cwd: req.cwd, resume: req.resume ?? null, model: req.model ?? null, permissionMode, env, claudePath: this.config.claudePath, log: this.config.log, adoptProcess: this.config.adoptProcess }, transcript)
       session.on('change', (t: Transcript) => this.emit('change', id, t))
       session.on('approval', (a: ChatItemApproval) => this.emit('approval', id, a))
       session.on('question', (q: ChatItemQuestion) => this.emit('question', id, q))
@@ -88,7 +91,21 @@ export class ChatManager extends EventEmitter implements ChatBridge {
       return { id, transcript: session.transcript }
     }
     const server = this.server()
-    const transcript = req.resume ? await server.readTranscript(req.resume) : emptyTranscript('codex', { cwd: req.cwd, model: req.model ?? null })
+    let transcript = emptyTranscript('codex', { cwd: req.cwd, model: req.model ?? null })
+    if (req.resume) {
+      try {
+        transcript = await server.readTranscript(req.resume)
+      } catch (err) {
+        // A thread nobody sent a message to is never written to disk, so after a restart Codex cannot read or
+        // resume it ("thread not loaded", "no rollout found"). The pane starts a new one and says why, rather
+        // than failing to start at all (the debug profile's Codex pane was stuck this way until 2026-10-21).
+        this.config.log?.(`[chat] codex thread ${req.resume} could not be read: ${(err as Error)?.message ?? err}`)
+        transcript = {
+          ...transcript,
+          items: [{ kind: 'system', id: `resume-lost:${req.resume}`, level: 'info', at: Date.now(), variant: 'notice', text: 'The earlier Codex thread was never saved (it had no messages), so this is a new one.' }]
+        }
+      }
+    }
     const thread = new CodexThread(server, transcript)
     thread.on('change', (t: Transcript) => this.emit('change', id, t))
     thread.on('approval', (a: ChatItemApproval) => this.emit('approval', id, a))
@@ -150,7 +167,7 @@ export class ChatManager extends EventEmitter implements ChatBridge {
   }
 
   async shell(id: string, command: string): Promise<void> {
-    await this.codexThread(id, 'Type ! commands in a Codex chat; in Claude Code, ! is a CLI mode').shell(command)
+    await this.codexThread(id, 'Type ! commands in TaylorMade Codex; in TaylorMade CC, ! is a CLI mode').shell(command)
   }
 
   async review(id: string, target: ReviewTarget): Promise<void> {
@@ -194,7 +211,7 @@ export class ChatManager extends EventEmitter implements ChatBridge {
   async fork(id: string, itemId?: string): Promise<{ sessionId: string | null; prompt: string }> {
     const l = this.must(id)
     if (l.claude) {
-      if (!itemId) throw new Error('Fork a Claude Code chat from a prompt’s menu')
+      if (!itemId) throw new Error('Fork TaylorMade CC from a prompt’s menu')
       return l.claude.fork(itemId)
     }
     return l.codex!.fork(itemId)
@@ -235,6 +252,11 @@ export class ChatManager extends EventEmitter implements ChatBridge {
     const l = this.must(id)
     if (l.claude) l.claude.send('/compact')
     else await l.codex!.compact()
+  }
+
+  /** Answer one of Claude Code's user dialogs (Codex has none); `null` dismisses it. */
+  async answerDialog(id: string, dialogId: string, result: string | null): Promise<void> {
+    this.must(id).claude?.answerDialog(dialogId, result)
   }
 
   async answerQuestion(id: string, questionId: string, answers: Record<string, string[]> | null): Promise<void> {
