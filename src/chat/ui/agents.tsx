@@ -46,14 +46,14 @@ export function AgentsPanel({ cards, selected, onSelect, onClose, onStop, onShow
       <div className="chat-panel-head chat-agents-head">
         {card ? <button className="chat-iconbtn" aria-label="Back to agents" title="Back to agents" onClick={() => onSelect(null)} data-testid="chat-agents:back"><ChevronLeft className="chat-ic" /></button> : null}
         <span className="chat-panel-title">{card ? (card.kind === 'agent' ? 'Agent' : 'Background task') : 'Agents'}</span>
-        <span className="chat-panel-hint">{card ? null : running ? `${running} running` : `${cards.length} this session`}</span>
+        <span className="chat-panel-hint">{card ? null : running ? `${running} running` : null}</span>
         <button className="chat-iconbtn" aria-label="Close agents" title="Close agents" onClick={onClose} data-testid="chat-agents:close"><X className="chat-ic" /></button>
       </div>
       {card ? (
         <AgentDetail card={card} onStop={onStop} onShow={onShow} actions={actions} nestedFor={nestedFor} itemFor={itemFor} />
       ) : (
         <div className="chat-agents-list" role="list">
-          {cards.length ? cards.map((c) => <CardRow key={c.id} card={c} onOpen={() => onSelect(c.id)} onStop={onStop} />) : <div className="chat-empty">No agents in this session.</div>}
+          {cards.length ? cards.map((c) => <CardRow key={c.id} card={c} onOpen={() => onSelect(c.id)} onStop={onStop} />) : <div className="chat-empty">No agents yet.</div>}
         </div>
       )}
     </aside>
@@ -106,7 +106,7 @@ function CardRow({ card, onOpen, onStop }: { card: AgentCard; onOpen: () => void
         <StateIcon state={card.state} />
         <span className="chat-agent-name">{card.name}</span>
         <span className="chat-agent-meta"><Meta card={card} /></span>
-        {card.latest ? <span className="chat-agent-latest">{card.latest}</span> : null}
+        {/* Two rows only (the user's call, 2026-10-21): the latest step's line read as noise here; the card's detail has every step. */}
       </button>
       <StopButton card={card} onStop={onStop} />
     </div>
