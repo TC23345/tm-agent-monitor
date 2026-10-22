@@ -2093,6 +2093,11 @@ function registerIpc(): void {
         child.on('close', (code) => { clearTimeout(cutoff); resolve({ code, out }) })
       })
       if (handoff.code !== 0) return `built, but could not start the installer helper (WMI ${handoff.code}): ${handoff.out.trim().slice(-200)}`
+      // The waiter installs what was just built. electron-updater would otherwise run the release it has
+      // downloaded on this same quit (autoInstallOnAppQuit, silent, no relaunch) — two NSIS installers at once,
+      // and NSIS runs one at a time, so the app stayed gone for minutes and looked crashed (0.4.74, 2026-10-22,
+      // a pending 0.4.74 beside a rebuilt 0.4.74). The tray's *Restart to update* still installs the download.
+      autoUpdater.autoInstallOnAppQuit = false
       // Give the reply a beat to land before the ordinary quit flush runs.
       setTimeout(() => app.quit(), 800)
       return `v${version} built — reinstalling, back in a moment`
