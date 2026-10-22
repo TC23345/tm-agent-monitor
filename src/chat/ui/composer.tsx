@@ -434,7 +434,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
   const named = (kind: PrefKind, id: string, row: { label: string; description?: string }) => labelFor(prefs, provider, kind, id, row).label
   const shownModel = transcript ? currentModel(transcript, options) : undefined
   const modelChoices = latestModels(options?.models ?? [], shownModel?.id)
-  const chipEfforts: (string | null)[] = shownModel?.efforts?.length ? [null, ...shownModel.efforts] : []
   const modeRow = modes.find((m) => m.id === transcript?.permissionMode)
 
   // ---- auto-correct (the user's ask, 2026-10-21) ------------------------------------------------------------
@@ -909,9 +908,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
               {transcript.fastMode === 'on' ? <Zap className="chat-ic chat-fast-ic" aria-label="Fast mode" /> : null}
               {/* Each word is as wide as the widest it can be, so picking another never moves the chips (the user's call, 2026-10-20). */}
               <StableText value={shownModel ? named('model', shownModel.id, shownModel) : currentModelLabel(transcript, options)} options={modelChoices.map((m) => named('model', m.id, m))} />
-              {chipEfforts.length ? (
-                <span className="chat-footchip-sub"><StableText value={effortLabel(transcript.effort ?? null, provider)} options={chipEfforts.map((e) => effortLabel(e, provider))} /></span>
-              ) : transcript.effort ? <span className="chat-footchip-sub">{effortLabel(transcript.effort, provider)}</span> : null}
+              {/* The effort word (*Auto*, *High*) is the menu's, not the chip's (the user's call, 2026-10-21: it made the chip bulky). */}
               <ChevronDown className="chat-ic chat-footchip-chev" />
             </button>
           ) : null}

@@ -567,8 +567,9 @@
 .chat-iconbtn.is-stop { color: var(--chat-bad); }
 .chat-foot-clock { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; height: 24px; font-size: 12px; color: var(--muted, #888); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .chat-foot-clock.is-live { color: inherit; }
-.chat-footchip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; background: rgba(127, 127, 127, 0.1); color: inherit; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.chat-footchip:hover:not(:disabled), .chat-footchip.is-on { background: rgba(127, 127, 127, 0.18); }
+/* The footer chips (model, mode) stand off the box (the user's call, 2026-10-21): an ink tint with a hairline of the same, not the box's own grey. */
+.chat-footchip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border: 1px solid color-mix(in srgb, var(--chat-ink) 18%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--chat-ink) 11%, transparent); color: inherit; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.chat-footchip:hover:not(:disabled), .chat-footchip.is-on { background: color-mix(in srgb, var(--chat-ink) 20%, transparent); border-color: color-mix(in srgb, var(--chat-ink) 28%, transparent); }
 .chat-footchip:disabled { opacity: 0.5; cursor: default; }
 .chat-footchip-sub { color: var(--muted, #888); }
 /* A state chip (Codex plan mode) never shrinks; the model chip gives way first. */
