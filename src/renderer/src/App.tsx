@@ -15,7 +15,7 @@ import { setFieldActive } from './fieldActive'
 import { StatusBar, type StatusMenu } from './StatusBar'
 import { Pane } from './Pane'
 import type { TerminalPaneHandle } from './TerminalPane'
-import { ChatPane, type ChatPaneConfig, type ChatPaneHandle } from '../../chat/ui/ChatPane'
+import { ChatPane, type ChatPaneConfig, type ChatPaneHandle, type StepStore } from '../../chat/ui/ChatPane'
 import { MarkdownView } from './MarkdownView'
 // xterm and its addon are ~40% of the renderer bundle; a workspace with no
 // terminal pane never parses them. The ref still reaches the real component.
@@ -31,7 +31,8 @@ import brandMark from './assets/icon.png'
 import { KeysPane } from './KeysPane'
 import { WebPane, type WebPaneHandle } from './WebPane'
 import { sanitizeWebConfig, type WebPaneConfig } from '@shared/webPane.mjs'
-import { sourceLabel } from '@shared/clips.mjs'
+import { inGroup, sourceLabel } from '@shared/clips.mjs'
+import { groupDot } from './clipboard/ClipNav'
 import type { ClipSummary } from '@shared/types'
 import { isWorkspaceCommand } from '@shared/workspaceCommand.mjs'
 import { APP_KEYS, eventChord, matchAppKey, type AppKeyAction } from '@shared/keymap.mjs'
@@ -916,6 +917,19 @@ export function App() {
     addPane('chat', undefined, undefined, undefined, { provider: kind, cwd: target.cwd ?? '' })
   }
 
+  // A chat step's dot menu saves into the clipboard history (0.4.69): the groups as the Clipboard pane lists them —
+  // its order, dot colours and counts — and a save is one `clips:add` titled by the row, noting which chat it came from.
+  const chatStepStore = useMemo<StepStore>(() => ({
+    groups: async () => {
+      const listing = await window.watch.listClips()
+      return listing.groups.map((name) => ({
+        name, color: groupDot(name), count: listing.clips.filter((c) => inGroup(c, name)).length,
+        ...(listing.groupInfo[name]?.description ? { description: listing.groupInfo[name].description } : {})
+      }))
+    },
+    save: async (step, group) => !!(await window.watch.addClip({ text: step.text, title: step.title, groups: [group], note: `From ${step.provider === 'claude' ? 'TaylorMade CC' : 'TaylorMade Codex'} · ${step.cwd.split(/[\\/]/).filter(Boolean).pop() ?? step.cwd}` }))
+  }), [])
+
   const updateChat = (paneId: string, patch: Partial<ChatPaneConfig>) => {
     setPanes((current) => current.map((p) => {
       if (p.id !== paneId || !p.chat) return p
@@ -1038,6 +1052,7 @@ export function App() {
             saveText={(name, text) => window.watch.saveChat(name, text)}
             pathForFile={(file) => window.watch.pathForFile(file) || null}
             onFocus={() => { if (focusedPane !== pane.id) setFocusedPane(pane.id) }}
+            stepStore={chatStepStore}
           />
         )
       case 'terminal':

@@ -26,17 +26,18 @@ import { Search, X } from 'lucide-react'
 import type { ChatBridge } from './bridge'
 import { QueuedRow, Row, StepFold, plain, type PlanComment, type PromptAction, type RowActions } from './rows'
 import { Composer, type ComposerHandle } from './composer'
-import { FindBar, ImagePreview, JumpToLatest, McpPanel, PinnedPrompt, RewindCard, SelectionBar, SidePanel, WorkingLine, type SelectionInfo } from './extras'
+import { FindBar, ImagePreview, JumpToLatest, McpPanel, PinnedPrompt, RewindCard, SelectionBar, SidePanel, StepMenu, WorkingLine, type SelectionInfo, type StepStore } from './extras'
 import { MarkupViewer, type ImageEdit } from './markup'
 import { readPrefs } from './prefs'
 import { defaultFor } from '../shared/chatPrefs.mjs'
 import { AgentsPanel } from './agents'
-import { CODEX_INIT_PROMPT, cardSteps, transcriptMarkdown, type DialogAction } from '../shared/present.mjs'
+import { CODEX_INIT_PROMPT, cardSteps, stepText, stepTitle, transcriptMarkdown, type DialogAction } from '../shared/present.mjs'
 import { agentCards } from '../shared/agents.mjs'
 import {
   pendingRequests, sortSessions,
-  type ApprovalChoice, type Attachment, type ChatConfigPatch, type ChatItem, type ChatItemTurn, type ChatOptions, type McpRequest, type Provider, type SessionSummary, type Transcript
+  type ApprovalChoice, type Attachment, type ChatConfigPatch, type ChatItem, type ChatItemTool, type ChatItemTurn, type ChatOptions, type McpRequest, type Provider, type SessionSummary, type Transcript
 } from '../shared/chatModel.mjs'
+export type { SavedStep, StepGroup, StepStore } from './extras'
 
 export interface ChatPaneConfig {
   provider: Provider
@@ -86,6 +87,8 @@ interface Props {
   draftKey?: string
   /** Open a web page outside the app (a dialog's *Learn more*); a new browser window by default. */
   openUrl?: (url: string) => void
+  /** Where a step's dot menu can *Save* the step (claude-watch: the clipboard history's groups); without it the menu only copies. */
+  stepStore?: StepStore
 }
 
 const PROVIDER_LABEL: Record<Provider, string> = { claude: 'Claude Code', codex: 'Codex' }
@@ -123,7 +126,7 @@ function edgeChar(range: Range, last: boolean): DOMRect | null {
 }
 
 export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(props, ref) {
-  const { bridge, config, onConfig, renderText, copyText, openFile, listFiles, saveText, pathForFile, onFocus, onAttention, draftKey, openUrl } = props
+  const { bridge, config, onConfig, renderText, copyText, openFile, listFiles, saveText, pathForFile, onFocus, onAttention, draftKey, openUrl, stepStore } = props
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [chatId, setChatId] = useState<string | null>(config.chatId ?? null)
   const [options, setOptions] = useState<ChatOptions | null>(null)
@@ -150,6 +153,21 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
   const composer = useRef<ComposerHandle | null>(null)
   const scroller = useRef<HTMLDivElement | null>(null)
   const stickToBottom = useRef(true)
+  // The dot menu open on a step: the step, and where the bar sits (the scroll wrap's coordinates, like the selection bar).
+  const [stepMenu, setStepMenu] = useState<{ item: ChatItemTool; x: number; y: number } | null>(null)
+  // The host's store as one stable object, so an inline prop (a new object each render) does not refetch the groups while the menu is open.
+  const storeRef = useRef(stepStore)
+  storeRef.current = stepStore
+  const hasStore = !!stepStore
+  const stableStore = useMemo<StepStore | undefined>(() => (hasStore ? { groups: () => storeRef.current!.groups(), save: (s, g) => storeRef.current!.save(s, g) } : undefined), [hasStore])
+  const closeStepMenu = useCallback(() => setStepMenu(null), [])
+  const onStepMenu = useCallback((item: ChatItemTool, anchor: DOMRect) => {
+    const host = scroller.current?.parentElement
+    if (!host) return
+    const box = host.getBoundingClientRect()
+    // The same dot again closes it; another dot moves it.
+    setStepMenu((open) => (open && open.item.id === item.id ? null : { item, x: anchor.right - box.left + 4, y: anchor.top - box.top - 4 }))
+  }, [])
 
   // Attach: reuse the host's live session, else start one (resuming the stored provider session).
   const attach = useCallback(async (resume: string | null | undefined, reuse: string | null, permissionMode?: string | null) => {
@@ -429,8 +447,9 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
     onKeepPlanning: () => composer.current?.focus(),
     onRetry: lastPrompt?.kind === 'user' && lastPrompt.text ? () => send(lastPrompt.text, []) : undefined,
     onRemoveComment: (approvalId: string, commentId: string) => setComments((c) => ({ ...c, [approvalId]: (c[approvalId] ?? []).filter((x) => x.id !== commentId) })),
-    openAgent: wide ? openAgent : undefined
-  }), [bridge, chatId, copy, provider, config.cwd, openFile, promptAction, canRewind, lastPrompt, send, pendingPlan, stopTask, wide, openAgent, openPage])
+    openAgent: wide ? openAgent : undefined,
+    onStepMenu
+  }), [bridge, chatId, copy, provider, config.cwd, openFile, promptAction, canRewind, lastPrompt, send, pendingPlan, stopTask, wide, openAgent, openPage, onStepMenu])
 
   // The rows: a subagent's steps under its Agent row, and in focus view each run of steps folded to one line.
   const { blocks, nested } = useMemo(() => {
@@ -655,7 +674,7 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
           <div
             className="chat-scroll"
             ref={(el) => { scroller.current = el; setScrollEl(el) }}
-            onScroll={() => { trackScroll(); clearSel() }}
+            onScroll={() => { trackScroll(); clearSel(); if (stepMenu) setStepMenu(null) }}
             onMouseUp={onSelectEnd}
             onMouseDown={clearSel}
           >
@@ -697,6 +716,13 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
             ))}
           </div>
           {!atBottom ? <JumpToLatest count={newRows} onJump={jumpToLatest} /> : null}
+          {stepMenu ? (
+            <StepMenu
+              key={stepMenu.item.id} x={stepMenu.x} y={stepMenu.y}
+              step={{ title: stepTitle(stepMenu.item), text: stepText(stepMenu.item), provider, cwd: config.cwd }}
+              store={stableStore} onCopy={copy} onClose={closeStepMenu}
+            />
+          ) : null}
           {sel ? (
             <SelectionBar
               sel={sel} onClose={clearSel}
@@ -729,6 +755,8 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
         onInterrupt={interrupt}
         onConfigure={configure}
         onNotice={setNotice}
+        openFile={openFile}
+        onDuplicateStyle={chatId && config.provider === 'claude' && bridge.duplicateStyle ? (name: string) => bridge.duplicateStyle!(chatId, name) : undefined}
         listFiles={listFiles ? () => listFiles(config.cwd) : undefined}
         onSideQuestion={() => setPanel('side')}
         onMcp={() => setPanel('mcp')}

@@ -2259,6 +2259,8 @@ function registerIpc(): void {
   ipcMain.handle('chat:stop-task', async (_e, id: unknown, taskId: unknown) => (validTermId(id) && validItemId(taskId) ? settle(() => chats.stopTask(id, taskId)) : null))
   ipcMain.handle('chat:rename', async (_e, id: unknown, title: unknown) => (validTermId(id) && typeof title === 'string' && title.trim() && title.length <= 200 && !/[\r\n\0]/.test(title) ? settle(() => chats.rename(id, title.trim())) : null))
   ipcMain.handle('chat:compact', async (_e, id: unknown) => (validTermId(id) ? settle(() => chats.compact(id)) : null))
+  // An editable copy of a built-in output style (the menu's *Duplicate to edit*): the name is one the CLI listed, in its own spelling.
+  ipcMain.handle('chat:duplicate-style', async (_e, id: unknown, name: unknown) => (validTermId(id) && typeof name === 'string' && /^[\w .()-]{1,64}$/.test(name) ? settle(() => chats.duplicateStyle(id, name)) : null))
   // The `@` picker's list: the folder's files, relative — git's own list when it is a repository
   // (tracked and untracked, ignores honoured), else a bounded walk that skips `.git` and `node_modules`.
   const fileLists = new Map<string, { at: number; files: string[] }>()
@@ -2313,7 +2315,7 @@ function registerIpc(): void {
   // Efforts are each provider's own list (Codex adds levels such as `ultra`), so main checks the shape
   // and the session checks the value; neither reaches a command line.
   const validEffort = (e: unknown): e is string => typeof e === 'string' && /^[a-z][a-z_-]{1,23}$/.test(e)
-  const CHAT_MODES = new Set(['default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'read-only', 'full-access', 'ask', 'auto-review', 'custom'])
+  const CHAT_MODES = new Set(['default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions', 'read-only', 'full-access', 'ask', 'auto-review', 'custom'])
   ipcMain.handle('chat:configure', async (_e, id: unknown, patch: unknown): Promise<string | null> => {
     if (!validTermId(id) || typeof patch !== 'object' || patch === null) return 'Invalid request'
     const p = patch as Record<string, unknown>

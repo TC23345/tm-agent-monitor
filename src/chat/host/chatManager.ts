@@ -31,6 +31,8 @@ export interface ChatManagerOptions {
   scratchDir?: string
   /** Keep everything each CLI starts together, so closing a chat ends its MCP servers too (claude-watch: a Windows job). */
   adoptProcess?: AdoptProcess
+  /** Offer Claude's *Bypass* mode (`ClaudeSessionOptions.allowBypass`): off unless the host says so. */
+  allowBypass?: boolean
 }
 
 interface Live {
@@ -80,7 +82,7 @@ export class ChatManager extends EventEmitter implements ChatBridge {
     if (req.provider === 'claude') {
       const transcript = req.resume ? await loadClaudeTranscript(req.resume, req.cwd).catch(() => undefined) : undefined
       const permissionMode = req.permissionMode ? (req.permissionMode as ConstructorParameters<typeof ClaudeSession>[0]['permissionMode']) : undefined
-      const session = new ClaudeSession({ cwd: req.cwd, resume: req.resume ?? null, model: req.model ?? null, permissionMode, env, claudePath: this.config.claudePath, log: this.config.log, adoptProcess: this.config.adoptProcess }, transcript)
+      const session = new ClaudeSession({ cwd: req.cwd, resume: req.resume ?? null, model: req.model ?? null, permissionMode, env, claudePath: this.config.claudePath, log: this.config.log, adoptProcess: this.config.adoptProcess, allowBypass: this.config.allowBypass }, transcript)
       session.on('change', (t: Transcript) => this.emit('change', id, t))
       session.on('approval', (a: ChatItemApproval) => this.emit('approval', id, a))
       session.on('question', (q: ChatItemQuestion) => this.emit('question', id, q))
@@ -274,6 +276,13 @@ export class ChatManager extends EventEmitter implements ChatBridge {
   async options(id: string): Promise<ChatOptions> {
     const l = this.must(id)
     return l.claude ? l.claude.options() : l.codex!.options()
+  }
+
+  /** Claude: an editable copy of a built-in output style, written to the user's style folder; its path. */
+  async duplicateStyle(id: string, name: string): Promise<string> {
+    const l = this.must(id)
+    if (!l.claude) throw new Error('Codex has no output styles')
+    return l.claude.duplicateStyle(name)
   }
 
   async close(id: string): Promise<void> {

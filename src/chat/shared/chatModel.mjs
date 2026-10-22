@@ -116,7 +116,7 @@ import { changeLines, countChanges, splitLines } from './diff.mjs'
  */
 /**
  * `plan-auto` / `plan-manual` approve a plan and leave plan mode for
- * *Bypass* (`acceptEdits`) or *Manual*.
+ * *Edits* (`acceptEdits`), *Bypass* (`bypassPermissions`) or *Manual*.
  * @typedef {'allow' | 'allow-session' | 'deny' | 'cancel' | 'plan-auto' | 'plan-manual'} ApprovalChoice
  */
 /**
@@ -222,9 +222,10 @@ import { changeLines, countChanges, splitLines } from './diff.mjs'
  * `id` is what `configure` takes (an alias such as `opus` on Claude); `model` the canonical id it resolves to.
  * @typedef {{ id: string, label: string, description?: string, efforts: string[], defaultEffort?: string | null, model?: string }} ModelOption
  * @typedef {{ id: string, label: string, description: string }} ModeOption
- * @typedef {{ name: string, description: string, argumentHint?: string }} CommandOption
- * `outputStyles` and `fastMode` (whether the current model offers it) are Claude's.
- * @typedef {{ models: ModelOption[], modes: ModeOption[], commands: CommandOption[], outputStyles?: string[], fastMode?: boolean }} ChatOptions
+ * @typedef {{ name: string, description: string, argumentHint?: string, builtin?: boolean }} CommandOption
+ * `outputStyles` (the names), `styles` (each name with its description, file and preview — `outputStyles.mjs`) and
+ * `fastMode` (whether the current model offers it) are Claude's.
+ * @typedef {{ models: ModelOption[], modes: ModeOption[], commands: CommandOption[], outputStyles?: string[], styles?: import('./outputStyles.mjs').OutputStyleInfo[], fastMode?: boolean }} ChatOptions
  */
 /** @typedef {{ model?: string | null, effort?: string | null, permissionMode?: string | null, fastMode?: boolean, outputStyle?: string }} ChatConfigPatch */
 

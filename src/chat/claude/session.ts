@@ -23,6 +23,8 @@ import {
   type ModeOption, type Question, type RewindResult, type SessionSummary, type Transcript
 } from '../shared/chatModel.mjs'
 import { DIALOG_KINDS, describePermissionUpdates } from '../shared/present.mjs'
+import { duplicateStyle, styleCatalog } from '../shared/outputStyles.mjs'
+import { readStyleFiles, writeStyleFile } from './styles'
 import { resolveClaude } from '../shared/findCli.mjs'
 import { killProcessTree, type AdoptProcess } from '../shared/processTree.mjs'
 
@@ -54,6 +56,12 @@ export interface ClaudeSessionOptions {
   adoptProcess?: AdoptProcess
   /** Allow Claude Code to read the user's settings (hooks included) — default true, like the extension. */
   settingSources?: ('user' | 'project' | 'local')[]
+  /**
+   * Offer the *Bypass* mode (`bypassPermissions`): the session is started with the SDK's
+   * `allowDangerouslySkipPermissions`, which is what lets `setPermissionMode` take it later. Off by default —
+   * the host decides, and without it the mode is not in the menu.
+   */
+  allowBypass?: boolean
   log?: (line: string) => void
 }
 
@@ -146,16 +154,27 @@ export function askUserQuestionInput(input: Record<string, unknown>, answers: Re
 /**
  * The permission modes the composer offers, with the Claude Code extension's
  * descriptions (its mode table in webview/index.js, docs/rea-findings.md) and
- * one-word names (the user's call, 2026-10-20: `acceptEdits`, the extension's
- * *Edit automatically*, is *Bypass*). `dontAsk` is left out (the user never
- * uses it), and so is `bypassPermissions`: switching to it mid-session needs
- * the session started with `allowDangerouslySkipPermissions`, which this host
- * never sets. `auto` is offered only on a model that supports it.
+ * one-word names (the user's call, 2026-10-20). Since 0.4.69 *Bypass* is the
+ * real `bypassPermissions` — the user read the word as "stop asking" and
+ * `acceptEdits` (the extension's *Edit automatically*, now *Edits*) kept
+ * asking about reads outside the folder and guarded shell commands. It is
+ * offered only when the host started the session with `allowBypass`
+ * (`ClaudeSessionOptions`); the menu confirms it first, and Shift+Tab never
+ * lands on it. `dontAsk` is left out (the user never uses it).
+ * `auto` is offered only on a model that supports it.
  */
 export const CLAUDE_MODES: ModeOption[] = [
   { id: 'default', label: 'Manual', description: 'Claude will ask for approval before making each edit' },
-  { id: 'acceptEdits', label: 'Bypass', description: 'Claude will make edits without asking first' },
+  { id: 'acceptEdits', label: 'Edits', description: 'Claude will make edits without asking first' },
   { id: 'plan', label: 'Plan', description: 'Claude will explore the code and present a plan before editing' },
+  {
+    id: 'bypassPermissions', label: 'Bypass', description: 'Claude will edit files and run commands without asking',
+    confirm: {
+      title: 'Bypass permissions?',
+      body: 'Claude will edit files, run commands and reach the network in this folder without asking you first. Use it only where you trust what it may do.',
+      action: 'Bypass'
+    }
+  },
   { id: 'auto', label: 'Auto', description: 'Claude will approve actions that pass a safety check and pause for anything risky' }
 ]
 
@@ -629,10 +648,11 @@ export class ClaudeSession extends EventEmitter {
   /** What the composer's menus offer: the CLI's models (with their effort levels and fast mode), the modes, the slash commands and the output styles. */
   async options(): Promise<ChatOptions> {
     const q = this.live()
-    const [models, commands, init] = await Promise.all([
+    const [models, commands, init, styleFiles] = await Promise.all([
       q.supportedModels().catch(() => [] as ModelInfo[]),
       q.supportedCommands().catch(() => []),
-      q.initializationResult().catch(() => null)
+      q.initializationResult().catch(() => null),
+      readStyleFiles(this.config.cwd).catch(() => [])
     ])
     this.models = models
     this.outputStyles = init?.available_output_styles ?? []
@@ -646,11 +666,25 @@ export class ClaudeSession extends EventEmitter {
         efforts: m.supportsEffort === false ? [] : [...(m.supportedEffortLevels ?? [])],
         ...(m.supportsFastMode ? { fastMode: true } : {})
       })),
-      modes: CLAUDE_MODES.filter((m) => m.id !== 'auto' || current?.supportsAutoMode === true || this.transcript.permissionMode === 'auto'),
-      commands: commands.filter((c) => !this.terminalCommands.has(c.name)).map((c) => ({ name: c.name, description: c.description, argumentHint: c.argumentHint || undefined })),
+      modes: CLAUDE_MODES.filter((m) => (m.id !== 'auto' || current?.supportsAutoMode === true || this.transcript.permissionMode === 'auto')
+        && (m.id !== 'bypassPermissions' || this.config.allowBypass === true || this.transcript.permissionMode === 'bypassPermissions')),
+      commands: commands.filter((c) => !this.terminalCommands.has(c.name)).map((c) => ({ name: c.name, description: c.description, argumentHint: c.argumentHint || undefined, ...(c.builtin ? { builtin: true } : {}) })),
       outputStyles: [...this.outputStyles],
+      // Each listed style with its file (the user's own) or its built-in description, for the menu's preview card.
+      styles: styleCatalog(this.outputStyles, styleFiles),
       fastMode: current?.supportsFastMode === true
     }
+  }
+
+  /**
+   * Write an editable copy of a built-in output style into `~/.claude/output-styles`
+   * (the built-ins have no file) and answer its path. The CLI lists the copy
+   * when a session next starts; this one keeps its list.
+   */
+  async duplicateStyle(name: string): Promise<string> {
+    const copy = duplicateStyle(name)
+    if (!copy) throw new Error(`${name} is not a built-in style — edit its file instead`)
+    return writeStyleFile(copy.fileName, copy.text)
   }
 
   /** End the process and the MCP servers it started; the session stays resumable from disk. */

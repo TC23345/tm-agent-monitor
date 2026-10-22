@@ -161,8 +161,8 @@ export interface Transcript {
 
 export interface ModelOption { id: string; label: string; description?: string; efforts: string[]; defaultEffort?: string | null; model?: string; fastMode?: boolean; fastLabel?: string }
 export interface ModeOption { id: string; label: string; description: string; confirm?: { title: string; body: string; action: string } }
-export interface CommandOption { name: string; description: string; argumentHint?: string; local?: boolean }
-export interface ChatOptions { models: ModelOption[]; modes: ModeOption[]; commands: CommandOption[]; outputStyles?: string[]; fastMode?: boolean; fastLabel?: string; planMode?: boolean; shell?: boolean }
+export interface CommandOption { name: string; description: string; argumentHint?: string; local?: boolean; builtin?: boolean }
+export interface ChatOptions { models: ModelOption[]; modes: ModeOption[]; commands: CommandOption[]; outputStyles?: string[]; styles?: import('./outputStyles.mjs').OutputStyleInfo[]; fastMode?: boolean; fastLabel?: string; planMode?: boolean; shell?: boolean }
 export interface ChatConfigPatch { model?: string | null; effort?: string | null; permissionMode?: string | null; fastMode?: boolean; outputStyle?: string; planMode?: boolean }
 export type ReviewTarget = { type: 'uncommittedChanges' } | { type: 'baseBranch'; branch: string }
 export interface UndoResult { ok: boolean; message: string }

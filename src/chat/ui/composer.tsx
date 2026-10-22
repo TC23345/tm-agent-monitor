@@ -14,8 +14,9 @@
 // instead of hiding the workspace.
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react'
 import {
-  AtSign, Bot, Check, ChevronDown, ChevronRight, CircleStop, Clock, FileCode, Hand, Layers, ListChecks, Lock, MessageCircleQuestion, Paperclip, PencilLine, Plug, Plus, ScanText, Send, ShieldCheck, ShieldOff, Slash, Sparkles, Square, TextQuote, Undo2, X, Zap
+  AtSign, Bot, Check, ChevronDown, ChevronRight, CircleStop, Clock, CopyPlus, FileCode, FilePen, Hand, Layers, ListChecks, Lock, MessageCircleQuestion, Paperclip, PencilLine, Plug, Plus, ScanText, Send, ShieldCheck, ShieldOff, Slash, Sparkles, Square, TextQuote, Undo2, X, Zap
 } from 'lucide-react'
+import type { OutputStyleInfo } from '../shared/outputStyles.mjs'
 import { MAX_DESCRIPTION, MAX_LABEL, defaultFor, labelFor, withDefault, withLabel, type ChatPrefs, type PrefKind } from '../shared/chatPrefs.mjs'
 import { savePrefs, useChatPrefs } from './prefs'
 import { readDraft, writeDraft } from './drafts'
@@ -27,6 +28,7 @@ function draftAttachment(a: Attachment): DraftAttachment {
   return { kind: 'image', name: a.name, mime: a.mime, data: a.data, ...(a.width && a.height ? { width: a.width, height: a.height } : {}) }
 }
 import { cardInsertion, cardTitle, composeMessage, effortLabel, fmtTokens, formatElapsed, isLongPaste, latestModels, matchFiles, modelLabel } from '../shared/present.mjs'
+import { argumentList, commandLine, groupCommands, withArgument, type ArgChoice } from '../shared/commandArgs.mjs'
 import type { Attachment, ChatConfigPatch, ChatOptions, CommandOption, ContextUsage, ModeOption, ModelOption, Provider, Transcript } from '../shared/chatModel.mjs'
 import { runningLabel, type AgentCard } from '../shared/agents.mjs'
 import { ContextBreakdown } from './extras'
@@ -79,6 +81,10 @@ interface Props {
   onShowRow?: (rowId: string) => void
   /** Where the unsent draft is kept (claude-watch: the pane's id), so an Update, a crash or a reload gives it back. */
   draftKey?: string
+  /** Open a file the menu names (an output style's own file) — claude-watch: a File pane. */
+  openFile?: (path: string) => void
+  /** Claude: write an editable copy of a built-in output style; the path written. Without it *Duplicate to edit* is not offered. */
+  onDuplicateStyle?: (name: string) => Promise<string>
 }
 
 /** How long typing rests before the draft is written. */
@@ -93,7 +99,7 @@ function mentionAt(text: string, caret: number): { start: number; query: string 
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(props, ref) {
-  const { provider, transcript, chatId, options, onRefreshOptions, onSend, onInterrupt, onConfigure, onNotice, listFiles, onSideQuestion, onMcp, loadContext, onCompact, onStopTask, onPreview, onPlanMode, agents, onAgents, agentsOpen, onShowRow, draftKey } = props
+  const { provider, transcript, chatId, options, onRefreshOptions, onSend, onInterrupt, onConfigure, onNotice, listFiles, onSideQuestion, onMcp, loadContext, onCompact, onStopTask, onPreview, onPlanMode, agents, onAgents, agentsOpen, onShowRow, draftKey, openFile, onDuplicateStyle } = props
   // The draft this pane left unsent, read once when it mounts.
   const restored = useRef<Draft | null | undefined>(undefined)
   if (restored.current === undefined) restored.current = readDraft(draftKey)
@@ -165,6 +171,27 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
   useEffect(() => {
     if (slashQuery === null) setSlashDismissed(false)
   }, [slashQuery])
+  // The command the box starts with, when it is one the session lists (a typo stays plain text): it draws as a chip
+  // behind the text, and its sub-options — the bundled skills' documented subcommands, or a hint's `a | b` — list
+  // while the first word after it is typed (0.4.69, the user's ask).
+  const leadCommand = useMemo(() => {
+    const line = commandLine(text)
+    return line ? commands.find((c) => c.name === line.name) ?? null : null
+  }, [text, commands])
+  const [argsDismissed, setArgsDismissed] = useState(false)
+  const [argIndex, setArgIndex] = useState(0)
+  const argList = useMemo<ArgChoice[]>(() => (leadCommand && !argsDismissed ? argumentList(leadCommand, text) : []), [leadCommand, text, argsDismissed])
+  const argsOpen = argList.length > 0
+  useEffect(() => setArgIndex(0), [text])
+  useEffect(() => {
+    if (!leadCommand) setArgsDismissed(false)
+  }, [leadCommand])
+  const backdrop = useRef<HTMLDivElement | null>(null)
+  const pickArgument = (a: ArgChoice) => {
+    const r = withArgument(text, a.value)
+    setText(r.text)
+    placeCaret(r.caret)
+  }
   useEffect(() => {
     if (slashOpen) onRefreshOptions()
     // Refresh once per opening: skills a session discovers mid-way join the list.
@@ -337,13 +364,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
   }
 
   const insertCommand = (c: CommandOption) => {
-    setText((t) => {
-      const rest = t.replace(/^\/\S*\s?/, '')
-      return `/${c.name} ${rest}`
-    })
+    // The command goes first — that is where the CLI reads it — and the user's own text stays after it, with the
+    // caret where it was in that text (0.4.69: it used to land at the end); an empty box puts the caret after the command.
+    const line = commandLine(text)
+    const before = line ? `/${line.name}${line.complete ? ' ' : ''}`.length : 0
+    const head = `/${c.name} `
+    // The box's own caret, which it keeps while the + menu has focus; the state is the fallback.
+    const at = area.current?.selectionStart ?? caret
+    setText(head + (line ? line.rest : text))
+    placeCaret(Math.max(head.length, at - before + head.length))
     setMenu(null)
     setSlashDismissed(true)
-    area.current?.focus()
+    setArgsDismissed(false)
   }
 
   const insertMention = (path: string) => {
@@ -406,6 +438,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
         }
       }
     }
+    if (argsOpen) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') return pickFrom(argList.length, setArgIndex)
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+        const pick = argList[argIndex]
+        if (pick) {
+          e.preventDefault()
+          pickArgument(pick)
+          return
+        }
+      }
+    }
     if (slashOpen && slashList.length) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') return pickFrom(slashList.length, setSlashIndex)
       if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
@@ -423,6 +466,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
       if (mentionOpen) {
         e.preventDefault()
         setMentionDismissed(true)
+      } else if (argsOpen) {
+        e.preventDefault()
+        setArgsDismissed(true)
       } else if (menu === 'add') {
         e.preventDefault()
         setMenu(null)
@@ -553,19 +599,44 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
       {slashOpen ? (
         <Popover onClose={() => { setMenu(null); setSlashDismissed(true) }} className="is-slash" testid="chat-menu:slash">
           <div className="chat-pop-title">Slash commands</div>
-          {options === null ? <div className="chat-pop-empty">Loading…</div> : slashList.length === 0 ? <div className="chat-pop-empty">No matching command</div> : slashList.map((c, i) => (
+          {options === null ? <div className="chat-pop-empty">Loading…</div> : slashList.length === 0 ? <div className="chat-pop-empty">No matching command</div>
+            // Nothing typed: the list in sections (skills, each plugin, Claude Code's own); a query ranks it flat.
+            : (slashQuery ? [{ title: '', items: slashList }] : groupCommands(slashList)).map((section) => (
+              <div key={section.title} className="chat-pop-section" data-testid={section.title ? `chat-commands:${section.title}` : undefined}>
+                {section.title ? <div className="chat-pop-title is-sub">{section.title}</div> : null}
+                {section.items.map((c) => {
+                  const i = slashList.indexOf(c)
+                  return (
+                    <button
+                      key={c.name} className={`chat-pop-item ${i === slashIndex ? 'is-active' : ''}`}
+                      onMouseEnter={() => setSlashIndex(i)} onMouseDown={(e) => e.preventDefault()} onClick={() => insertCommand(c)} title={c.description || undefined}
+                      data-testid={`chat-command:${c.name}`}
+                    >
+                      <span className="chat-pop-label is-mono">/{c.name}{c.argumentHint ? <span className="chat-pop-hint"> {c.argumentHint}</span> : null}</span>
+                      {c.description ? <span className="chat-pop-desc">{c.description}</span> : null}
+                    </button>
+                  )
+                })}
+              </div>
+            ))}
+        </Popover>
+      ) : null}
+      {argsOpen && leadCommand ? (
+        <Popover onClose={() => setArgsDismissed(true)} className="is-slash is-args" testid="chat-menu:args">
+          <div className="chat-pop-title"><span className="chat-pop-label is-mono">/{leadCommand.name}</span> options</div>
+          {argList.map((a, i) => (
             <button
-              key={c.name} className={`chat-pop-item ${i === slashIndex ? 'is-active' : ''}`}
-              onMouseEnter={() => setSlashIndex(i)} onMouseDown={(e) => e.preventDefault()} onClick={() => insertCommand(c)} title={c.description || undefined}
-              data-testid={`chat-command:${c.name}`}
+              key={a.value} className={`chat-pop-item is-compact ${i === argIndex ? 'is-active' : ''}`}
+              onMouseEnter={() => setArgIndex(i)} onMouseDown={(e) => e.preventDefault()} onClick={() => pickArgument(a)}
+              data-testid={`chat-arg:${a.value}`}
             >
-              <span className="chat-pop-label is-mono">/{c.name}{c.argumentHint ? <span className="chat-pop-hint"> {c.argumentHint}</span> : null}</span>
-              {c.description ? <span className="chat-pop-desc">{c.description}</span> : null}
+              <span className="chat-pop-label is-mono">{a.value}</span>
+              {a.hint ? <span className="chat-pop-desc">{a.hint}</span> : null}
             </button>
           ))}
         </Popover>
       ) : null}
-      {menu === 'model' ? <ModelMenu provider={provider} transcript={transcript} options={options} prefs={prefs} onConfigure={onConfigure} onClose={() => setMenu(null)} /> : null}
+      {menu === 'model' ? <ModelMenu provider={provider} transcript={transcript} options={options} prefs={prefs} onConfigure={onConfigure} onClose={() => setMenu(null)} onNotice={onNotice} openFile={openFile} onDuplicateStyle={onDuplicateStyle} /> : null}
       {menu === 'mode' ? (
         <Popover onClose={() => setMenu(null)} onEscape={modeEdits.escape} className="is-mode" testid="chat-menu:mode">
           {confirming?.confirm ? (
@@ -645,6 +716,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
           </div>
         ) : null}
         <div className="chat-textwrap">
+          {leadCommand ? (
+            // The command's chip: a layer under the text with the same metrics, drawing only the box behind `/name`.
+            <div ref={backdrop} className={`chat-cmd-backdrop ${suggestion ? 'is-suggesting' : ''}`} aria-hidden data-testid="chat-cmd-chip">
+              <span className="chat-cmd-mark">/{leadCommand.name}</span>{text.slice(leadCommand.name.length + 1)}
+            </div>
+          ) : null}
           <textarea
             ref={area}
             rows={1}
@@ -656,6 +733,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
               setCaret(e.target.selectionStart ?? e.target.value.length)
               followHistory((e.nativeEvent as InputEvent).inputType, e.target.value)
             }}
+            onScroll={(e) => { if (backdrop.current) backdrop.current.scrollTop = e.currentTarget.scrollTop }}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
             onKeyDown={onKey}
             onPaste={onPaste}
@@ -789,14 +867,29 @@ function useOutside(ref: RefObject<HTMLElement | null>, onOut: () => void) {
  * menu open; picking a model closes it. A model's right-click renames it or
  * makes it the one new chats start on.
  */
-function ModelMenu({ provider, transcript, options, prefs, onConfigure, onClose }: { provider: Provider; transcript: Transcript | null; options: ChatOptions | null; prefs: ChatPrefs; onConfigure: (p: ChatConfigPatch) => void; onClose: () => void }) {
+function ModelMenu({ provider, transcript, options, prefs, onConfigure, onClose, onNotice, openFile, onDuplicateStyle }: {
+  provider: Provider
+  transcript: Transcript | null
+  options: ChatOptions | null
+  prefs: ChatPrefs
+  onConfigure: (p: ChatConfigPatch) => void
+  onClose: () => void
+  onNotice: (text: string) => void
+  openFile?: (path: string) => void
+  onDuplicateStyle?: (name: string) => Promise<string>
+}) {
   const edits = useOptionEdits()
   const current = currentModel(transcript, options)
   const models = latestModels(options?.models ?? [], current?.id)
   const efforts = current?.efforts ?? []
   const effort = transcript?.effort ?? null
-  const styles = options?.outputStyles ?? []
+  // The styles with their files and descriptions when the session read them; the bare names from an older host.
+  const styles: OutputStyleInfo[] = options?.styles ?? (options?.outputStyles ?? []).map((name) => ({ name, builtin: false }))
+  // The style under the pointer; the session's own when none is, so the preview card never jumps or empties.
+  const [hoverStyle, setHoverStyle] = useState<string | null>(null)
+  const previewed = styles.find((s) => s.name === hoverStyle) ?? styles.find((s) => s.name === transcript?.outputStyle) ?? styles[0]
   const fast = transcript?.fastMode === 'on'
+  const fastHint = currentModel(transcript, options)?.fastLabel ?? options?.fastLabel ?? 'Faster replies, billed at fast-mode rates'
   // The slider's positions: Auto (the model's default), then the session's levels.
   const levels: (string | null)[] = [null, ...efforts]
   // The level under a drag, or just applied: the heading's dots and word follow it until the session's effort catches up.
@@ -826,12 +919,12 @@ function ModelMenu({ provider, transcript, options, prefs, onConfigure, onClose 
       ) : null}
       {options?.fastMode || fast ? (
         <>
-          {/* Speed, under Effort with its own dots (the user's call, 2026-10-20): they and the word run a yellow-to-blue charge while Fast is on. */}
-          <div className={`chat-pop-title chat-speed-title ${fast ? 'is-on' : ''}`} data-testid="chat-speed-title">
-            <span className="chat-speed-word">Speed</span> <SpeedDots on={fast} /> <span className="chat-pop-hint">{fast ? 'Fast' : 'Normal'}</span>
-          </div>
-          <button className="chat-pop-item is-row" role="switch" aria-checked={fast} onClick={() => onConfigure({ fastMode: !fast })} data-testid="chat-fast-mode">
-            <span className="chat-pop-label"><Zap className="chat-ic" aria-hidden /> {provider === 'codex' ? 'Fast' : 'Fast mode'}<span className="chat-pop-hint">{currentModel(transcript, options)?.fastLabel ?? options?.fastLabel ?? 'Faster replies, billed at fast-mode rates'}</span></span>
+          {/* Speed, under Effort with its own dots (the user's call, 2026-10-20): they and the word run a yellow-to-blue charge while Fast is on.
+              One line since 0.4.69 (the user's call): the heading, the dots, the state and the switch; the billing sentence is the row's title. */}
+          <button className="chat-pop-item is-row chat-speed-row" role="switch" aria-checked={fast} title={fastHint} onClick={() => onConfigure({ fastMode: !fast })} data-testid="chat-fast-mode">
+            <span className={`chat-pop-title chat-speed-title ${fast ? 'is-on' : ''}`} data-testid="chat-speed-title">
+              <span className="chat-speed-word">Speed</span> <SpeedDots on={fast} /> <span className="chat-pop-hint">{fast ? 'Fast' : 'Normal'}</span>
+            </span>
             <span className={`chat-switch ${fast ? 'is-on' : ''}`} aria-hidden><span className="chat-switch-thumb" /></span>
           </button>
           <div className="chat-pop-sep" />
@@ -849,15 +942,65 @@ function ModelMenu({ provider, transcript, options, prefs, onConfigure, onClose 
         <>
           <div className="chat-pop-sep" />
           <div className="chat-pop-title">Output style</div>
-          {styles.map((s) => (
-            <button key={s} className={`chat-pop-item is-compact ${s === transcript?.outputStyle ? 'is-on' : ''}`} onClick={() => onConfigure({ outputStyle: s })} data-testid={`chat-style:${s}`}>
-              <span className="chat-pop-label">{s}</span>
-              {s === transcript?.outputStyle ? <Check className="chat-ic chat-pop-check" /> : null}
-            </button>
-          ))}
+          <div onMouseLeave={() => setHoverStyle(null)}>
+            {styles.map((s) => (
+              <button
+                key={s.name} className={`chat-pop-item is-compact ${s.name === transcript?.outputStyle ? 'is-on' : ''}`}
+                onClick={() => onConfigure({ outputStyle: s.name })} onMouseEnter={() => setHoverStyle(s.name)} onFocus={() => setHoverStyle(s.name)}
+                data-testid={`chat-style:${s.name}`}
+              >
+                <span className="chat-pop-label">{s.name}{s.builtin ? <span className="chat-pop-tag">built in</span> : null}</span>
+                {s.name === transcript?.outputStyle ? <Check className="chat-ic chat-pop-check" /> : null}
+              </button>
+            ))}
+          </div>
+          {previewed ? (
+            <StylePreview
+              style={previewed} openFile={openFile}
+              onDuplicate={onDuplicateStyle ? (name) => {
+                onDuplicateStyle(name)
+                  .then((path) => {
+                    onNotice(`Saved ${fileTail(path)}. Claude Code lists it when a session next starts.`)
+                    openFile?.(path)
+                    onClose()
+                  })
+                  .catch((err) => onNotice((err as Error).message))
+              } : undefined}
+            />
+          ) : null}
         </>
       ) : null}
     </Popover>
+  )
+}
+
+/** A path's file name. */
+function fileTail(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path
+}
+
+/**
+ * The style menu's preview card (the user's design, 0.4.69): the hovered
+ * style — its description, its file's first lines and *Open file* when it is
+ * the user's own; *Built into Claude Code* and *Duplicate to edit* when it is
+ * built in, since those have no file. Sized by its lines, never by hover,
+ * so the menu holds still.
+ */
+function StylePreview({ style, openFile, onDuplicate }: { style: OutputStyleInfo; openFile?: (path: string) => void; onDuplicate?: (name: string) => void }) {
+  const lines = style.preview ?? []
+  return (
+    <div className="chat-style-card" data-testid="chat-style-preview" data-style={style.name}>
+      <div className="chat-style-head">
+        <span className="chat-style-name">{style.name}</span>
+        <span className="chat-style-tag" title={style.path}>{style.builtin ? 'built into Claude Code' : style.path ? fileTail(style.path) : 'no file found'}</span>
+      </div>
+      {style.description ? <div className="chat-pop-desc">{style.description}</div> : null}
+      {lines.length ? <pre className="chat-style-lines">{lines.join('\n')}</pre> : style.builtin ? <div className="chat-style-note">It has no file of its own; a copy of it is one you can edit.</div> : null}
+      <div className="chat-style-actions">
+        {style.path && openFile ? <button className="chat-textbtn" onClick={() => openFile(style.path!)} data-testid="chat-style-open"><FilePen className="chat-ic" aria-hidden /> Open file</button> : null}
+        {style.builtin && onDuplicate ? <button className="chat-textbtn" onClick={() => onDuplicate(style.name)} data-testid="chat-style-duplicate"><CopyPlus className="chat-ic" aria-hidden /> Duplicate to edit</button> : null}
+      </div>
+    </div>
   )
 }
 
@@ -1352,7 +1495,8 @@ function ModeIcon({ id }: { id: string | null | undefined }) {
     case 'acceptEdits': return <PencilLine className="chat-ic" aria-hidden />
     case 'plan': return <ListChecks className="chat-ic" aria-hidden />
     case 'auto': return <Sparkles className="chat-ic" aria-hidden />
-    case 'dontAsk': return <ShieldOff className="chat-ic" aria-hidden />
+    case 'dontAsk':
+    case 'bypassPermissions': return <ShieldOff className="chat-ic" aria-hidden />
     case 'read-only': return <Lock className="chat-ic" aria-hidden />
     case 'full-access': return <ShieldOff className="chat-ic" aria-hidden />
     case 'default':
@@ -1363,7 +1507,7 @@ function ModeIcon({ id }: { id: string | null | undefined }) {
 }
 
 const MODE_FALLBACK: Record<string, string> = {
-  default: 'Manual', acceptEdits: 'Bypass', plan: 'Plan', auto: 'Auto', dontAsk: 'Deny', bypassPermissions: 'Unrestricted',
+  default: 'Manual', acceptEdits: 'Edits', plan: 'Plan', auto: 'Auto', dontAsk: 'Deny', bypassPermissions: 'Bypass',
   'read-only': 'Read only', 'full-access': 'Full', ask: 'Ask', 'auto-review': 'Auto', custom: 'Custom (config.toml)'
 }
 

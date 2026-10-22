@@ -1,11 +1,12 @@
 # Upgrade plan — optimizations and the next twenty features
 
-> **Status as of 2026-10-18 (v0.4.59): live roadmap.** Every row carries its
+> **Status as of 2026-10-21 (v0.4.68, released): live roadmap.** Every row carries its
 > real status: ✅ with the version it shipped in, *changed:* when it shipped
 > differently, *removed in 0.4.x* when it was taken out again, or **open**.
 > **Open now** at the end gathers everything still left across all the
 > planning docs (this one, `UX-IMPROVEMENT-PLANS.md`, `4.2-plan.md`,
-> `4.3-plan.md`, `CLAUDE-CODE-MANAGEMENT-PLAN.md`). Current architecture is
+> `4.3-plan.md`, `CLAUDE-CODE-MANAGEMENT-PLAN.md`) and the chat panes' own gap lists
+> (`tc-rea/chat-panes/docs/rea-findings.md`). Current architecture is
 > `CLAUDE.md`; release history is `CHANGELOG.md`.
 
 > Written 2026-08-25 against 0.3.1 (IDE title bar, command palette, draggable
@@ -53,7 +54,7 @@
 | F4 ✅ 0.4.2 | **Activity feed pane.** A reverse-chronological feed of attention events across all sessions — questions asked, permissions requested, turns completed, sessions started/ended — each row jumps to the agent. A per-agent filter makes it a session timeline. A bounded event ring in `AgentStore` and one `agent:events` IPC route. *Changed in 0.4.46:* the pane was removed; the feed is the sidebar's Activity stream under the project badges (`ActivityStream.tsx`), and file edits joined it as folded `edited` rows. | `AgentEventV1` flows through `daemon.ts` → `store.ts`; the store keeps a 300-entry ring. | M |
 | F5 ✅ 0.4.2 | **Drop a project onto the grid, and agent actions in the palette.** Dragging a project group (already draggable for reordering) onto the pane grid opens a shell pane in that cwd (Shift: Claude Code); the palette's agent rows gain sub-actions: *terminal here*, *open folder*, *open in Cursor*, *copy path* (mirroring `AgentContextMenu`). | `dragHandle` on `ProjectGroup`, the grid's `onDrop` → `dropProject`, `addPane('terminal', { cwd })`, `openPath`, `openCursor`, `copyText`. | S–M |
 | F6 **open** | **Terminal tabs within a pane.** A pane holds several shells with a tab strip in its header; "new tab" sits beside Terminal → New terminal, and a tab can be torn out into its own pane. Sessions are already independent in `terminals.ts`, so this is renderer-only. | `PaneInstance.term` becomes `terms[]` + `activeTerm`; `TerminalPane` per tab, hidden with `display: none` like zoom. | M |
-| F7 **open** | **Launch profiles.** User-defined launch commands beyond the fixed ones — `claude --continue`, `claude --model …`, `codex --full-auto`, a project's `npm run dev` — in the Terminal menu, a project badge's menu, and as palette commands (the Launch pane they were planned for was removed in 0.4.2). Stored as a validated `AppSettingsPatch` field. Partly covered today: a folder's `.tm.json` commands and npm scripts are Terminal → Run (F15), and chat panes pick model, effort and permission mode per chat (0.4.58–0.4.59). | `TerminalLaunch` + `terminals.ts` spawn already parameterize the command; settings validation in `store.ts`. | M |
+| F7 **open** | **Launch profiles.** User-defined launch commands beyond the fixed ones — `claude --continue`, `claude --model …`, `codex --full-auto`, a project's `npm run dev` — in the Terminal menu, a project badge's menu, and as palette commands (the Launch pane they were planned for was removed in 0.4.2). Stored as a validated `AppSettingsPatch` field. Partly covered today: a folder's `.tm.json` commands and npm scripts are Terminal → Run (F15), and chat panes pick model, effort and permission mode per chat (0.4.58–0.4.59), with a default model and mode a new chat starts on (0.4.66). | `TerminalLaunch` + `terminals.ts` spawn already parameterize the command; settings validation in `store.ts`. | M |
 | F8 ✅ 0.4.2 | **Slash snippets.** Common commands typed into the PTY — `/compact`, `/context`, `/cost`, `/clear`, `/resume` — plus user snippets. *Changed in 0.4.3:* the tool-strip menu was removed in the header diet; snippets are the palette's **Snippets** group, acting on the focused terminal pane (`snippets.ts`, `commandGroup` → `Snippets`). | `termInput(id, data)`. | S |
 | F9 ✅ 0.4.2 | **Named workspace layouts.** Save the current panes + sizes + sidebar views as "Review", "Build", "Monitor"…; switch from the status bar's **Layout** popover or the palette (`Layout: Build`). It first shipped under View → Layouts; the View menu was removed in 0.4.2. Terminal panes restore with their launch + cwd (a fresh shell). | `tm.layouts.v1` (`layouts.ts`): a named snapshot of `tm.panes.v3`, `tm.layout.v1`, `tm.sidebar.v3`. | S–M |
 | F10 **open** | **Multi-machine roll-up.** With MongoDB history configured, the History pane shows other machines' days too (`token_board.machines` is written on every connect and never read), with a per-machine legend. | `history.ts` docs carry `machineId`; the read path filters on this machine's id, so `recentDays()` needs a `machineId?` filter and one IPC route. | M |
@@ -66,7 +67,7 @@ hours-long sessions reaches for.
 
 | # | Feature | Grounded in | Effort |
 |---|---------|-------------|--------|
-| F11 ✅ 0.4.2 | **Status API for agents.** The live `StatusSnapshot` over the daemon as a read-only `GET /v1/status` for token holders, and `tm status [--json]`, so a Claude Code session can ask *what else is running, what's waiting* — and avoid launching a second session in a project that already has one. `hooks/SKILL.md` (`tm skill --install`) teaches it. **Open remainder:** the stdio MCP-server wrapper was never built. | `status:get`; the daemon on loopback with a bearer token. | M |
+| F11 ✅ 0.4.2 | **Status API for agents.** The live `StatusSnapshot` over the daemon as a read-only `GET /v1/status` for token holders, and `tm status [--json]`, so a Claude Code session can ask *what else is running, what's waiting* — and avoid launching a second session in a project that already has one. `hooks/SKILL.md` (`tm skill --install`) teaches it. Since 0.4.68 agents can also start and drive chat panes (`/v1/chats`, `tm chats`; approvals stay the user's). **Open remainder:** the stdio MCP-server wrapper was never built. | `status:get`; the daemon on loopback with a bearer token. | M |
 | F12 ✅ 0.4.2 | **Scriptable workspace.** `tm open --cwd … --launch claude`, `tm layout build`, `tm palette|usage|activity|notes|show|hide`: a second instance forwards its argv to the running one, main forwards a validated command to the renderer, which runs the same handler the palette does (`workspaceCommand.mjs`). **Open remainder:** the `tm-agent://` deep link — no protocol handler is registered. | `second-instance` event, the palette's command table, `addPane`. | M |
 | F13 ✅ 0.4.2 | **Automation-stable targets.** `data-testid` on every interactive element (menus, palette rows, pane tools, splitters, agent rows; `testid.ts`) and a `CDP :port` chip when main sees `--remote-debugging-port` — in the status bar at the right (`StatusBar.tsx`), not the title bar. | The MCP loop had targeted aria-labels and class names, which drift. | S |
 | F14 ✅ 0.4.2 | **Answer a waiting session from the monitor.** For a session running in an embedded pane (matched by terminal id since 0.4.3, as in F3), the agent row's context menu gets a reply box that writes to its PTY; external sessions fall back to focus. | `question` is on the row; `termInput(sessionId, data)`. | M |
@@ -129,7 +130,7 @@ resume command and exact-session resume); the `UsageSample` ring through
 
 ## Open now
 
-Everything still left across the planning docs, as of 2026-10-18 (v0.4.59).
+Everything still left across the planning docs, as of 2026-10-21 (v0.4.68). The update feed is current again: v0.4.68 is the first GitHub release since v0.2.3, so installs older than the dev loop now get updates.
 
 This plan:
 - **F6** terminal tabs within a pane.
@@ -162,3 +163,9 @@ From `CLAUDE-CODE-MANAGEMENT-PLAN.md` (parked, not started):
 - F1 MCP server manager, F2 hooks CRUD, F3 skills / subagents / plugins browser, F4 What's New, F5 config diff viewer, F6 config health check.
 
 From `MACOS-COMPATIBILITY-PLAN.md`: the whole port is unstarted; that doc is the reference for it.
+
+Chat panes (the package's `docs/rea-findings.md` has the evidence for each):
+- **In progress (another agent, 2026-10-21):** Fast mode as one line with no description; output-style rows with an arrow chip, a hover preview that edits the style as Markdown, and a click that opens it in a pane.
+- **Framework pass recommendations** (rea-findings *Pass 3*, each a design call): a session id before the first message (needs a resume fallback first); deleting, archiving, tagging and searching sessions for both providers; rewinding a conversation in place (Claude `resumeSessionAt`, Codex `thread/revert`); a resumed session's subagent steps; a live MCP panel with MCP forms and sign-in; a Claude `/status` card and Codex account and hook-trust status; agents and Codex skills in the composer menus; Codex's Auto-mode review state.
+- **Markdown:** the explanatory output style's insight frame (`★ Insight`) still draws as plain code and a rule.
+- **Claude dialogs:** the refusal card's first-time safeguard copy is not reproduced.

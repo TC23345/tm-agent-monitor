@@ -66,6 +66,8 @@ export interface ChatBridge {
   background(id: string, toolUseId?: string): Promise<boolean>
   /** Stop one background task (Claude). */
   stopTask(id: string, taskId: string): Promise<void>
+  /** Claude: write an editable copy of a built-in output style (`~/.claude/output-styles`); the path written. */
+  duplicateStyle?(id: string, name: string): Promise<string>
   /** Name the session. */
   rename(id: string, title: string): Promise<void>
   /** Compact the context now. */

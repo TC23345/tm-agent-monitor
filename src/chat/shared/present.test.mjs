@@ -4,7 +4,7 @@ import {
   argDetail, cardSteps, clockTime, previewMarkdown, streamParts, effortLabel, fmtTokens, formatElapsed, imageSize, latestModels, mcpTitle, modelLabel, serverTitle, splitMcpName,
   WORKING_VERBS, activitySummary, describePermissionUpdates, limitLines, limitName, matchFiles, relPath, resetPhrase, transcriptMarkdown, verbDelay
 } from './present.mjs'
-import { cardInsertion, cardTitle, chatDigest, composeMessage, dialogCard, isLongPaste, quoteBlock } from './present.mjs'
+import { MAX_STEP_TITLE, cardInsertion, cardTitle, chatDigest, composeMessage, dialogCard, isLongPaste, quoteBlock, stepText, stepTitle } from './present.mjs'
 import { emptyTranscript } from './chatModel.mjs'
 
 test('previewMarkdown keeps a code preview’s lines in a fence and leaves Markdown as written', () => {
@@ -69,7 +69,7 @@ test('the working line uses the extension’s 82 verbs on its 2 s, 3 s, 5 s sche
 
 test('describePermissionUpdates names what "don’t ask again" saves', () => {
   assert.equal(describePermissionUpdates([{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], behavior: 'allow', destination: 'localSettings' }]), 'Bash(npm test:*) in this project')
-  assert.equal(describePermissionUpdates([{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }]), 'Bypass for this session')
+  assert.equal(describePermissionUpdates([{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }]), 'Edits for this session')
   assert.equal(describePermissionUpdates([{ type: 'addDirectories', directories: ['C:\\tmp'], destination: 'session' }]), 'access to C:\\tmp for this session')
   assert.equal(describePermissionUpdates([{ type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'deny', destination: 'session' }]), undefined)
   assert.equal(describePermissionUpdates(undefined), undefined)
@@ -288,4 +288,27 @@ test('dialogCard: the auto-mode fallback, its help link only on Anthropic\'s sit
   assert.deepEqual(c.actions.map((a) => a.result), ['continue', 'interrupt'])
   assert.equal(dialogCard({ dialogKind: 'auto_mode_server_fallback', payload: { helpUrl: 'https://docs.claude.com/x', paragraphs: ['A', ' '] } }).learnMore, 'https://docs.claude.com/x')
   assert.equal(dialogCard({ dialogKind: 'something_new', payload: {} }), null)
+})
+
+test('stepText: a step as the text its row shows, parts a blank line apart', () => {
+  assert.equal(stepText({ kind: 'tool', view: 'command', input: 'npm test\n', output: 'ok\n\n' }), 'npm test\n\nok')
+  assert.equal(stepText({ kind: 'tool', view: 'command', input: 'npm test' }), 'npm test')
+  assert.equal(stepText({ kind: 'tool', view: 'edit', edits: [{ path: 'a.ts', before: 'x\ny\n', after: 'x\nz\n' }] }), 'a.ts\n x\n-y\n+z')
+  assert.equal(stepText({ kind: 'tool', view: 'edit', edits: [], output: 'Edit failed: not found' }), 'Edit failed: not found')
+  assert.equal(stepText({ kind: 'tool', view: 'write', content: 'line 1\nline 2\n' }), 'line 1\nline 2')
+  assert.equal(stepText({ kind: 'tool', view: 'read', path: 'C:\p\a.ts' }), 'C:\p\a.ts')
+  assert.equal(stepText({ kind: 'tool', view: 'search', input: 'foo', output: 'a.ts:1\nb.ts:4' }), 'foo\n\na.ts:1\nb.ts:4')
+  assert.equal(stepText({ kind: 'tool', view: 'todo', todos: [{ content: 'A', status: 'completed' }, { content: 'B', status: 'in_progress' }, { content: 'C', status: 'pending' }] }), '[x] A\n[-] B\n[ ] C')
+  assert.equal(stepText({ kind: 'tool', view: 'agent', prompt: 'Find the bug', output: 'It is in x()' }), 'Find the bug\n\nIt is in x()')
+  assert.equal(stepText({ kind: 'tool', view: 'agent', prompt: 'Go', summary: 'done' }), 'Go\n\ndone', 'a background agent keeps only its summary')
+  assert.equal(stepText({ kind: 'tool', view: 'other', input: '{"a":1}', output: '' }), '{"a":1}')
+  assert.equal(stepText({ kind: 'tool', view: 'read', output: '   ' }), '')
+})
+
+test('stepTitle: one line, cut at the clip title budget', () => {
+  assert.equal(stepTitle({ kind: 'tool', title: 'Ran  npm\ntest' }), 'Ran npm test')
+  assert.equal(stepTitle({ kind: 'tool', name: 'Bash' }), 'Bash')
+  const long = stepTitle({ kind: 'tool', title: 'x'.repeat(200) })
+  assert.equal(long.length, MAX_STEP_TITLE)
+  assert.ok(long.endsWith('…'))
 })

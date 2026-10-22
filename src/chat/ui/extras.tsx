@@ -6,9 +6,9 @@
 // that floats over a reply's code block. Each one that can be open carries
 // `data-escape-close` and closes on Escape and on the host's `tm-escape`.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
-import { Check, ChevronDown, ChevronUp, MessageSquareQuote, MessageSquarePlus, Plug, RotateCw, Send, X } from 'lucide-react'
+import { Bookmark, Check, ChevronDown, ChevronRight, ChevronUp, Copy, MessageSquareQuote, MessageSquarePlus, Plug, RotateCw, Send, X } from 'lucide-react'
 import { WORKING_VERBS, fmtTokens, limitLines, relPath, verbDelay } from '../shared/present.mjs'
-import type { ContextUsage, McpServer, RewindResult } from '../shared/chatModel.mjs'
+import type { ContextUsage, McpServer, Provider, RewindResult } from '../shared/chatModel.mjs'
 
 /** Escape (and the host's `tm-escape`) closes whatever `ref` holds while `active`. */
 export function useEscape(ref: RefObject<HTMLElement | null>, onClose: () => void, active = true) {
@@ -168,6 +168,102 @@ export function SelectionBar({ sel, onQuote, onComment, onClose }: { sel: Select
         <>
           <button className="chat-selbar-btn" onClick={onQuote} data-testid="chat-selbar-quote"><MessageSquareQuote className="chat-ic" aria-hidden /> Quote</button>
           {onComment ? <button className="chat-selbar-btn" onClick={() => setWriting(true)} data-testid="chat-selbar-comment"><MessageSquarePlus className="chat-ic" aria-hidden /> Comment</button> : null}
+        </>
+      )}
+    </div>
+  )
+}
+
+export interface StepGroup { name: string; count: number; color?: string; description?: string }
+/** A step to keep: the row's title, its text, and which chat it came from (the host's provenance note). */
+export interface SavedStep { title: string; text: string; provider: Provider; cwd: string }
+/** The host's keeper of steps (claude-watch: the clipboard history and its groups). Without one the dot's menu only copies. */
+export interface StepStore {
+  /** The groups a step can go into, fetched when the menu opens. */
+  groups(): Promise<StepGroup[]>
+  /** Keep the step in a group; false when the host refused it. */
+  save(step: SavedStep, group: string): Promise<boolean>
+}
+
+/** How long *Copied* / *Saved to …* stays in the bar before it closes. */
+const STEP_DONE_MS = 1000
+
+/**
+ * The rail dot's menu on a finished step (a click or right-click on the dot):
+ * the selection bar's twin beside the dot — *Copy* the step's text, and
+ * *Save ▸* it into one of the host's groups, listed under the bar with their
+ * dots and counts (hover or click opens the list). Copying or saving says so
+ * in the bar for a beat, then it closes; Escape and a click elsewhere close it.
+ */
+export function StepMenu({ x, y, step, store, onCopy, onClose }: { x: number; y: number; step: SavedStep; store?: StepStore; onCopy: (text: string) => void; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const first = useRef<HTMLButtonElement | null>(null)
+  const [groups, setGroups] = useState<StepGroup[] | null>(null)
+  const [listing, setListing] = useState(false)
+  const [done, setDone] = useState<string | null>(null)
+  useEscape(ref, onClose)
+  useEffect(() => { first.current?.focus() }, [])
+  useEffect(() => {
+    if (!store) return
+    let live = true
+    store.groups().then((g) => { if (live) setGroups(g) }).catch(() => { if (live) setGroups([]) })
+    return () => { live = false }
+  }, [store])
+  // A press anywhere else closes it; a press on a dot is the pane's (it toggles or moves the menu).
+  useEffect(() => {
+    const down = (e: MouseEvent) => {
+      const t = e.target as Element | null
+      if (ref.current && t && !ref.current.contains(t) && !t.closest('.chat-rail-hit')) onClose()
+    }
+    document.addEventListener('mousedown', down, true)
+    return () => document.removeEventListener('mousedown', down, true)
+  }, [onClose])
+  // Beside the dot, kept inside the pane: measured before paint, as the selection bar is.
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    const host = el?.offsetParent as HTMLElement | null
+    if (!el || !host) return
+    setPos({ left: Math.max(8, Math.min(x, host.clientWidth - el.offsetWidth - 8)), top: Math.max(4, Math.min(y, host.clientHeight - el.offsetHeight - 8)) })
+  }, [x, y, listing, groups, done])
+  const finish = (text: string) => {
+    setDone(text)
+    window.setTimeout(onClose, STEP_DONE_MS)
+  }
+  const save = (name: string) => {
+    if (!store) return
+    store.save(step, name).then((ok) => finish(ok ? `Saved to ${name}` : 'Could not save')).catch(() => finish('Could not save'))
+  }
+  const style: CSSProperties = pos ?? { left: x, top: y, visibility: 'hidden' }
+  return (
+    <div ref={ref} className="chat-selbar chat-stepmenu" style={style} data-escape-close="" data-testid="chat-stepmenu" role="menu" aria-label="Step">
+      {done ? (
+        <span className="chat-selbar-copied is-done" data-testid="chat-stepmenu-done"><Check className="chat-ic" aria-hidden /> {done}</span>
+      ) : (
+        <>
+          <button ref={first} className="chat-selbar-btn" role="menuitem" onClick={() => { onCopy(step.text); finish('Copied') }} data-testid="chat-stepmenu-copy"><Copy className="chat-ic" aria-hidden /> Copy</button>
+          {store ? (
+            <button
+              className={`chat-selbar-btn ${listing ? 'is-on' : ''}`} role="menuitem" aria-haspopup="menu" aria-expanded={listing}
+              onClick={() => setListing((v) => !v)} onMouseEnter={() => setListing(true)} data-testid="chat-stepmenu-save"
+            >
+              <Bookmark className="chat-ic" aria-hidden /> Save <ChevronRight className="chat-ic chat-stepmenu-chev" aria-hidden />
+            </button>
+          ) : null}
+          {store && listing ? (
+            <div className="chat-stepmenu-list" role="menu" aria-label="Groups" data-testid="chat-stepmenu-groups">
+              <div className="chat-stepmenu-head">Groups</div>
+              {groups === null ? <div className="chat-stepmenu-empty">Loading…</div>
+                : groups.length === 0 ? <div className="chat-stepmenu-empty">No groups yet</div>
+                : groups.map((g) => (
+                  <button key={g.name} className="chat-stepmenu-group" role="menuitem" title={g.description} onClick={() => save(g.name)} data-testid={`chat-stepmenu-group:${g.name}`}>
+                    <span className="chat-stepmenu-dot" style={g.color ? { background: g.color } : undefined} aria-hidden />
+                    <span className="chat-stepmenu-name">{g.name}</span>
+                    <span className="chat-stepmenu-count">{g.count || ''}</span>
+                  </button>
+                ))}
+            </div>
+          ) : null}
         </>
       )}
     </div>

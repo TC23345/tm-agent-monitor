@@ -142,7 +142,9 @@
 .chat-more { display: inline-block; margin-top: 4px; padding: 0; border: 0; background: none; color: var(--muted, #888); font: inherit; font-size: 12px; cursor: pointer; }
 .chat-more:hover { color: var(--chat-ink); text-decoration: underline; text-underline-offset: 3px; }
 .chat-user-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
-.chat-cmd { font-family: var(--chat-mono); font-size: 12.5px; font-weight: 600; padding: 0 5px; border-radius: 4px; background: var(--chat-tool-bg); border: 1px solid var(--chat-rule); }
+/* A slash command in a sent prompt: a chip in ink, not a state hue (0.4.69: on the user card the tool-row tint and
+   hairline were invisible, the user's screenshot). The composer's chip (.chat-cmd-mark) is the same tint. */
+.chat-cmd { font-family: var(--chat-mono); font-size: 12.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; color: var(--chat-ink); background: color-mix(in srgb, var(--chat-ink) 16%, transparent); }
 /* The prompt's actions sit on the card's corner, as the extension's do. */
 .chat-prompt-actions { position: absolute; top: -9px; right: 8px; opacity: 0; }
 .chat-prompt-actions .chat-mini { background: var(--card, #1f1e23); border: 1px solid var(--chat-line); width: 22px; height: 22px; }
@@ -716,3 +718,42 @@
   .chat-speed-title.is-on .chat-speed-word { animation: none; }
   .chat-spark { display: none; }
 }
+/* The rail dot's menu (0.4.69): a finished step's dot is a hit target — the dot grows under the pointer — and the
+   menu is the selection bar's twin beside it, with the host's groups listed under the bar (dot · name · count). */
+.chat-rail-hit { position: absolute; left: 2px; top: calc(var(--row-pad, 5px) - 1px); width: 21px; height: 21px; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; z-index: 2; }
+.chat-rail-hit:focus-visible { outline: 2px solid var(--accent, #4a7bd0); outline-offset: -2px; }
+.chat-row.is-tl::before { transition: transform 120ms; }
+.chat-row.is-tl:has(> .chat-rail-hit:hover)::before, .chat-row.is-tl:has(> .chat-rail-hit:focus-visible)::before { transform: scale(1.6); }
+.chat-stepmenu { flex-wrap: nowrap; }
+.chat-stepmenu .chat-selbar-copied.is-done { height: 24px; padding: 0 8px 0 6px; border-right: 0; color: var(--chat-ink); }
+.chat-stepmenu .chat-selbar-btn.is-on { background: rgba(127, 127, 127, 0.16); }
+.chat-stepmenu-chev { width: 11px !important; height: 11px !important; margin-left: -2px; color: var(--faint, var(--muted, #888)); }
+.chat-stepmenu-list { position: absolute; left: 0; top: calc(100% + 4px); min-width: 210px; max-height: 280px; overflow: auto; padding: 4px; border: 1px solid var(--chat-line); border-radius: var(--r-card, 8px); background: var(--card, #1f1e23); box-shadow: var(--chat-float-shadow); }
+.chat-stepmenu-head { padding: 4px 8px 2px; font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted, #888); }
+.chat-stepmenu-group { display: flex; align-items: center; gap: 9px; width: 100%; height: 26px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--chat-ink); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.chat-stepmenu-group:hover, .chat-stepmenu-group:focus-visible { background: rgba(127, 127, 127, 0.16); outline: none; }
+.chat-stepmenu-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--muted, #888); }
+.chat-stepmenu-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-stepmenu-count { font-size: 11.5px; color: var(--faint, var(--muted, #888)); font-variant-numeric: tabular-nums; }
+.chat-stepmenu-empty { padding: 6px 8px; font-size: 12px; color: var(--muted, #888); }
+/* Speed on one line (0.4.69): the heading, dots and state at the left of a switch row. */
+.chat-speed-row { padding: 2px 8px 2px 0; }
+.chat-speed-row .chat-speed-title { padding: 4px 8px; }
+/* The output style menu's preview card (0.4.69): the hovered style's description, first lines and file actions. */
+.chat-style-card { display: flex; flex-direction: column; gap: 4px; margin: 4px 4px 2px; padding: 8px 10px; border: 1px solid var(--chat-rule); border-radius: 6px; background: var(--elev, rgba(127, 127, 127, 0.06)); }
+.chat-style-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 12.5px; font-weight: 600; }
+.chat-style-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-style-tag { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--chat-mono); font-size: 11px; font-weight: 400; color: var(--faint, var(--muted, #888)); }
+.chat-style-lines { margin: 2px 0 0; max-height: calc(6 * 1.45 * 11px); overflow: hidden; font-family: var(--chat-mono); font-size: 11px; line-height: 1.45; color: var(--muted, #888); white-space: pre; text-overflow: ellipsis; }
+.chat-style-note { font-size: 11.5px; color: var(--faint, var(--muted, #888)); }
+.chat-style-actions { display: flex; justify-content: flex-end; gap: 4px; margin-top: 2px; }
+.chat-style-actions:empty { display: none; }
+/* A slash command's chip in the box (0.4.69): a layer under the textarea with its metrics, drawing only the box
+   behind the leading `/name` — the text itself stays the textarea's. The `/` list's sections and a command's options. */
+.chat-textwrap textarea { position: relative; z-index: 1; }
+.chat-cmd-backdrop { position: absolute; inset: 0; z-index: 0; overflow: hidden; padding: 9px 12px 4px; font: inherit; font-size: 13.5px; line-height: 1.45; color: transparent; white-space: pre-wrap; overflow-wrap: break-word; pointer-events: none; }
+.chat-cmd-backdrop.is-suggesting { padding-right: 44px; }
+.chat-cmd-mark { border-radius: 4px; background: color-mix(in srgb, var(--chat-ink) 16%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--chat-ink) 16%, transparent); }
+.chat-pop-title.is-sub { padding-top: 8px; }
+.chat-pop-section:first-child .chat-pop-title.is-sub { padding-top: 4px; }
+.chat-pop.is-args .chat-pop-title .chat-pop-label { text-transform: none; letter-spacing: 0; color: var(--chat-ink); }

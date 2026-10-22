@@ -1,4 +1,4 @@
-import type { Transcript } from './chatModel.mjs'
+import type { ChatItemTool, Transcript } from './chatModel.mjs'
 
 export function imageSize(base64: string): { width: number; height: number } | null
 export function serverTitle(server: string): string
@@ -44,3 +44,6 @@ export const DIALOG_KINDS: string[]
 export interface DialogAction { label: string; result: string; primary?: boolean; openUrl?: string; editPrompt?: boolean }
 export interface DialogCard { title: string; body: string[]; learnMore: string | null; dismissable: boolean; delayMs: number; actions: DialogAction[] }
 export function dialogCard(dialog: { dialogKind: string; payload: Record<string, unknown> }, name?: (model: string) => string): DialogCard | null
+export const MAX_STEP_TITLE: number
+export function stepText(item: ChatItemTool): string
+export function stepTitle(item: ChatItemTool): string

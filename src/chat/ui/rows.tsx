@@ -8,7 +8,7 @@
 // turn ends in a footer with its time and the files it changed. Rows are
 // memoised on the item: an item is replaced, never mutated, so a streamed
 // delta re-renders only its own row.
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import {
   Check, ChevronDown, ChevronRight, CircleDot, Circle, CircleCheck, CornerUpLeft, FileCode, Image as ImageIcon, MessageCircleQuestion, MoveDownRight, Square, X
 } from 'lucide-react'
@@ -51,6 +51,8 @@ export interface RowActions {
   onKeepPlanning?: () => void
   /** A wide pane's agents panel: an Agent row that has a card there is one line, and a click opens the card. */
   openAgent?: { has: (rowId: string) => boolean; open: (rowId: string) => void }
+  /** A finished step's rail dot was pressed: open its copy / save menu beside the dot's box. */
+  onStepMenu?: (item: ChatItemTool, anchor: DOMRect) => void
 }
 
 type Tone = 'ok' | 'bad' | 'wait' | 'run' | 'idle'
@@ -302,8 +304,13 @@ export function ToolRow({ item, actions, nested }: { item: ChatItemTool; actions
       {toCard ? <ChevronRight className="chat-ic chat-step-chev" /> : toggles ? (open ? <ChevronDown className="chat-ic chat-step-chev" /> : <ChevronRight className="chat-ic chat-step-chev" />) : null}
     </>
   )
+  // A finished step's dot opens the copy / save menu; a running or declined one has nothing to keep yet.
+  const openStepMenu = actions.onStepMenu && (item.status === 'done' || item.status === 'failed')
+    ? (e: ReactMouseEvent<HTMLButtonElement>) => { e.preventDefault(); e.stopPropagation(); actions.onStepMenu?.(item, e.currentTarget.getBoundingClientRect()) }
+    : null
   return (
     <Timeline tone={toolTone(item)} testid="chat-row:tool" className={`is-tool is-${view} is-${item.status}`} itemId={item.id}>
+      {openStepMenu ? <button className="chat-rail-hit" aria-label="Copy or save this step" title="Copy or save this step" onClick={openStepMenu} onContextMenu={openStepMenu} data-testid="chat-step-dot" /> : null}
       <div className="chat-step-line">
         {toCard
           ? <button className="chat-step-head is-toggle" onClick={() => { if (!selecting()) actions.openAgent?.open(item.id) }} title={`${item.title} — open in the agents panel`} data-testid="chat-open-agent">{head}</button>

@@ -54,6 +54,7 @@ const chat: ChatBridge = {
   stopTask: (id, taskId) => settled(ipcRenderer.invoke('chat:stop-task', id, taskId)),
   rename: (id, title) => settled(ipcRenderer.invoke('chat:rename', id, title)),
   compact: (id) => settled(ipcRenderer.invoke('chat:compact', id)),
+  duplicateStyle: (id, name) => settled(ipcRenderer.invoke('chat:duplicate-style', id, name)),
   steer: (id, itemId) => settled(ipcRenderer.invoke('chat:steer', id, itemId)),
   resumeQueue: (id) => settled(ipcRenderer.invoke('chat:resume-queue', id)),
   shell: (id, command) => settled(ipcRenderer.invoke('chat:shell', id, command)),
@@ -238,7 +239,7 @@ const api = {
   /** Everything unpinned, or everything when `all`. Answers how many went. */
   clearClips: (all?: boolean): Promise<number> => ipcRenderer.invoke('clips:clear', all === true),
   mergeClips: (ids: string[]): Promise<string | null> => ipcRenderer.invoke('clips:merge', ids),
-  addClip: (input: { text: string; title?: string; groups?: string[] }): Promise<string | null> => ipcRenderer.invoke('clips:add', input),
+  addClip: (input: { text: string; title?: string; groups?: string[]; note?: string }): Promise<string | null> => ipcRenderer.invoke('clips:add', input),
   /** The full list of named groups; a dropped name leaves every clip that carried it. */
   setClipGroups: (names: string[]): Promise<string[] | null> => ipcRenderer.invoke('clips:groups', names),
   /** One group's add / rename / describe / remove: `true`, `false`, or a plain sentence saying why not (a bad or taken name). */

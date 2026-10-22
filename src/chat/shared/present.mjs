@@ -2,6 +2,7 @@
 // labels, durations and times. The wording follows the Claude Code
 // extension's own webview where it has one (docs/rea-findings.md, webview
 // pass). Pure and tested; used by both folds and the React pane.
+import { changeLines } from './diff.mjs'
 
 /**
  * The pixel size of a base64 PNG, GIF, WebP or JPEG, read from its header
@@ -266,7 +267,7 @@ export function verbDelay(swaps) {
 
 const DESTINATIONS = { localSettings: 'in this project', projectSettings: 'in this project, for everyone', userSettings: 'in all your projects', session: 'for this session', cliArg: 'for this session' }
 // The composer's one-word mode names (CLAUDE_MODES); the two it never offers keep one word too.
-const MODE_WORDS = { acceptEdits: 'Bypass', default: 'Manual', plan: 'Plan', auto: 'Auto', dontAsk: 'Deny', bypassPermissions: 'Unrestricted' }
+const MODE_WORDS = { acceptEdits: 'Edits', default: 'Manual', plan: 'Plan', auto: 'Auto', dontAsk: 'Deny', bypassPermissions: 'Bypass' }
 
 /**
  * What "don't ask again" will save, from the CLI's permission suggestions
@@ -679,4 +680,63 @@ export function dialogCard(dialog, name = (m) => modelLabel(m) || m) {
     }
   }
   return null
+}
+
+/** The most a saved step's title carries (the clipboard's own title limit is 120). */
+export const MAX_STEP_TITLE = 80
+
+/**
+ * A finished step as text to copy or keep (the rail dot's menu): a command's
+ * input, then its output; an edit's changes as `-` / `+` lines under each
+ * file's path; a write's content; a search's output; an agent's prompt, then
+ * its result; a todo list as checkboxes; anything else its input and output.
+ * Empty when the step holds no text. Trailing whitespace is dropped and the
+ * parts sit a blank line apart, so the clip reads like the row does.
+ * @param {ChatItemTool} item
+ * @returns {string}
+ */
+export function stepText(item) {
+  const parts = []
+  const push = (s) => { if (typeof s === 'string' && s.trim()) parts.push(s.replace(/\s+$/, '')) }
+  switch (item.view) {
+    case 'command':
+      push(item.input)
+      push(item.output)
+      break
+    case 'edit':
+      for (const e of item.edits ?? []) {
+        const lines = changeLines(e).filter((l) => l.type !== 'hunk').map((l) => (l.type === 'add' ? '+' : l.type === 'del' ? '-' : ' ') + l.text)
+        if (lines.length) push(`${e.path}\n${lines.join('\n')}`)
+      }
+      if (!parts.length) push(item.output)
+      break
+    case 'write':
+      push(item.content ?? item.input)
+      break
+    case 'read':
+      push(item.path ?? item.input)
+      push(item.output)
+      break
+    case 'todo':
+      if (item.todos?.length) push(item.todos.map((t) => `${t.status === 'completed' ? '[x]' : t.status === 'in_progress' ? '[-]' : '[ ]'} ${t.content}`).join('\n'))
+      break
+    case 'agent':
+      push(item.prompt ?? item.input)
+      push(item.output ?? item.summary)
+      break
+    default:
+      push(item.input)
+      push(item.output)
+  }
+  return parts.join('\n\n')
+}
+
+/**
+ * The saved step's title: the row's one-line title, on one line, cut to `MAX_STEP_TITLE`.
+ * @param {ChatItemTool} item
+ * @returns {string}
+ */
+export function stepTitle(item) {
+  const one = String(item.title ?? item.label ?? item.name ?? '').replace(/\s+/g, ' ').trim()
+  return one.length > MAX_STEP_TITLE ? `${one.slice(0, MAX_STEP_TITLE - 1).trimEnd()}…` : one
 }
