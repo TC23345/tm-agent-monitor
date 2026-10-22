@@ -217,6 +217,9 @@ const chats = new ChatManager({
   // The user's call (2026-10-21, 0.4.70): every Claude chat starts with the SDK's allowDangerouslySkipPermissions,
   // so the menu's *Bypass* (bypassPermissions, confirmed there) can be picked. Codex's *Full* needs no start flag.
   allowBypass: true,
+  // The user's call (2026-10-22, 0.4.76): a new Claude chat starts in Bypass; the mode menu's own default (a
+  // right-click on a mode) still wins, and the chip switches it live.
+  defaultMode: 'bypassPermissions',
   log: (line) => console.log(`[chat] ${line}`),
   // Each CLI in a job of its own (0.4.68): closing the chat ends every MCP server it started, even one whose
   // npx/cmd parent had already exited, which the tree kill cannot find; and the app dying ends them too.

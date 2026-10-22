@@ -34,6 +34,8 @@ export interface ChatManagerOptions {
   adoptProcess?: AdoptProcess
   /** Offer Claude's *Bypass* mode (`ClaudeSessionOptions.allowBypass`): off unless the host says so. */
   allowBypass?: boolean
+  /** The permission mode a new Claude chat starts in when the request names none (the user's own default, set in the mode menu, still wins). */
+  defaultMode?: string
 }
 
 interface Live {
@@ -82,7 +84,8 @@ export class ChatManager extends EventEmitter implements ChatBridge {
     const env = this.config.envFor?.(id, req.provider) ?? {}
     if (req.provider === 'claude') {
       const transcript = req.resume ? await loadClaudeTranscript(req.resume, req.cwd).catch(() => undefined) : undefined
-      const permissionMode = req.permissionMode ? (req.permissionMode as ConstructorParameters<typeof ClaudeSession>[0]['permissionMode']) : undefined
+      const wanted = req.permissionMode ?? this.config.defaultMode
+      const permissionMode = wanted ? (wanted as ConstructorParameters<typeof ClaudeSession>[0]['permissionMode']) : undefined
       const session = new ClaudeSession({ cwd: req.cwd, resume: req.resume ?? null, model: req.model ?? null, permissionMode, env, claudePath: this.config.claudePath, log: this.config.log, adoptProcess: this.config.adoptProcess, allowBypass: this.config.allowBypass }, transcript)
       session.on('change', (t: Transcript) => this.emit('change', id, t))
       session.on('approval', (a: ChatItemApproval) => this.emit('approval', id, a))
