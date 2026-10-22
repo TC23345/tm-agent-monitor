@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from 'react'
-import { ChevronLeft, ChevronRight, Folder, FolderPlus, Globe, Rss, SquareTerminal } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Folder, Globe, Rss, SquareTerminal } from 'lucide-react'
 import type { TerminalLaunch } from '@shared/types'
 import { launchKey } from '@shared/panes.mjs'
 import { packRows } from '@shared/projectStrip.mjs'
@@ -64,7 +64,6 @@ interface Props {
   paneFull: boolean
   /** The folder's usual start (tm.launch.v2) — checked in its menu. */
   launchKindFor: (cwd: string) => TerminalLaunch
-  onNewProject: () => void
   /** A `WEB_LINKS` site: a web pane, or the browser on Shift-click. */
   onOpenWeb: (link: { url: string; label: string }, external: boolean) => void
   /** A folder dropped from Explorer becomes the launch target. */
@@ -86,7 +85,7 @@ interface Props {
  * (the path comes from `webUtils.getPathForFile` in the preload — `File.path`
  * was removed in Electron 32).
  */
-export function ProjectStrip({ projects, selected, treeFor, openMenu, onOpenMenu, onSelect, onLaunch, paneFull, launchKindFor, onNewProject, onOpenWeb, onDropFolder }: Props) {
+export function ProjectStrip({ projects, selected, treeFor, openMenu, onOpenMenu, onSelect, onLaunch, paneFull, launchKindFor, onOpenWeb, onDropFolder }: Props) {
   const now = useNow()
   const [dropHot, setDropHot] = useState(false)
   const [hover, setHover] = useState(false)
@@ -257,11 +256,6 @@ export function ProjectStrip({ projects, selected, treeFor, openMenu, onOpenMenu
         <span className="projects-title" title="Project folders with activity in the last 4 hours, newest first">
           <Rss className="gpane-ic" strokeWidth={2} />
           <span className="pane-title">Activity</span>
-        </span>
-        <span className="gpane-actions">
-          <button className="iconbtn iconbtn--sm" onClick={onNewProject} title="New project — create a project folder and open it in Cursor" aria-label="New project" data-testid="launch-new-project">
-            <FolderPlus className="gear gear--sm" strokeWidth={2} />
-          </button>
         </span>
       </div>
 

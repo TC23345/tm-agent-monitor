@@ -746,10 +746,11 @@ kbd {
 .splitter--stream.is-dragging::after { background: var(--accent); }
 /* Every sidebar section with another beneath it ends in the same handle: drag to size it, up past the snap folds
    it, double-click resets. At rest only its hairline shows — the rule between the sections, so the next one draws
-   none of its own; the pill appears while the section is hovered, or the handle focused or dragged. */
+   none of its own; the pill appears only while the handle itself is hovered, focused or dragged (the user's call,
+   2026-10-22: a pill under every hovered section read as a stray bar). */
 .splitter--section { margin: 6px -4px 0; }
 .splitter--section::after { opacity: 0; transition: opacity 120ms ease, background-color 120ms ease; }
-.sideview:hover .splitter--section::after,
+.splitter--section:hover::after,
 .splitter--section:focus-visible::after,
 .splitter--section.is-dragging::after { opacity: 1; }
 .sideview.has-grip { padding-bottom: 0; }

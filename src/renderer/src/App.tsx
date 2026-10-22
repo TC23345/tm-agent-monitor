@@ -52,7 +52,7 @@ import {
 } from './panes'
 import { Splitter } from './Splitter'
 import {
-  PANE_MIN, PANE_MIN_ROW, clampSectionHeight, clampSidebarWidth, columnTemplate, normalizeFractions, resizeFractions,
+  PANE_MIN, PANE_MIN_ROW, clampSectionHeight, clampSidebarWidth, columnTemplate, normalizeFractions, resizeFractions, snapSectionHeight,
   trackWidths, viewportBucket, type SizeBucket
 } from '@shared/layout.mjs'
 import { launchFor, launchKey, withLaunch, type LaunchPrefs } from '@shared/panes.mjs'
@@ -1254,7 +1254,7 @@ export function App() {
           </span>
         </div>
         {!rolled && <div className="sideview-body">{sidebarBody(v.id)}</div>}
-        {/* The stream's handle, under a section another one follows (its pill shows while the section is hovered):
+        {/* The stream's handle, under a section another one follows (its pill shows while the handle is hovered):
             drag to size it, up past the snap folds it to its header, down on a folded one opens it; double-click
             (or Home) goes back to the default sizing. */}
         {hasGrip && <Splitter
@@ -1265,7 +1265,8 @@ export function App() {
           title={rolled ? `Drag down to open ${v.label}` : `${v.label} height — drag to resize, up to fold, double-click to reset`}
           onStart={() => { sectionDrag.current = { height: rolled ? 0 : sectionEls.current[v.id]?.offsetHeight ?? 0, sidebar: sidebarRef.current?.clientHeight ?? 800 } }}
           onMove={(delta) => {
-            const h = clampSectionHeight(sectionDrag.current.height + delta, sectionDrag.current.sidebar)
+            // Stops at the sidebar's quarters and thirds on the way (the user's ask, 2026-10-22).
+            const h = snapSectionHeight(clampSectionHeight(sectionDrag.current.height + delta, sectionDrag.current.sidebar), sectionDrag.current.sidebar)
             if (h === 0) { setSidebarCollapsed((current) => (current.includes(v.id) ? current : [...current, v.id])); return }
             setSidebarCollapsed((current) => (current.includes(v.id) ? current.filter((x) => x !== v.id) : current))
             setSectionH((current) => (current[v.id] === h ? current : { ...current, [v.id]: h }))
@@ -1549,6 +1550,20 @@ export function App() {
         onNewTerminal={newTerminal}
         onNewChat={newChat}
         onNewProject={() => setNewProjectOpen(true)}
+        sizeMode={sizeMode}
+        onSizeMode={applySizeMode}
+        paneCols={paneCols}
+        onPaneCols={setPaneCols}
+        canResetSizes={sized}
+        onResetSizes={resetSizes}
+        fieldOn={fieldOn}
+        sidebarHidden={sidebarHidden}
+        onToggleSidebar={toggleSidebar}
+        onToggleField={toggleField}
+        layouts={layoutNames}
+        onSaveLayout={() => setLayoutDialog(true)}
+        onApplyLayout={applyLayout}
+        onDeleteLayout={deleteLayout}
         commands={projectCommands}
         onRunCommand={runProjectCommand}
         canResetOrder={order.length > 0}
@@ -1557,7 +1572,7 @@ export function App() {
         onKeys={openLegend}
         rebuild={rebuild}
         onRebuild={rebuildApp}
-        openMenu={openMenu === 'file' || openMenu === 'terminal' || openMenu === 'user' ? openMenu : null}
+        openMenu={openMenu === 'file' || openMenu === 'layout' || openMenu === 'terminal' || openMenu === 'user' ? openMenu : null}
         onOpenMenu={setOpenMenu}
         onPalette={() => { setOpenMenu(null); setPalette((v) => !v) }}
         onMinimize={() => { setOpenMenu(null); window.watch.minimize() }}
@@ -1587,7 +1602,6 @@ export function App() {
             }}
             paneFull={panes.length >= MAX_PANES}
             launchKindFor={(cwd) => launchFor(launchPrefs, cwd)}
-            onNewProject={() => setNewProjectOpen(true)}
             onOpenWeb={openWeb}
             onDropFolder={dropLaunchFolder}
           />
@@ -1755,21 +1769,7 @@ export function App() {
         onClosePane={closePane}
         sidebarViews={sidebarViews}
         onToggleSidebarView={toggleSidebarView}
-        sizeMode={sizeMode}
-        onSizeMode={applySizeMode}
-        paneCols={paneCols}
-        onPaneCols={setPaneCols}
-        canResetSizes={sized}
-        onResetSizes={resetSizes}
-        fieldOn={fieldOn}
-        sidebarHidden={sidebarHidden}
-        onToggleSidebar={toggleSidebar}
-        onToggleField={toggleField}
-        layouts={layoutNames}
-        onSaveLayout={() => setLayoutDialog(true)}
-        onApplyLayout={applyLayout}
-        onDeleteLayout={deleteLayout}
-        openMenu={openMenu === 'panes' || openMenu === 'layout' ? openMenu : null}
+        openMenu={openMenu === 'panes' ? openMenu : null}
         onOpenMenu={setOpenMenu}
         version={appInfo.version}
         debugPort={appInfo.debugPort}

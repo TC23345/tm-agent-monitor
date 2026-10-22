@@ -1,11 +1,10 @@
-import { ChevronUp, Columns3, LayoutGrid, LayoutTemplate, Monitor, PanelLeft, PanelRight, Pause, RefreshCw, Ruler, Save, Sparkles, Trash2 } from 'lucide-react'
-import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
-import { MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, isUniqueKind, type PaneCols, type PaneInstance, type PaneKind, type SidebarView } from './panes'
-import type { SizeMode } from '@shared/types'
+import { ChevronUp, LayoutGrid, Pause, RefreshCw } from 'lucide-react'
+import { MenuCheckItem, MenuPop } from './Menu'
+import { MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, isUniqueKind, type PaneInstance, type PaneKind, type SidebarView } from './panes'
 import { tid } from './testid'
 
 /** The status bar's popovers. Held in App's single `openMenu`, like every menu. */
-export type StatusMenu = 'panes' | 'layout'
+export type StatusMenu = 'panes'
 
 interface Props {
   /** Rebuild & relaunch: shared busy state and main's last reply. */
@@ -17,25 +16,6 @@ interface Props {
   onClosePane: (paneId: string) => void
   sidebarViews: SidebarView[]
   onToggleSidebarView: (view: SidebarView) => void
-  /** Workspace size (persisted; also the half-view side), grid columns, and the
-   * dragged sizes' way back to defaults. */
-  sizeMode: SizeMode
-  onSizeMode: (mode: SizeMode) => void
-  paneCols: PaneCols
-  onPaneCols: (cols: PaneCols) => void
-  canResetSizes: boolean
-  onResetSizes: () => void
-  /** The one GPU layer left: the Session bar's pace streaks. */
-  fieldOn: boolean
-  onToggleField: () => void
-  /** Ctrl+B: hide the sidebar so the grid takes the whole frame. */
-  sidebarHidden: boolean
-  onToggleSidebar: () => void
-  /** Named layouts: save the current one, apply or forget a saved one. */
-  layouts: string[]
-  onSaveLayout: () => void
-  onApplyLayout: (name: string) => void
-  onDeleteLayout: (name: string) => void
   openMenu: StatusMenu | null
   onOpenMenu: (menu: StatusMenu | null) => void
   version?: string
@@ -48,26 +28,22 @@ interface Props {
 
 export const REBUILD_HINT = 'Quit, rebuild the installer from the local checkout (npm run dist), silently reinstall, and relaunch'
 
-const SIZE_LABEL: Record<SizeMode, string> = { full: 'Full', left: 'Left half', right: 'Right half' }
-
 /**
  * The IDE-style status bar under the workspace. The title-bar menus hold
  * verbs; this bar holds *state*. Left: the one build action (Update) with
- * main's last reply beside it, then two popovers — **Panes** (which unique
- * panes and sidebar sections show) and **Layout** (workspace size, columns,
- * saved layouts, reset). Right: passive facts (CDP port, version). The Layout
- * chip's label is the live state, so the bar reads as state even closed.
+ * main's last reply beside it, then the **Panes** popover (which unique panes
+ * and sidebar sections show). Right: passive facts (CDP port, version). The
+ * Layout popover lived here until 0.4.74; it is the title bar's *Layout* menu
+ * now (the user's call).
  */
 export function StatusBar(props: Props) {
   const {
     rebuild, onRebuild, panes, onAddPane, onClosePane, sidebarViews, onToggleSidebarView,
-    sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, fieldOn, onToggleField, sidebarHidden, onToggleSidebar,
-    layouts, onSaveLayout, onApplyLayout, onDeleteLayout, openMenu, onOpenMenu, version, debugPort, clipsPaused, onResumeClips
+    openMenu, onOpenMenu, version, debugPort, clipsPaused, onResumeClips
   } = props
   const full = panes.length >= MAX_PANES
   const warn = rebuild.msg ? /failed|no repo|no installer|dev build|could not/.test(rebuild.msg) : false
   const toggle = (menu: StatusMenu) => () => onOpenMenu(openMenu === menu ? null : menu)
-  const run = (action: () => void) => () => { onOpenMenu(null); action() }
 
   return (
     <footer className="statusbar" data-testid="statusbar">
@@ -131,67 +107,6 @@ export function StatusBar(props: Props) {
           )}
         </div>
 
-        <div className="menu-wrap statusbar-menu">
-          <button
-            className={`status-btn ${openMenu === 'layout' ? 'status-btn--open' : ''}`}
-            onClick={toggle('layout')}
-            title="Workspace size, grid columns, saved layouts"
-            data-testid={tid('menu-btn', 'layout')}
-          >
-            <Monitor className="status-ic" strokeWidth={2} />
-            {SIZE_LABEL[sizeMode]} · {paneCols === 'auto' ? 'Auto' : `${paneCols} col`}
-            <ChevronUp className="status-chev" strokeWidth={2} />
-          </button>
-          {openMenu === 'layout' && (
-            <MenuPop onAway={() => onOpenMenu(null)} ignoreSelector=".statusbar-menu">
-              {/* Radio groups stay open so a choice can be compared and re-picked. */}
-              <div className="menu-label"><Monitor className="menu-label-ic" strokeWidth={2} />Workspace size</div>
-              <MenuCheckItem icon={<Monitor strokeWidth={2} />} label="Full screen" hint="Fill the work area (default)" checked={sizeMode === 'full'} onClick={() => onSizeMode('full')} />
-              <MenuCheckItem icon={<PanelLeft strokeWidth={2} />} label="Left half" hint="Take the left half, leaving the right visible" checked={sizeMode === 'left'} onClick={() => onSizeMode('left')} />
-              <MenuCheckItem icon={<PanelRight strokeWidth={2} />} label="Right half" hint="Take the right half, leaving the left visible" checked={sizeMode === 'right'} onClick={() => onSizeMode('right')} />
-              <div className="menu-sep" />
-              <div className="menu-label"><Columns3 className="menu-label-ic" strokeWidth={2} />Columns</div>
-              <MenuCheckItem label="Auto" hint="Up to three columns, as panes fit" checked={paneCols === 'auto'} onClick={() => onPaneCols('auto')} />
-              <MenuCheckItem label="1 column" checked={paneCols === 1} onClick={() => onPaneCols(1)} />
-              <MenuCheckItem label="2 columns" checked={paneCols === 2} onClick={() => onPaneCols(2)} />
-              <MenuCheckItem label="3 columns" checked={paneCols === 3} onClick={() => onPaneCols(3)} />
-              <div className="menu-sep" />
-              <MenuCheckItem
-                icon={<PanelLeft strokeWidth={2} />}
-                label="Sidebar"
-                hint="Ctrl+B (Alt+S inside a terminal): hide it and let the panes fill the frame"
-                checked={!sidebarHidden}
-                onClick={onToggleSidebar}
-                testId="sidebar-toggle"
-              />
-              <MenuCheckItem
-                icon={<Sparkles strokeWidth={2} />}
-                label="Pace streaks"
-                hint="Streaks along the Session bar's fill while the app projects when you will hit the limit — faster the quicker you burn"
-                checked={fieldOn}
-                onClick={onToggleField}
-              />
-              <div className="menu-sep" />
-              <div className="menu-label"><LayoutTemplate className="menu-label-ic" strokeWidth={2} />Saved layouts</div>
-              <MenuItem icon={<Save strokeWidth={2} />} label="Save current layout…" hint="Panes, sizes, and sidebar views under a name" onClick={run(onSaveLayout)} />
-              {layouts.map((name) => (
-                <MenuItem key={`apply:${name}`} icon={<LayoutTemplate strokeWidth={2} />} label={name} hint={`Apply layout “${name}”`} onClick={run(() => onApplyLayout(name))} />
-              ))}
-              {layouts.length > 0 && <div className="menu-label"><Trash2 className="menu-label-ic" strokeWidth={2} />Delete layout</div>}
-              {layouts.map((name) => (
-                <MenuItem key={`delete:${name}`} icon={<Trash2 strokeWidth={2} />} label={name} hint={`Forget layout “${name}”`} onClick={run(() => onDeleteLayout(name))} />
-              ))}
-              <div className="menu-sep" />
-              <MenuItem
-                icon={<Ruler strokeWidth={2} />}
-                label="Reset pane sizes"
-                hint="Sidebar width and dragged column widths back to their defaults"
-                disabled={!canResetSizes}
-                onClick={run(onResetSizes)}
-              />
-            </MenuPop>
-          )}
-        </div>
       </div>
       <div className="statusbar-right">
         {clipsPaused && (

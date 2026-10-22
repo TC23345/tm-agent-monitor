@@ -35,6 +35,29 @@ export function clampSectionHeight(height, sidebarHeight) {
   return Math.round(Math.min(height, max))
 }
 
+/** Where a section drag pauses on its way: the sidebar's quarters and thirds. */
+export const SECTION_STOPS = [1 / 4, 1 / 3, 1 / 2, 2 / 3, 3 / 4]
+/** How close (px) a drag must come to a stop to land on it. */
+export const SECTION_STOP_PX = 10
+
+/**
+ * A clamped section height pulled onto the nearest stop when it is within reach (the user's ask, 2026-10-22:
+ * checkpoints at standard sizes on the way down). A folded section (0) and a height outside the clamp stay.
+ */
+export function snapSectionHeight(height, sidebarHeight) {
+  if (!Number.isFinite(height) || height <= 0 || !Number.isFinite(sidebarHeight) || sidebarHeight <= 0) return height
+  const max = clampSectionHeight(SECTION_MAX, sidebarHeight)
+  let best = height
+  let gap = SECTION_STOP_PX + 1
+  for (const f of SECTION_STOPS) {
+    const stop = Math.round(sidebarHeight * f)
+    if (stop < SECTION_SNAP || stop > max) continue
+    const d = Math.abs(stop - height)
+    if (d <= SECTION_STOP_PX && d < gap) { best = stop; gap = d }
+  }
+  return best
+}
+
 /** The persisted section heights (`tm.sidebar.sections.v1`): `{ [view]: px }` for known views only, each a sane whole number. */
 export function sanitizeSectionHeights(raw, ids) {
   const out = {}

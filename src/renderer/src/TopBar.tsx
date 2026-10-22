@@ -1,11 +1,11 @@
 import {
-  Code2, Folder, FolderPlus, Globe, Keyboard, ListRestart, Minus, Play, Power, RefreshCw, Rss, Search, SquareTerminal, Terminal, X
+  Code2, Columns3, Folder, FolderPlus, Globe, Keyboard, LayoutTemplate, ListRestart, Minus, Monitor, PanelLeft, PanelRight, Play, Power, RefreshCw, Rss, Ruler, Save, Search, Sparkles, SquareTerminal, Terminal, Trash2, X
 } from 'lucide-react'
 import { Settings } from './Icons'
 import mark from './assets/icon.png'
-import { MenuItem, MenuPop } from './Menu'
-import { MAX_PANES, PANE_KINDS, type PaneInstance, type PaneKind } from './panes'
-import type { ProjectCommand, ProviderHealth, ProviderId, TerminalLaunch } from '@shared/types'
+import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
+import { MAX_PANES, PANE_KINDS, type PaneCols, type PaneInstance, type PaneKind } from './panes'
+import type { ProjectCommand, ProviderHealth, ProviderId, SizeMode, TerminalLaunch } from '@shared/types'
 import { overallStatus } from '@shared/health.mjs'
 import { ProviderBadge } from './ProviderBadge'
 import { REBUILD_HINT } from './StatusBar'
@@ -33,7 +33,7 @@ export function ConnChip({ health }: { health: HealthInput }) {
 /** The title-bar menus. There is no View menu: what panes and sidebar sections
  * show, the workspace size, columns, and saved layouts are *state*, and state
  * lives in the status bar's popovers (StatusBar.tsx). Menus hold verbs. */
-export type MenuName = 'file' | 'terminal' | 'user'
+export type MenuName = 'file' | 'layout' | 'terminal' | 'user'
 
 interface Props {
   waiting: number
@@ -49,6 +49,22 @@ interface Props {
   /** A chat pane: the extension's conversation with the CLI, in the grid. */
   onNewChat: (provider: 'claude' | 'codex') => void
   onNewProject: () => void
+  /** The Layout menu (the status bar's popover until 0.4.74, the user's call): workspace size (persisted; also the
+   * half-view side), grid columns, the sidebar, pace streaks, saved layouts, and the dragged sizes' way back. */
+  sizeMode: SizeMode
+  onSizeMode: (mode: SizeMode) => void
+  paneCols: PaneCols
+  onPaneCols: (cols: PaneCols) => void
+  canResetSizes: boolean
+  onResetSizes: () => void
+  fieldOn: boolean
+  onToggleField: () => void
+  sidebarHidden: boolean
+  onToggleSidebar: () => void
+  layouts: string[]
+  onSaveLayout: () => void
+  onApplyLayout: (name: string) => void
+  onDeleteLayout: (name: string) => void
   /** This folder's `.tm.json` commands and npm scripts — Terminal → Run. */
   commands: ProjectCommand[]
   onRunCommand: (command: ProjectCommand) => void
@@ -87,6 +103,7 @@ interface Props {
 export function TopBar(props: Props) {
   const {
     waiting, waitingOnly, onWaitingOnly, onRouteWaiting, health, panes, context, onNewTerminal, onNewChat, onNewProject, commands, onRunCommand,
+    sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, fieldOn, onToggleField, sidebarHidden, onToggleSidebar, layouts, onSaveLayout, onApplyLayout, onDeleteLayout,
     canResetOrder, onResetOrder, onSettings, onKeys, openMenu, onOpenMenu, onPalette, onMinimize, onHide, onOpenPane, onActivity, hot, onFocusAgent,
     rebuild, onRebuild
   } = props
@@ -149,6 +166,59 @@ export function TopBar(props: Props) {
         </div>
 
         <div className="menu-wrap">
+          {menuButton('layout', 'Layout')}
+          {openMenu === 'layout' && (
+            <MenuPop {...away}>
+              {/* Radio groups stay open so a choice can be compared and re-picked. */}
+              <div className="menu-label"><Monitor className="menu-label-ic" strokeWidth={2} />Workspace size</div>
+              <MenuCheckItem icon={<Monitor strokeWidth={2} />} label="Full screen" hint="Fill the work area (default)" checked={sizeMode === 'full'} onClick={() => onSizeMode('full')} />
+              <MenuCheckItem icon={<PanelLeft strokeWidth={2} />} label="Left half" hint="Take the left half, leaving the right visible" checked={sizeMode === 'left'} onClick={() => onSizeMode('left')} />
+              <MenuCheckItem icon={<PanelRight strokeWidth={2} />} label="Right half" hint="Take the right half, leaving the left visible" checked={sizeMode === 'right'} onClick={() => onSizeMode('right')} />
+              <div className="menu-sep" />
+              <div className="menu-label"><Columns3 className="menu-label-ic" strokeWidth={2} />Columns</div>
+              <MenuCheckItem label="Auto" hint="Up to three columns, as panes fit" checked={paneCols === 'auto'} onClick={() => onPaneCols('auto')} />
+              <MenuCheckItem label="1 column" checked={paneCols === 1} onClick={() => onPaneCols(1)} />
+              <MenuCheckItem label="2 columns" checked={paneCols === 2} onClick={() => onPaneCols(2)} />
+              <MenuCheckItem label="3 columns" checked={paneCols === 3} onClick={() => onPaneCols(3)} />
+              <div className="menu-sep" />
+              <MenuCheckItem
+                icon={<PanelLeft strokeWidth={2} />}
+                label="Sidebar"
+                hint="Ctrl+B (Alt+S inside a terminal): hide it and let the panes fill the frame"
+                checked={!sidebarHidden}
+                onClick={onToggleSidebar}
+                testId="sidebar-toggle"
+              />
+              <MenuCheckItem
+                icon={<Sparkles strokeWidth={2} />}
+                label="Pace streaks"
+                hint="Streaks along the Session bar's fill while the app projects when you will hit the limit — faster the quicker you burn"
+                checked={fieldOn}
+                onClick={onToggleField}
+              />
+              <div className="menu-sep" />
+              <div className="menu-label"><LayoutTemplate className="menu-label-ic" strokeWidth={2} />Saved layouts</div>
+              <MenuItem icon={<Save strokeWidth={2} />} label="Save current layout…" hint="Panes, sizes, and sidebar views under a name" onClick={run(onSaveLayout)} />
+              {layouts.map((name) => (
+                <MenuItem key={`apply:${name}`} icon={<LayoutTemplate strokeWidth={2} />} label={name} hint={`Apply layout “${name}”`} onClick={run(() => onApplyLayout(name))} />
+              ))}
+              {layouts.length > 0 && <div className="menu-label"><Trash2 className="menu-label-ic" strokeWidth={2} />Delete layout</div>}
+              {layouts.map((name) => (
+                <MenuItem key={`delete:${name}`} icon={<Trash2 strokeWidth={2} />} label={name} hint={`Forget layout “${name}”`} onClick={run(() => onDeleteLayout(name))} />
+              ))}
+              <div className="menu-sep" />
+              <MenuItem
+                icon={<Ruler strokeWidth={2} />}
+                label="Reset pane sizes"
+                hint="Sidebar width and dragged column widths back to their defaults"
+                disabled={!canResetSizes}
+                onClick={run(onResetSizes)}
+              />
+            </MenuPop>
+          )}
+        </div>
+
+        <div className="menu-wrap">
           {menuButton('terminal', 'Terminal')}
           {openMenu === 'terminal' && (
             <MenuPop {...away}>
@@ -198,13 +268,13 @@ export function TopBar(props: Props) {
               <div className="menu-sep" />
               <MenuItem icon={<Settings strokeWidth={2} />} label="Settings…" hint="Hotkey, notifications, startup, updates, hooks (Ctrl+,)" onClick={run(onSettings)} />
               <MenuItem icon={<Keyboard strokeWidth={2} />} label="Keyboard shortcuts" hint="The Keys pane on and off — every key the workspace, Claude Code, Codex and the shell use (F1)" onClick={run(onKeys)} />
-              <div className="menu-sep" />
-              <div className="menu-status">
-                <ConnChip health={health} />
-              </div>
             </MenuPop>
           )}
         </div>
+        {/* New project, at hand in the bar (the user's call, 2026-10-22: it sat on the Activity header). */}
+        <button className="menu-btn menu-btn--icon" onClick={() => { onOpenMenu(null); onNewProject() }} title="New project — create a project folder and open it in Cursor" aria-label="New project" data-testid="launch-new-project">
+          <FolderPlus strokeWidth={2} />
+        </button>
       </nav>
 
       {/* The command center: the palette's front door, where an IDE keeps its

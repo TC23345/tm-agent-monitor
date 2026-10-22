@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  PANE_MIN, PANE_MIN_ROW, SECTION_RESERVE, SECTION_SNAP, SIDEBAR_MAX, SIDEBAR_MIN, clampSectionHeight, clampSidebarWidth, columnTemplate,
+  PANE_MIN, PANE_MIN_ROW, SECTION_RESERVE, SECTION_SNAP, SECTION_STOP_PX, SIDEBAR_MAX, SIDEBAR_MIN, clampSectionHeight, clampSidebarWidth, columnTemplate, snapSectionHeight,
   defaultSidebarWidth, equalFractions, normalizeFractions, resizeFractions, sanitizeSectionHeights, trackWidths,
   viewportBucket
 } from './layout.mjs'
@@ -107,4 +107,15 @@ test('the size bucket follows the live viewport, not the persisted mode', () => 
   // Unmeasured (first paint, no screen info) assumes full rather than churning.
   assert.equal(viewportBucket(Number.NaN, 2560), 'full')
   assert.equal(viewportBucket(2560, 0), 'full')
+})
+
+test('a section drag lands on the sidebar’s quarters and thirds when within reach', () => {
+  assert.equal(snapSectionHeight(300, 1200), 300, 'a quarter exactly')
+  assert.equal(snapSectionHeight(300 + SECTION_STOP_PX, 1200), 300, 'just over it')
+  assert.equal(snapSectionHeight(300 + SECTION_STOP_PX + 1, 1200), 300 + SECTION_STOP_PX + 1, 'out of reach')
+  assert.equal(snapSectionHeight(405, 1200), 400, 'a third')
+  assert.equal(snapSectionHeight(595, 1200), 600, 'a half')
+  assert.equal(snapSectionHeight(0, 1200), 0, 'folded stays folded')
+  assert.equal(snapSectionHeight(150, 200), 150, 'a stop past the clamp is not one')
+  assert.equal(snapSectionHeight(NaN, 1200), NaN)
 })

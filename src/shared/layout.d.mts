@@ -9,6 +9,9 @@ export type SizeBucket = 'full' | 'half'
 
 /** A sidebar section's dragged height: 0 folds it, else whole pixels from the snap to the sidebar minus its reserve. */
 export function clampSectionHeight(height: number, sidebarHeight: number): number
+export const SECTION_STOPS: number[]
+export const SECTION_STOP_PX: number
+export function snapSectionHeight(height: number, sidebarHeight: number): number
 /** `{ [view]: px }` for known views only, each a sane whole number. */
 export function sanitizeSectionHeights(raw: unknown, ids: readonly string[]): Record<string, number>
 
