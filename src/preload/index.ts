@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { NoteMeta, NoteOrder } from '../shared/notes.mjs'
 import type { ActivityEvent, StatusSnapshot, AppSettings, AppSettingsPatch, ClipCaptureSettings, ClipGroupOp, ClipsListing, DailyUsageDay, DirListing, FileContent, DesktopWindow, GitStatus, ProjectCommand, ProviderId, SizeMode, SystemDiagnostic, TerminalAttachResult, TerminalCreateRequest, UsageInsights, WorkspaceCommand } from '../shared/types.js'
 import type { ChatBridge } from '../chat/ui/bridge'
+import type { SpellAnswer } from '../chat/shared/autocorrect.mjs'
 import type { ChatOptions, Transcript } from '../chat/shared/chatModel.mjs'
 
 /** The newer chat routes answer `{ ok, value }` or `{ ok: false, error }`; null is a request main refused. */
@@ -55,6 +56,7 @@ const chat: ChatBridge = {
   rename: (id, title) => settled(ipcRenderer.invoke('chat:rename', id, title)),
   compact: (id) => settled(ipcRenderer.invoke('chat:compact', id)),
   duplicateStyle: (id, name) => settled(ipcRenderer.invoke('chat:duplicate-style', id, name)),
+  complete: (id, draft) => settled(ipcRenderer.invoke('chat:complete', id, draft)),
   steer: (id, itemId) => settled(ipcRenderer.invoke('chat:steer', id, itemId)),
   resumeQueue: (id) => settled(ipcRenderer.invoke('chat:resume-queue', id)),
   shell: (id, command) => settled(ipcRenderer.invoke('chat:shell', id, command)),
@@ -176,6 +178,8 @@ const api = {
   },
   /** A chat pane's `@` picker: the folder's files, relative and forward-slashed (git's list, else a bounded walk). */
   listChatFiles: async (cwd: string): Promise<string[]> => ((await ipcRenderer.invoke('chat:files', cwd)) as string[] | null) ?? [],
+  /** The chat composer's auto-correct: the dictionary's answer for one word (main's Hunspell en_US); an unanswerable word reads as fine. */
+  spellWord: async (word: string): Promise<SpellAnswer> => ((await ipcRenderer.invoke('chat:spell', word)) as SpellAnswer | null) ?? { ok: true, suggestions: [] },
   /** Save conversation: a save dialog, then the Markdown written where the user picked; false when cancelled. */
   saveChat: (name: string, text: string): Promise<boolean> => ipcRenderer.invoke('chat:save', name, text),
   /** A dropped path as a folder: the directory itself, or a file's parent. */

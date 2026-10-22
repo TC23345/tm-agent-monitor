@@ -68,6 +68,8 @@ export interface ChatBridge {
   stopTask(id: string, taskId: string): Promise<void>
   /** Claude: write an editable copy of a built-in output style (`~/.claude/output-styles`); the path written. */
   duplicateStyle?(id: string, name: string): Promise<string>
+  /** Auto-complete what is being typed (Shift+Tab): the continuation as text to put after the draft, or '' when the model had none. */
+  complete?(id: string, draft: string): Promise<string>
   /** Name the session. */
   rename(id: string, title: string): Promise<void>
   /** Compact the context now. */

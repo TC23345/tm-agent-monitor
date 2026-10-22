@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { MAX_LABEL, defaultFor, emptyPrefs, labelFor, parsePrefs, sanitizePrefs, withDefault, withLabel } from './chatPrefs.mjs'
+import { MAX_LABEL, composerOn, defaultFor, emptyPrefs, keptWords, labelFor, parsePrefs, sanitizePrefs, withComposer, withDefault, withKept, withLabel } from './chatPrefs.mjs'
 
 const opus = { label: 'Opus 5.5', description: 'For complex work and everyday tasks' }
 
@@ -46,5 +46,27 @@ test('parsePrefs reads what was stored and drops anything malformed', () => {
   assert.deepEqual(parsePrefs('{bad'), emptyPrefs())
   assert.deepEqual(parsePrefs(null), emptyPrefs())
   const odd = sanitizePrefs({ labels: { claude: { model: { 'bad id!': { label: 'x' }, ok: { label: 7 } }, mode: 'no' }, 'Not-A-Provider': {} }, defaults: { claude: { model: '../x', mode: 'plan' } } })
-  assert.deepEqual(odd, { labels: { claude: { model: {}, mode: {} } }, defaults: { claude: { mode: 'plan' } } })
+  assert.deepEqual(odd, { labels: { claude: { model: {}, mode: {} } }, defaults: { claude: { mode: 'plan' } }, composer: {} })
+})
+
+test('composer switches are on until switched off, and survive a round trip', () => {
+  let p = emptyPrefs()
+  assert.equal(composerOn(p, 'autoCorrect'), true)
+  assert.equal(composerOn(p, 'autoComplete'), true)
+  p = withComposer(p, 'autoCorrect', false)
+  assert.equal(composerOn(p, 'autoCorrect'), false)
+  assert.equal(composerOn(p, 'autoComplete'), true)
+  const back = parsePrefs(JSON.stringify(p))
+  assert.equal(composerOn(back, 'autoCorrect'), false)
+  assert.equal(withComposer(p, 'nope', false), p, 'an unknown switch changes nothing')
+  assert.deepEqual(sanitizePrefs({ composer: { autoCorrect: 'yes', keep: 'x' } }).composer, {})
+})
+
+test('withKept remembers a word taken back, once, newest last', () => {
+  let p = withKept(emptyPrefs(), 'Zorblax')
+  p = withKept(p, 'repo')
+  p = withKept(p, 'zorblax')
+  assert.deepEqual(keptWords(p), ['repo', 'zorblax'])
+  assert.deepEqual(keptWords(parsePrefs(JSON.stringify(p))), ['repo', 'zorblax'])
+  assert.deepEqual(keptWords(emptyPrefs()), [])
 })

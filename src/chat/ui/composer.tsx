@@ -5,10 +5,15 @@
 // clock, the model and effort chip (effort, models, fast mode, output style),
 // the agents and background tasks while any run (on a wide pane the chip
 // opens the agents panel, else a menu of them), the context pie (hover for the
-// breakdown, click to compact), the permission mode chip (Shift+Tab cycles it,
-// as in the CLI) and send / stop. Typing `@` lists the project's files and
-// `/` the slash commands; ↑ in an empty box brings back the last prompt; the
-// CLI's guess at the next prompt shows as the placeholder and Tab takes it.
+// breakdown, click to compact; its popover opens on the Composer switches),
+// the permission mode chip and send / stop. Typing `@` lists the project's
+// files and `/` the slash commands; ↑ in an empty box brings back the last
+// prompt; the CLI's guess at the next prompt shows as the placeholder and Tab
+// takes it. Since 0.4.72 (the user's asks) a misspelled word is corrected as
+// its boundary is typed (shared/autocorrect.mjs; Backspace right after takes
+// it back and keeps the word), and Shift+Tab — only Shift+Tab, never on its
+// own — asks for a continuation of what is typed, shown as ghost text that
+// Tab takes (shared/complete.mjs).
 // Menus open inside the pane and close on Escape; in claude-watch they carry
 // `data-escape-close`, so the host hands them its Escape (`tm-escape`)
 // instead of hiding the workspace.
@@ -17,8 +22,9 @@ import {
   AtSign, Bot, Check, ChevronDown, ChevronRight, CircleStop, Clock, CopyPlus, FileCode, FilePen, Hand, Layers, ListChecks, Lock, MessageCircleQuestion, Paperclip, PencilLine, Plug, Plus, ScanText, Send, ShieldCheck, ShieldOff, Slash, Sparkles, Square, TextQuote, Undo2, X, Zap
 } from 'lucide-react'
 import type { OutputStyleInfo } from '../shared/outputStyles.mjs'
-import { MAX_DESCRIPTION, MAX_LABEL, defaultFor, labelFor, withDefault, withLabel, type ChatPrefs, type PrefKind } from '../shared/chatPrefs.mjs'
-import { savePrefs, useChatPrefs } from './prefs'
+import { MAX_DESCRIPTION, MAX_LABEL, composerOn, defaultFor, keptWords, labelFor, withComposer, withDefault, withKept, withLabel, type ChatPrefs, type ComposerSwitch, type PrefKind } from '../shared/chatPrefs.mjs'
+import { BOUNDARY, correctable, fixFor, lexicon, wordBefore, type SpellAnswer } from '../shared/autocorrect.mjs'
+import { readPrefs, savePrefs, useChatPrefs } from './prefs'
 import { readDraft, writeDraft } from './drafts'
 import type { Draft, DraftAttachment } from '../shared/drafts.mjs'
 
@@ -85,6 +91,10 @@ interface Props {
   openFile?: (path: string) => void
   /** Claude: write an editable copy of a built-in output style; the path written. Without it *Duplicate to edit* is not offered. */
   onDuplicateStyle?: (name: string) => Promise<string>
+  /** The auto-correct dictionary's answer for a word (claude-watch: Hunspell en_US in main). Without it nothing is corrected. */
+  spell?: (word: string) => Promise<SpellAnswer>
+  /** Auto-complete (Shift+Tab): the continuation of the draft, or '' when the model had none. Without it Shift+Tab does nothing. */
+  onComplete?: (draft: string) => Promise<string>
 }
 
 /** How long typing rests before the draft is written. */
@@ -99,7 +109,7 @@ function mentionAt(text: string, caret: number): { start: number; query: string 
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(props, ref) {
-  const { provider, transcript, chatId, options, onRefreshOptions, onSend, onInterrupt, onConfigure, onNotice, listFiles, onSideQuestion, onMcp, loadContext, onCompact, onStopTask, onPreview, onPlanMode, agents, onAgents, agentsOpen, onShowRow, draftKey, openFile, onDuplicateStyle } = props
+  const { provider, transcript, chatId, options, onRefreshOptions, onSend, onInterrupt, onConfigure, onNotice, listFiles, onSideQuestion, onMcp, loadContext, onCompact, onStopTask, onPreview, onPlanMode, agents, onAgents, agentsOpen, onShowRow, draftKey, openFile, onDuplicateStyle, spell, onComplete } = props
   // The draft this pane left unsent, read once when it mounts.
   const restored = useRef<Draft | null | undefined>(undefined)
   if (restored.current === undefined) restored.current = readDraft(draftKey)
@@ -151,6 +161,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
   const [files, setFiles] = useState<string[] | null>(null)
   const [recall, setRecall] = useState(-1)
   const [focused, setFocused] = useState(false)
+  /** Auto-complete's continuation, shown after the text until Tab takes it; and whether one is on its way. */
+  const [ghost, setGhost] = useState<string | null>(null)
+  const [completing, setCompleting] = useState(false)
   const area = useRef<HTMLTextAreaElement | null>(null)
   const fileInput = useRef<HTMLInputElement | null>(null)
   const inputBox = useRef<HTMLDivElement | null>(null)
@@ -215,9 +228,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
     const el = area.current
     if (!el) return
     el.style.height = ''
-    el.style.height = `${Math.min(el.scrollHeight, 220)}px`
+    // A ghost continuation may need lines the text alone does not.
+    const under = backdrop.current?.querySelector('.chat-ghost') ? backdrop.current.scrollHeight : 0
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, under), 220)}px`
   }, [])
-  useEffect(fit, [text, fit])
+  useEffect(fit, [text, ghost, fit])
 
   // The caret goes where it is asked once the text set with it is in the box: a layout effect right after that
   // commit, not the next frame, which a hidden or busy window may not draw for a while (and the button that asked,
@@ -348,9 +363,23 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
     })
   }
 
-  const send = () => {
+  const sending = useRef(false)
+  const send = async () => {
+    if (sending.current) return
+    // The last word has had no boundary typed after it: it gets its correction now, like the others did.
+    let typed = text
+    if (autoCorrect && spell) {
+      sending.current = true
+      try {
+        typed = await correctTail(text)
+      } catch {
+        /* the dictionary failed: send as typed */
+      } finally {
+        sending.current = false
+      }
+    }
     // Waiting cards go with it: quotes first as `> ` blocks (as Quote used to write them into the box), then pastes.
-    const body = composeMessage(cards, text)
+    const body = composeMessage(cards, typed)
     if (!chatId || (!body && attachments.length === 0)) return
     onSend(body, attachments)
     writeDraft(draftKey, null)
@@ -392,14 +421,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
 
   const modes = options?.modes ?? []
   const [confirming, setConfirming] = useState<ModeOption | null>(null)
-  // Shift+Tab never lands on a mode that asks for confirmation (Codex's Full access) or on Custom, which cannot be picked.
-  const cycleMode = () => {
-    const ring = modes.filter((m) => !m.confirm && m.id !== 'custom')
-    if (!ring.length) return
-    const i = ring.findIndex((m) => m.id === transcript?.permissionMode)
-    const next = ring[(i + 1) % ring.length]
-    if (next) onConfigure({ permissionMode: next.id })
-  }
   const pickMode = (m: ModeOption) => {
     if (m.id === 'custom') return setMenu(null)
     if (m.confirm && m.id !== transcript?.permissionMode) return setConfirming(m)
@@ -415,6 +436,105 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
   const modelChoices = latestModels(options?.models ?? [], shownModel?.id)
   const chipEfforts: (string | null)[] = shownModel?.efforts?.length ? [null, ...shownModel.efforts] : []
   const modeRow = modes.find((m) => m.id === transcript?.permissionMode)
+
+  // ---- auto-correct (the user's ask, 2026-10-21) ------------------------------------------------------------
+  const autoCorrect = composerOn(prefs, 'autoCorrect')
+  const autoComplete = composerOn(prefs, 'autoComplete')
+  // Words never corrected: the conversation's own (a name, a term it already uses) and those the user took back.
+  const known = useMemo(() => {
+    const items = transcript?.items ?? []
+    const texts = items.slice(-80).map((x) => ('text' in x && typeof x.text === 'string' ? x.text : ''))
+    return new Set([...keptWords(prefs), ...lexicon(texts)])
+  }, [transcript?.items, prefs.composer?.keep])
+  /** The last correction made, while Backspace can still take it back: the word as typed, the fix, and where the caret sat after the boundary. */
+  const lastFix = useRef<{ start: number; from: string; to: string; caret: number } | null>(null)
+  /**
+   * A boundary was typed at `caret`: ask about the word before it, and when a fix comes back and the text has not
+   * moved on there, put it in through the box's own editing (so Ctrl+Z takes it out) and keep the caret where it was.
+   */
+  const correctAt = (value: string, caret: number) => {
+    if (!spell) return
+    const w = wordBefore(value, caret)
+    if (!w || !correctable(w.word, known)) return
+    const boundary = value[w.end]
+    void spell(w.word).then((answer) => {
+      const el = area.current
+      const fix = fixFor(w.word, answer)
+      if (!el || !fix || el.value.slice(w.start, w.end) !== w.word || el.value[w.end] !== boundary) return
+      const at = el.selectionStart
+      const delta = fix.length - w.word.length
+      const back = at >= w.end ? at + delta : at
+      if (document.activeElement === el) {
+        el.setSelectionRange(w.start, w.end)
+        if (!document.execCommand('insertText', false, fix)) setText(el.value.slice(0, w.start) + fix + el.value.slice(w.end))
+        el.setSelectionRange(back, back)
+      } else {
+        setText(el.value.slice(0, w.start) + fix + el.value.slice(w.end))
+      }
+      setCaret(back)
+      lastFix.current = { start: w.start, from: w.word, to: fix, caret: w.end + delta + 1 }
+    }, () => {})
+  }
+  /** The text with its last word corrected (for send): a boundary is imagined after it. */
+  const correctTail = async (value: string): Promise<string> => {
+    if (!spell) return value
+    const w = wordBefore(`${value} `, value.length + 1)
+    if (!w || !correctable(w.word, known)) return value
+    const fix = fixFor(w.word, await spell(w.word))
+    return fix ? value.slice(0, w.start) + fix : value
+  }
+  /** Backspace right after a correction: the word comes back as typed, and is never corrected again. */
+  const takeBack = (el: HTMLTextAreaElement): boolean => {
+    const f = lastFix.current
+    lastFix.current = null
+    if (!f || el.selectionStart !== f.caret || el.selectionEnd !== f.caret || el.value.slice(f.start, f.start + f.to.length) !== f.to) return false
+    el.setSelectionRange(f.start, f.start + f.to.length)
+    if (!document.execCommand('insertText', false, f.from)) setText(el.value.slice(0, f.start) + f.from + el.value.slice(f.start + f.to.length))
+    const back = f.caret - (f.to.length - f.from.length)
+    el.setSelectionRange(back, back)
+    setCaret(back)
+    savePrefs(withKept(readPrefs(), f.from))
+    return true
+  }
+
+  // ---- auto-complete (the user's ask, 2026-10-21): Shift+Tab asks, Tab takes, nothing ever runs on its own ----
+  const completeSeq = useRef(0)
+  const dismissGhost = () => {
+    completeSeq.current++
+    setCompleting(false)
+    setGhost(null)
+  }
+  // The text moved (typed, recalled, a card shown): a ghost no longer fits and an answer on its way is stale.
+  useEffect(dismissGhost, [text])
+  const requestCompletion = () => {
+    if (!onComplete || !text.trim() || completing) return
+    const draft = text
+    const seq = ++completeSeq.current
+    setCompleting(true)
+    onComplete(draft).then((out) => {
+      if (seq !== completeSeq.current) return
+      setCompleting(false)
+      if (area.current && area.current.value !== draft) return
+      if (out) setGhost(out)
+      else onNotice('No continuation came back')
+    }, (err: Error) => {
+      if (seq !== completeSeq.current) return
+      setCompleting(false)
+      onNotice(err.message)
+    })
+  }
+  /** The ghost goes in at the end through the box's own editing, so Ctrl+Z takes it out again. */
+  const acceptGhost = () => {
+    const el = area.current
+    const g = ghost
+    if (!el || !g) return
+    setGhost(null)
+    const end = el.value.length
+    el.focus()
+    el.setSelectionRange(end, end)
+    if (!document.execCommand('insertText', false, g)) setText(el.value + g)
+    placeCaret(end + g.length)
+  }
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     const pickFrom = (len: number, set: (f: (i: number) => number) => void) => {
@@ -460,10 +580,19 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
         }
       }
     }
+    if (e.key === 'Backspace' && !e.ctrlKey && !e.altKey && !e.metaKey && lastFix.current) {
+      if (takeBack(e.currentTarget)) {
+        e.preventDefault()
+        return
+      }
+    }
     if (e.key === 'Escape') {
       // In claude-watch the host already routed this Escape to whatever owns it (`tm-escape`).
       if (e.defaultPrevented) return
-      if (mentionOpen) {
+      if (ghost || completing) {
+        e.preventDefault()
+        dismissGhost()
+      } else if (mentionOpen) {
         e.preventDefault()
         setMentionDismissed(true)
       } else if (argsOpen) {
@@ -482,16 +611,24 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
       }
       return
     }
-    if (e.key === 'Tab' && !e.shiftKey && suggestion) {
-      e.preventDefault()
-      setText(suggestion)
-      placeCaret(suggestion.length)
-      return
-    }
-    if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.altKey) {
-      e.preventDefault()
-      cycleMode()
-      return
+    if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      if (ghost) {
+        e.preventDefault()
+        acceptGhost()
+        return
+      }
+      if (e.shiftKey) {
+        // Shift+Tab asks for a continuation (0.4.72, the user's call: it cycled the modes until then).
+        e.preventDefault()
+        if (autoComplete) requestCompletion()
+        return
+      }
+      if (suggestion) {
+        e.preventDefault()
+        setText(suggestion)
+        placeCaret(suggestion.length)
+        return
+      }
     }
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.altKey && prompts.length) {
       const el = e.currentTarget
@@ -650,7 +787,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
             </div>
           ) : (
             <>
-              <div className="chat-pop-title" title={provider === 'codex' ? 'How should Codex actions be approved?' : undefined}>{provider === 'codex' ? 'Approvals' : 'Mode'} <kbd className="chat-kbd">Shift+Tab</kbd></div>
+              <div className="chat-pop-title" title={provider === 'codex' ? 'How should Codex actions be approved?' : undefined}>{provider === 'codex' ? 'Approvals' : 'Mode'}</div>
               {options === null ? <div className="chat-pop-empty">Loading…</div> : modes.map((m) => (
                 <OptionRow
                   key={m.id} provider={provider} prefs={prefs} kind="mode" id={m.id} row={m} on={m.id === transcript?.permissionMode}
@@ -716,10 +853,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
           </div>
         ) : null}
         <div className="chat-textwrap">
-          {leadCommand ? (
-            // The command's chip: a layer under the text with the same metrics, drawing only the box behind `/name`.
-            <div ref={backdrop} className={`chat-cmd-backdrop ${suggestion ? 'is-suggesting' : ''}`} aria-hidden data-testid="chat-cmd-chip">
-              <span className="chat-cmd-mark">/{leadCommand.name}</span>{text.slice(leadCommand.name.length + 1)}
+          {leadCommand || ghost || completing ? (
+            // The command's chip and the ghost: a layer under the text with the same metrics, drawing only the box
+            // behind `/name` and the continuation after the text.
+            <div ref={backdrop} className={`chat-cmd-backdrop ${suggestion || ghost ? 'is-suggesting' : ''}`} aria-hidden data-testid={leadCommand ? 'chat-cmd-chip' : 'chat-ghost-layer'}>
+              {leadCommand ? <><span className="chat-cmd-mark">/{leadCommand.name}</span>{text.slice(leadCommand.name.length + 1)}</> : text}
+              {ghost ? <span className="chat-ghost" data-testid="chat-ghost">{ghost}</span> : completing ? <span className="chat-ghost is-waiting" data-testid="chat-ghost-wait">…</span> : null}
             </div>
           ) : null}
           <textarea
@@ -727,11 +866,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
             rows={1}
             value={text}
             placeholder={placeholder}
-            className={suggestion ? 'is-suggesting' : undefined}
+            className={suggestion || ghost ? 'is-suggesting' : undefined}
             onChange={(e) => {
+              const ev = e.nativeEvent as InputEvent
               setText(e.target.value)
               setCaret(e.target.selectionStart ?? e.target.value.length)
-              followHistory((e.nativeEvent as InputEvent).inputType, e.target.value)
+              followHistory(ev.inputType, e.target.value)
+              lastFix.current = null
+              // A word boundary typed: the word before it is checked (a fix's own insertion is longer than one character).
+              if (autoCorrect && ((ev.inputType === 'insertText' && ev.data?.length === 1 && BOUNDARY.test(ev.data)) || ev.inputType === 'insertLineBreak')) {
+                correctAt(e.target.value, e.target.selectionStart ?? e.target.value.length)
+              }
             }}
             onScroll={(e) => { if (backdrop.current) backdrop.current.scrollTop = e.currentTarget.scrollTop }}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
@@ -742,7 +887,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
             disabled={!chatId}
             data-testid="chat-composer"
           />
-          {suggestion ? <kbd className="chat-kbd chat-suggest-key" title="Tab takes the suggestion">Tab</kbd> : null}
+          {suggestion || ghost ? <kbd className="chat-kbd chat-suggest-key" title={ghost ? 'Tab takes the continuation' : 'Tab takes the suggestion'}>Tab</kbd> : null}
         </div>
         <div className="chat-input-foot">
           <AddMenu
@@ -787,9 +932,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
               {live.some((c) => c.kind === 'agent') ? <Bot className="chat-ic" aria-hidden /> : <Layers className="chat-ic" aria-hidden />}<span>{liveLabel}</span>
             </button>
           ) : null}
-          {transcript ? <ContextPie transcript={transcript} onCompact={!running && chatId ? onCompact : undefined} loadContext={loadContext} /> : null}
+          {transcript ? <ContextPie transcript={transcript} onCompact={!running && chatId ? onCompact : undefined} loadContext={loadContext} head={<ComposerSwitches prefs={prefs} />} /> : null}
           {transcript ? (
-            <button className={`chat-footchip is-fixed ${menu === 'mode' ? 'is-on' : ''}`} onClick={() => { setMenu((m) => (m === 'mode' ? null : 'mode')); onRefreshOptions() }} disabled={!chatId} title="Permission mode (Shift+Tab)" data-testid="chat-chip:mode">
+            <button className={`chat-footchip is-fixed ${menu === 'mode' ? 'is-on' : ''}`} onClick={() => { setMenu((m) => (m === 'mode' ? null : 'mode')); onRefreshOptions() }} disabled={!chatId} title="Permission mode" data-testid="chat-chip:mode">
               <ModeIcon id={transcript.permissionMode} />
               <StableText
                 value={transcript.permissionMode === 'custom' ? 'Custom' : modeRow ? named('mode', modeRow.id, modeRow) : modeLabel(transcript.permissionMode, options)}
@@ -1338,12 +1483,44 @@ export function useTicker(ms: number): number {
   return now
 }
 
+const COMPOSER_SWITCHES: { key: ComposerSwitch; label: string; hint: string }[] = [
+  { key: 'autoCorrect', label: 'Auto-correct', hint: 'A misspelled word is replaced by the most likely fix as you type. Backspace right after takes it back and keeps the word.' },
+  { key: 'autoComplete', label: 'Auto-complete', hint: 'Shift+Tab suggests how your message could go on; Tab takes it. It never runs on its own.' }
+]
+
+/**
+ * The Composer switches at the top of the context popover (the user's call, 2026-10-21): Auto-correct and
+ * Auto-complete, two columns in one row, kept in the chat prefs for every pane.
+ */
+function ComposerSwitches({ prefs }: { prefs: ChatPrefs }) {
+  return (
+    <div className="chat-composer-prefs" data-testid="chat-composer-prefs">
+      <div className="chat-pop-title">Composer</div>
+      <div className="chat-composer-switches">
+        {COMPOSER_SWITCHES.map((r) => {
+          const on = composerOn(prefs, r.key)
+          return (
+            <button
+              key={r.key} className="chat-pop-item is-row chat-composer-switch" role="switch" aria-checked={on} title={r.hint}
+              onClick={() => savePrefs(withComposer(readPrefs(), r.key, !on))} data-testid={`chat-composer-switch:${r.key}`}
+            >
+              <span className="chat-pop-label">{r.label}</span>
+              <span className={`chat-switch ${on ? 'is-on' : ''}`} aria-hidden><span className="chat-switch-thumb" /></span>
+            </button>
+          )
+        })}
+      </div>
+      <div className="chat-pop-sep" />
+    </div>
+  )
+}
+
 /**
  * The extension's context indicator: a pie of the window in use; a click
  * compacts. Hovering it opens the breakdown by category (Claude's
  * `getContextUsage`), with *Compact now* in it.
  */
-function ContextPie({ transcript, onCompact, loadContext }: { transcript: Transcript; onCompact?: () => void; loadContext?: () => Promise<ContextUsage> }) {
+function ContextPie({ transcript, onCompact, loadContext, head }: { transcript: Transcript; onCompact?: () => void; loadContext?: () => Promise<ContextUsage>; head?: ReactNode }) {
   const [open, setOpen] = useState(false)
   const [usage, setUsage] = useState<ContextUsage | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -1394,6 +1571,7 @@ function ContextPie({ transcript, onCompact, loadContext }: { transcript: Transc
       </button>
       {open ? (
         <div className="chat-pop is-context" role="dialog" aria-label="Context usage" onMouseEnter={clear} onMouseLeave={leave}>
+          {head}
           <ContextBreakdown usage={usage} error={error} cwd={transcript.cwd} onCompact={onCompact ? () => { setOpen(false); onCompact() } : undefined} />
         </div>
       ) : null}

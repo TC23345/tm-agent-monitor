@@ -1,14 +1,19 @@
 // The user's own names and defaults for the composer's menus (the user's call, 2026-10-20): a right-click on a
 // model or a permission mode renames it (title and description) where it is shown, or makes it the one a new
 // chat starts on. Per provider, kept in the renderer's localStorage (`CHAT_PREFS_KEY`), never sent to the CLI.
-// Pure and tested; ui/prefs.ts reads and writes the store.
+// Pure and tested; ui/prefs.ts reads and writes the store. Since 0.4.72 the composer's own switches live here
+// too (the user's ask, 2026-10-21): auto-correct and auto-complete, on unless switched off, and the words the
+// user took an auto-correction back from, which are never corrected again.
+import { sanitizeKeep } from './autocorrect.mjs'
 
 /** @typedef {'model' | 'mode'} PrefKind */
+/** @typedef {'autoCorrect' | 'autoComplete'} ComposerSwitch */
 /** @typedef {{ label?: string, description?: string }} LabelOverride */
 /**
  * @typedef {{
  *   labels: Record<string, Record<PrefKind, Record<string, LabelOverride>>>,
- *   defaults: Record<string, { model?: string, mode?: string }>
+ *   defaults: Record<string, { model?: string, mode?: string }>,
+ *   composer: { autoCorrect?: boolean, autoComplete?: boolean, keep?: string[] }
  * }} ChatPrefs
  */
 
@@ -17,11 +22,12 @@ export const MAX_LABEL = 60
 export const MAX_DESCRIPTION = 160
 const MAX_ENTRIES = 64
 const KINDS = ['model', 'mode']
+const SWITCHES = ['autoCorrect', 'autoComplete']
 const ID = /^[\w.:\[\]-]{1,128}$/
 
 /** @returns {ChatPrefs} */
 export function emptyPrefs() {
-  return { labels: {}, defaults: {} }
+  return { labels: {}, defaults: {}, composer: {} }
 }
 
 function cleanText(value, max) {
@@ -55,6 +61,10 @@ export function sanitizePrefs(raw) {
     for (const kind of KINDS) if (typeof d[kind] === 'string' && ID.test(d[kind])) entry[kind] = d[kind]
     if (Object.keys(entry).length) out.defaults[provider] = entry
   }
+  const c = raw.composer && typeof raw.composer === 'object' ? raw.composer : {}
+  for (const key of SWITCHES) if (typeof c[key] === 'boolean') out.composer[key] = c[key]
+  const keep = sanitizeKeep(c.keep)
+  if (keep.length) out.composer.keep = keep
   return out
 }
 
@@ -114,4 +124,26 @@ export function withDefault(prefs, provider, kind, id) {
 /** The default a new chat of this provider starts on, if any. @param {ChatPrefs} prefs */
 export function defaultFor(prefs, provider, kind) {
   return prefs.defaults[provider]?.[kind] ?? null
+}
+
+/** Whether a composer switch is on: on unless the user switched it off. @param {ChatPrefs} prefs @param {ComposerSwitch} key */
+export function composerOn(prefs, key) {
+  return prefs.composer?.[key] !== false
+}
+
+/** Prefs with a composer switch set. @param {ChatPrefs} prefs @param {ComposerSwitch} key @returns {ChatPrefs} */
+export function withComposer(prefs, key, on) {
+  if (!SWITCHES.includes(key)) return prefs
+  return { ...prefs, composer: { ...prefs.composer, [key]: on === true } }
+}
+
+/** The words the user took an auto-correction back from (lowercase). @param {ChatPrefs} prefs */
+export function keptWords(prefs) {
+  return prefs.composer?.keep ?? []
+}
+
+/** Prefs with a word the user took an auto-correction back from: never corrected again (the newest MAX_KEEP kept). @param {ChatPrefs} prefs @returns {ChatPrefs} */
+export function withKept(prefs, word) {
+  const keep = sanitizeKeep([...keptWords(prefs).filter((w) => w !== String(word).toLowerCase()), word])
+  return { ...prefs, composer: { ...prefs.composer, keep } }
 }

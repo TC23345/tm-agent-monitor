@@ -30,6 +30,7 @@ import { FindBar, ImagePreview, JumpToLatest, McpPanel, PinnedPrompt, RewindCard
 import { MarkupViewer, type ImageEdit } from './markup'
 import { readPrefs } from './prefs'
 import { defaultFor } from '../shared/chatPrefs.mjs'
+import type { SpellAnswer } from '../shared/autocorrect.mjs'
 import { AgentsPanel } from './agents'
 import { CODEX_INIT_PROMPT, cardSteps, stepText, stepTitle, transcriptMarkdown, type DialogAction } from '../shared/present.mjs'
 import { agentCards } from '../shared/agents.mjs'
@@ -89,6 +90,8 @@ interface Props {
   openUrl?: (url: string) => void
   /** Where a step's dot menu can *Save* the step (claude-watch: the clipboard history's groups); without it the menu only copies. */
   stepStore?: StepStore
+  /** The composer's auto-correct dictionary (claude-watch: Hunspell en_US in main); without it nothing is corrected. */
+  spell?: (word: string) => Promise<SpellAnswer>
 }
 
 const PROVIDER_LABEL: Record<Provider, string> = { claude: 'Claude Code', codex: 'Codex' }
@@ -126,7 +129,7 @@ function edgeChar(range: Range, last: boolean): DOMRect | null {
 }
 
 export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(props, ref) {
-  const { bridge, config, onConfig, renderText, copyText, openFile, listFiles, saveText, pathForFile, onFocus, onAttention, draftKey, openUrl, stepStore } = props
+  const { bridge, config, onConfig, renderText, copyText, openFile, listFiles, saveText, pathForFile, onFocus, onAttention, draftKey, openUrl, stepStore, spell } = props
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [chatId, setChatId] = useState<string | null>(config.chatId ?? null)
   const [options, setOptions] = useState<ChatOptions | null>(null)
@@ -770,6 +773,8 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
         agentsOpen={agentsShown}
         onShowRow={showRow}
         draftKey={draftKey}
+        spell={spell}
+        onComplete={chatId && bridge.complete ? (draft: string) => bridge.complete!(chatId, draft) : undefined}
       />
       {dragging ? <div className="chat-drop" data-testid="chat-drop"><span>Drop to attach as context</span></div> : null}
       {preview?.edit ? (

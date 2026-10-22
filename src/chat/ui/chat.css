@@ -485,7 +485,7 @@
 
 /* ---- the context breakdown, over the pie ---- */
 .chat-ctx-wrap { position: relative; display: inline-flex; }
-.chat-pop.is-context { left: auto; right: -40px; bottom: calc(100% + 8px); width: 300px; }
+.chat-pop.is-context { left: auto; right: -40px; bottom: calc(100% + 8px); width: 320px; }
 .chat-ctx { display: flex; flex-direction: column; gap: 6px; padding: 2px 4px 4px; }
 .chat-ctx .chat-pop-title { padding: 4px 4px 0; }
 .chat-ctx-bar { display: flex; height: 8px; margin: 0 4px; border-radius: 4px; overflow: hidden; background: rgba(127, 127, 127, 0.22); }
@@ -711,6 +711,7 @@
   .chat-dot, .chat-row.tone-run::before, .chat-row.is-streaming .chat-text > :last-child::after, .chat-ic.is-spinning, .chat-agent-state.is-running { animation: none; }
   .chat-atom-spin { animation: none; transform: rotate(60deg); }
   .chat-switch-thumb { transition: none; }
+  .chat-ghost.is-waiting { animation: none; }
   .chat-table-pending th { animation: none; background: none; color: var(--muted, #888); }
   .chat-peek, .chat-preview { animation: none; }
   .chat-text.is-revealing .md-table tbody tr { animation: none; }
@@ -757,3 +758,11 @@
 .chat-pop-title.is-sub { padding-top: 8px; }
 .chat-pop-section:first-child .chat-pop-title.is-sub { padding-top: 4px; }
 .chat-pop.is-args .chat-pop-title .chat-pop-label { text-transform: none; letter-spacing: 0; color: var(--chat-ink); }
+/* Auto-complete (0.4.72): the continuation as ghost text after the draft in the backdrop layer, until Tab takes it; three dots while one is on its way. */
+.chat-ghost { color: var(--faint, var(--muted, #888)); }
+.chat-ghost.is-waiting { animation: chat-ghost-wait 1s ease-in-out infinite; }
+@keyframes chat-ghost-wait { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+/* The Composer switches at the top of the context popover: two columns in one row. */
+.chat-composer-switches { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.chat-composer-switch { padding: 4px 4px 4px 8px; gap: 8px; min-width: 0; }
+.chat-composer-switch .chat-pop-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

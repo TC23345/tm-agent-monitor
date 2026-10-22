@@ -11,6 +11,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ClaudeSession, listClaudeSessions, loadClaudeTranscript } from '../claude/session'
+import { completeDraft } from '../claude/complete'
 import type { AdoptProcess } from '../shared/processTree.mjs'
 import { CodexAppServer, CodexThread, type CodexServerMode } from '../codex/appServer'
 import {
@@ -279,6 +280,20 @@ export class ChatManager extends EventEmitter implements ChatBridge {
   }
 
   /** Claude: an editable copy of a built-in output style, written to the user's style folder; its path. */
+  /**
+   * The composer's auto-complete (Shift+Tab): a one-shot Haiku call beside the session, for a Claude or a Codex
+   * pane alike, with the conversation's last reply as context. The continuation, or '' when there was none.
+   */
+  async complete(id: string, draft: string): Promise<string> {
+    const l = this.must(id)
+    const t = (l.claude ?? l.codex)!.transcript
+    const last = [...t.items].reverse().find((x) => x.kind === 'assistant' && 'text' in x && x.text) as { text: string } | undefined
+    return completeDraft({
+      cwd: l.cwd, draft, context: last?.text ?? null, claudePath: this.config.claudePath,
+      env: this.config.envFor?.(id, l.provider), adoptProcess: this.config.adoptProcess, log: this.config.log
+    })
+  }
+
   async duplicateStyle(id: string, name: string): Promise<string> {
     const l = this.must(id)
     if (!l.claude) throw new Error('Codex has no output styles')

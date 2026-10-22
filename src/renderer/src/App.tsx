@@ -1053,6 +1053,7 @@ export function App() {
             pathForFile={(file) => window.watch.pathForFile(file) || null}
             onFocus={() => { if (focusedPane !== pane.id) setFocusedPane(pane.id) }}
             stepStore={chatStepStore}
+            spell={window.watch.spellWord}
           />
         )
       case 'terminal':

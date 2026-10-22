@@ -17,6 +17,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { statSync } from 'node:fs'
 import { Daemon } from './daemon.js'
+import { spellWord } from './spell.js'
 import { TerminalManager } from './terminals.js'
 import { fetchApiUsage } from './usage.js'
 import { LocalUsageView, type LocalUsageSnapshot } from './localUsageCore.mjs'
@@ -2249,6 +2250,10 @@ function registerIpc(): void {
   ipcMain.handle('chat:undo-turn', async (_e, id: unknown, turnItemId: unknown, reapply: unknown) => (validTermId(id) && validItemId(turnItemId) && (reapply === undefined || typeof reapply === 'boolean') ? settle(() => chats.undoTurn(id, turnItemId, reapply === true)) : null))
   ipcMain.handle('chat:side-question', async (_e, id: unknown, question: unknown) => (validTermId(id) && typeof question === 'string' && question.trim() && question.length <= 20_000 ? settle(() => chats.sideQuestion(id, question)) : null))
   ipcMain.handle('chat:context', async (_e, id: unknown) => (validTermId(id) ? settle(() => chats.contextUsage(id)) : null))
+  // The composer's auto-complete (Shift+Tab, 0.4.72): a one-shot Haiku call beside the session; the draft is bounded like a side question.
+  ipcMain.handle('chat:complete', async (_e, id: unknown, draft: unknown) => (validTermId(id) && typeof draft === 'string' && draft.trim() && draft.length <= 20_000 ? settle(() => chats.complete(id, draft)) : null))
+  // The composer's auto-correct (0.4.72): one plain word in, whether the dictionary knows it and its closest suggestions out.
+  ipcMain.handle('chat:spell', (_e, word: unknown) => (typeof word === 'string' && /^[A-Za-z']{1,40}$/.test(word) ? spellWord(word) : null))
   ipcMain.handle('chat:mcp', async (_e, id: unknown, req: unknown) => {
     if (!validTermId(id) || typeof req !== 'object' || req === null) return null
     const r = req as Record<string, unknown>
