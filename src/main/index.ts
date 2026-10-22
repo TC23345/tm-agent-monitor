@@ -213,6 +213,9 @@ const terminals = new TerminalManager(
 const chats = new ChatManager({
   envFor: (id) => ({ TM_AGENT_MONITOR_ENDPOINT_FILE: config.endpointFile, TM_TERMINAL_ID: id }),
   scratchDir: app.getPath('temp'),
+  // The user's call (2026-10-21, 0.4.70): every Claude chat starts with the SDK's allowDangerouslySkipPermissions,
+  // so the menu's *Bypass* (bypassPermissions, confirmed there) can be picked. Codex's *Full* needs no start flag.
+  allowBypass: true,
   log: (line) => console.log(`[chat] ${line}`),
   // Each CLI in a job of its own (0.4.68): closing the chat ends every MCP server it started, even one whose
   // npx/cmd parent had already exited, which the tree kill cannot find; and the app dying ends them too.
