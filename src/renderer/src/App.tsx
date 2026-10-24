@@ -804,8 +804,20 @@ export function App() {
       case 'clipboard':
         placePane(newPane(tool), replaceId)
         return
+      case 'open-project':
+        // The Projects folder's picker; in a start pane the project takes that pane's slot.
+        void window.watch.pickFolder('projects').then((dir) => {
+          if (!dir) return
+          openFolder(dir, replaceId)
+          if (openInCursor) window.watch.openCursor(dir)
+        })
+        return
       case 'project':
         setNewProjectOpen(true)
+        return
+      case 'more':
+        // Until 0.4.78 this tile opened the folder picker by mistake; it is the palette, as its Ctrl+K says.
+        setPalette(true)
     }
   }
   /** A badge: the launch target; by left-click also the head's file tree for that project (the same badge again: the stream). */

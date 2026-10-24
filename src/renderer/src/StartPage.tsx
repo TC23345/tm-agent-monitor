@@ -6,7 +6,7 @@ import { tid } from './testid'
 import { useNow } from './useNow'
 
 /** What a tool tile starts; App places the pane (in a start pane's own slot, or a new one from the empty grid). */
-export type StartTool = 'claude' | 'codex' | 'terminal' | 'folder' | 'notes' | 'clipboard' | 'project'
+export type StartTool = 'claude' | 'codex' | 'terminal' | 'folder' | 'open-project' | 'notes' | 'clipboard' | 'project' | 'more'
 
 interface Props {
   /** The folder the tools start in (the launch target), when there is one. */
@@ -43,21 +43,32 @@ export function StartPage({ context, suggested, folders, paneFull, onTool, onOpe
   )
   return (
     <div className="startpage" data-testid="start-page">
+      {/* The tools in three groups (0.4.78, the user's call): what to start, where to work, what else is here. */}
       <div className="start-section">
         <div className="start-title">Tools</div>
-        <div className="start-tools">
-          {tile('claude', <ProviderBadge provider="claude" />, 'New TaylorMade CC', `A Claude Code chat ${where}`, undefined, paneFull)}
-          {tile('codex', <ProviderBadge provider="codex" />, 'New TaylorMade Codex', `A Codex chat ${where}`, undefined, paneFull)}
-          {tile('terminal', <Terminal strokeWidth={2} />, 'Terminal', `A PowerShell terminal ${where}`, 'Ctrl+Shift+`')}
-          {tile('folder', <FolderOpen strokeWidth={2} />, 'Open folder…', 'Pick any folder: its files in a pane, with a chat or a terminal one click away', undefined, paneFull)}
-          {tile('notes', <NotebookPen strokeWidth={2} />, 'Notes', 'The shared notepad', undefined, paneFull)}
-          {tile('clipboard', <Clipboard strokeWidth={2} />, 'Clipboard', 'Everything you copied', undefined, paneFull)}
-          {tile('project', <FolderPlus strokeWidth={2} />, 'New project…', 'Create a project folder and open it in Cursor')}
-          <button type="button" className="start-tool is-more" onClick={() => onTool('folder')} title="Every other pane is in the status bar's Panes menu; Ctrl+K finds every command" data-testid="start-tool:more">
-            <span className="start-tool-ic"><LayoutGrid strokeWidth={2} /></span>
-            <span className="start-tool-label">More tools…</span>
-            <kbd className="start-keys">Ctrl+K</kbd>
-          </button>
+        <div className="start-groups">
+          <div className="start-group" data-testid="start-group:agents">
+            <div className="start-group-title">Start an agent</div>
+            {tile('claude', <ProviderBadge provider="claude" />, 'TaylorMade CC', `A Claude Code chat ${where}`, undefined, paneFull)}
+            {tile('codex', <ProviderBadge provider="codex" />, 'TaylorMade Codex', `A Codex chat ${where}`, undefined, paneFull)}
+            {tile('terminal', <Terminal strokeWidth={2} />, 'Terminal', `A PowerShell terminal ${where}`, 'Ctrl+Shift+`')}
+          </div>
+          <div className="start-group" data-testid="start-group:projects">
+            <div className="start-group-title">Projects</div>
+            {tile('open-project', <FolderOpen strokeWidth={2} />, 'Open project…', 'Browse your Projects folder: its files in a pane, with an agent or a terminal one click away', undefined, paneFull)}
+            {tile('project', <FolderPlus strokeWidth={2} />, 'New project…', 'Create a project folder and open it here')}
+            {tile('folder', <Folder strokeWidth={2} />, 'Open folder…', 'Any folder on the machine, in a pane', undefined, paneFull)}
+          </div>
+          <div className="start-group" data-testid="start-group:workspace">
+            <div className="start-group-title">Workspace</div>
+            {tile('notes', <NotebookPen strokeWidth={2} />, 'Notes', 'The shared notepad', undefined, paneFull)}
+            {tile('clipboard', <Clipboard strokeWidth={2} />, 'Clipboard', 'Everything you copied', undefined, paneFull)}
+            <button type="button" className="start-tool is-more" onClick={() => onTool('more')} title="Every command, pane and session — the palette (the status bar's Panes menu lists the panes)" data-testid="start-tool:more">
+              <span className="start-tool-ic"><LayoutGrid strokeWidth={2} /></span>
+              <span className="start-tool-label">More tools…</span>
+              <kbd className="start-keys">Ctrl+K</kbd>
+            </button>
+          </div>
         </div>
       </div>
       {suggested.length > 0 && (
