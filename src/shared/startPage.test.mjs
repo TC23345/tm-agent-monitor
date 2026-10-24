@@ -83,3 +83,14 @@ test('streamedLines types a line at a time with a pause between, and ends done',
   assert.deepEqual(streamedLines(lines, 150, 10, 100), { shown: ['abc', 'de'], current: -1, done: true })
   assert.deepEqual(streamedLines(lines, -5, 10, 100).shown, [''])
 })
+
+test('suggestProjects puts the active projects first, fills from the recents, folds duplicates, stops at ten', async () => {
+  const { suggestProjects, MAX_SUGGESTED } = await import('./startPage.mjs')
+  const active = [{ cwd: 'C:/p/a', label: 'a' }, { cwd: 'C:/p/b', label: 'b' }]
+  const folders = [{ cwd: 'c:/P/A/', label: 'a', at: 3 }, { cwd: 'C:/p/c', label: 'c', at: 2 }]
+  assert.deepEqual(suggestProjects(active, folders).map((p) => `${p.label}:${p.active}`), ['a:true', 'b:true', 'c:false'])
+  const many = Array.from({ length: 15 }, (_, i) => ({ cwd: `C:/p/f${i}`, label: `f${i}`, at: i }))
+  assert.equal(suggestProjects(active, many).length, MAX_SUGGESTED)
+  assert.equal(MAX_SUGGESTED, 10)
+  assert.deepEqual(suggestProjects([], []), [])
+})

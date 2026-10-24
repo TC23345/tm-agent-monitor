@@ -18,3 +18,5 @@ export function sanitizeFolders(raw: unknown): FolderEntry[]
 export function rememberFolder(list: FolderEntry[], cwd: string, at?: number, label?: string): FolderEntry[]
 export function forgetFolder(list: FolderEntry[], cwd: string): FolderEntry[]
 export function whenLabel(at: number, now?: number): string
+export const MAX_SUGGESTED: number
+export function suggestProjects(active: { cwd: string; label: string }[], folders: FolderEntry[], max?: number): { cwd: string; label: string; active: boolean }[]

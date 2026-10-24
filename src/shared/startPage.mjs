@@ -141,3 +141,29 @@ export function whenLabel(at, now = Date.now()) {
   const d = new Date(at)
   return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()]} ${d.getDate()}`
 }
+
+/** The start page shows ten suggested projects: two rows of five, or one scrolling row in a narrow pane (0.4.78). */
+export const MAX_SUGGESTED = 10
+
+/**
+ * The start page's Suggested tiles: the projects active lately first (the strip's own list, newest first), then the
+ * folders opened here (`tm.folders.v1`, newest first) to fill up to `max` — the strip forgets after four hours, so on
+ * its own it rarely had ten. One tile per folder, slash- and case-insensitive.
+ * @param {{ cwd: string, label: string }[]} active
+ * @param {FolderEntry[]} folders
+ * @returns {{ cwd: string, label: string, active: boolean }[]}
+ */
+export function suggestProjects(active, folders, max = MAX_SUGGESTED) {
+  const out = []
+  const seen = new Set()
+  const add = (cwd, label, live) => {
+    if (out.length >= max || typeof cwd !== 'string' || !cwd) return
+    const key = launchKey(cwd)
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push({ cwd, label: label || folderLabel(cwd), active: live })
+  }
+  for (const p of active ?? []) add(p?.cwd, p?.label, true)
+  for (const f of folders ?? []) add(f?.cwd, f?.label, false)
+  return out
+}

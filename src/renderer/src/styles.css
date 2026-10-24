@@ -794,7 +794,20 @@ kbd {
 .start-tool-ic svg { width: 15px; height: 15px; }
 .start-tool-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .start-keys { flex: 0 0 auto; padding: 1px 6px; border: 1px solid var(--hairline); border-radius: 4px; font: 10.5px var(--mono, monospace); color: var(--faint); }
-.start-suggested { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
+/* Up to ten (0.4.78): a narrow pane gets one row that scrolls sideways behind two arrows (each lit only while there
+   is more that way); from 600px the row becomes two equal rows of five and the arrows go. */
+.start-suggest-wrap { container-type: inline-size; position: relative; display: flex; align-items: center; gap: 4px; }
+.start-suggested { flex: 1 1 auto; min-width: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 120px; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
+.start-suggested::-webkit-scrollbar { display: none; }
+.start-suggested > .start-suggest { scroll-snap-align: start; }
+.start-suggest-arrow { flex: 0 0 auto; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid var(--hairline); border-radius: 50%; background: var(--elev); color: var(--muted); cursor: pointer; }
+.start-suggest-arrow svg { width: 14px; height: 14px; }
+.start-suggest-arrow:hover:not(:disabled) { color: var(--text); border-color: var(--muted); }
+.start-suggest-arrow:disabled { opacity: 0.3; cursor: default; }
+@container (min-width: 600px) {
+  .start-suggested { grid-auto-flow: row; grid-template-columns: repeat(5, minmax(0, 1fr)); grid-auto-columns: auto; overflow: visible; }
+  .start-suggest-arrow { display: none; }
+}
 .start-suggest { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; padding: 14px 8px 10px; border: 1px solid transparent; border-radius: var(--r-control); background: transparent; color: var(--text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
 .start-suggest:hover { background: var(--elev); border-color: var(--hairline); }
 .start-suggest-ic { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; background: var(--elev); color: var(--muted); }

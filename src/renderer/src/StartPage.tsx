@@ -1,6 +1,7 @@
-import { Clipboard, Code2, ExternalLink, Folder, FolderOpen, FolderPlus, LayoutGrid, NotebookPen, Terminal, X } from 'lucide-react'
+import { useLayoutEffect, useRef, useState } from 'react'
+import { ChevronLeft, ChevronRight, Clipboard, Code2, ExternalLink, Folder, FolderOpen, FolderPlus, LayoutGrid, NotebookPen, Terminal, X } from 'lucide-react'
 import { ProviderBadge } from './ProviderBadge'
-import { whenLabel, type FolderEntry } from '@shared/startPage.mjs'
+import { suggestProjects, whenLabel, type FolderEntry } from '@shared/startPage.mjs'
 import type { StripProject } from './ProjectStrip'
 import { tid } from './testid'
 import { useNow } from './useNow'
@@ -33,6 +34,25 @@ interface Props {
  */
 export function StartPage({ context, suggested, folders, paneFull, onTool, onOpenFolder, onStartIn, onForget }: Props) {
   const now = useNow()
+  const tiles = suggestProjects(suggested, folders)
+  // The narrow layout's arrows: each enabled only while there is more that way. The wide grid never overflows.
+  const rowRef = useRef<HTMLDivElement>(null)
+  const [edges, setEdges] = useState({ left: false, right: false })
+  const measure = () => {
+    const el = rowRef.current
+    if (!el) return
+    const next = { left: el.scrollLeft > 2, right: el.scrollLeft + el.clientWidth < el.scrollWidth - 2 }
+    setEdges((cur) => (cur.left === next.left && cur.right === next.right ? cur : next))
+  }
+  useLayoutEffect(() => {
+    measure()
+    const el = rowRef.current
+    if (!el) return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [tiles.length])
+  const scrollTiles = (dir: 1 | -1) => rowRef.current?.scrollBy({ left: dir * rowRef.current.clientWidth * 0.8, behavior: 'smooth' })
   const where = context.label ? `in ${context.label}` : 'in the home folder'
   const tile = (tool: StartTool, icon: React.ReactNode, label: string, hint: string, keys?: string, disabled = false) => (
     <button type="button" className="start-tool" onClick={() => onTool(tool)} title={hint} disabled={disabled} data-testid={tid('start-tool', tool)}>
@@ -71,16 +91,21 @@ export function StartPage({ context, suggested, folders, paneFull, onTool, onOpe
           </div>
         </div>
       </div>
-      {suggested.length > 0 && (
+      {tiles.length > 0 && (
         <div className="start-section">
           <div className="start-title">Suggested</div>
-          <div className="start-suggested">
-            {suggested.slice(0, 6).map((p) => (
-              <button key={p.cwd} type="button" className="start-suggest" onClick={() => onOpenFolder(p.cwd)} title={`${p.cwd}\nOpen its files; start a chat or a terminal from the pane's bar`} data-testid={tid('start-suggest', p.label)}>
-                <span className="start-suggest-ic"><Folder strokeWidth={1.75} /></span>
-                <span className="start-suggest-label">{p.label}</span>
-              </button>
-            ))}
+          {/* Ten (0.4.78, the user's call): two rows of five, or one row that scrolls behind arrows in a narrow pane. */}
+          <div className="start-suggest-wrap">
+            <button type="button" className="start-suggest-arrow is-left" onClick={() => scrollTiles(-1)} disabled={!edges.left} aria-label="Scroll the suggestions left" data-testid="start-suggest-left"><ChevronLeft strokeWidth={2} /></button>
+            <div className="start-suggested" ref={rowRef} onScroll={measure}>
+              {tiles.map((p) => (
+                <button key={p.cwd} type="button" className="start-suggest" onClick={() => onOpenFolder(p.cwd)} title={`${p.cwd}\n${p.active ? 'Active in the last four hours' : 'Opened here before'} — its files in a pane, with an agent or a terminal one click away`} data-testid={tid('start-suggest', p.label)}>
+                  <span className="start-suggest-ic"><Folder strokeWidth={1.75} /></span>
+                  <span className="start-suggest-label">{p.label}</span>
+                </button>
+              ))}
+            </div>
+            <button type="button" className="start-suggest-arrow is-right" onClick={() => scrollTiles(1)} disabled={!edges.right} aria-label="Scroll the suggestions right" data-testid="start-suggest-right"><ChevronRight strokeWidth={2} /></button>
           </div>
         </div>
       )}
