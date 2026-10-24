@@ -1,8 +1,18 @@
 import { useState } from 'react'
 import { X } from 'lucide-react'
 
-/** Prompt for a project name, create ~/Projects/<name>, and open it in Cursor. */
-export function NewProject({ onClose }: { onClose: () => void }) {
+/**
+ * Prompt for a project name and create ~/Projects/<name>. Since 0.4.78 it opens as a folder pane here (its files,
+ * and the red pill or the blue pill beside them), and in Cursor only while *Also open in Cursor* is on — the same
+ * remembered switch as the title bar's projects menu (the user's call).
+ */
+export function NewProject({ onClose, onCreated, openInCursor, onToggleCursor }: {
+  onClose: () => void
+  /** The folder it made: App opens it as a folder pane. */
+  onCreated: (path: string) => void
+  openInCursor: boolean
+  onToggleCursor: () => void
+}) {
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -12,9 +22,10 @@ export function NewProject({ onClose }: { onClose: () => void }) {
     setBusy(true)
     setErr(null)
     try {
-      const res = await window.watch.createProject(name)
+      const res = await window.watch.createProject(name, { cursor: openInCursor })
       if (res?.ok) {
         onClose() // close the prompt but keep the panel open
+        if (res.path) onCreated(res.path)
       } else {
         setErr(res?.error ?? 'Could not create the project.')
         setBusy(false)
@@ -48,10 +59,14 @@ export function NewProject({ onClose }: { onClose: () => void }) {
               else if (e.key === 'Escape') onClose()
             }}
           />
-          <div className="np-hint">Creates a folder in your Projects directory and opens it in Cursor.</div>
+          <div className="np-hint">Creates a folder in your Projects directory and opens it here{openInCursor ? ', and in Cursor' : ''}.</div>
+          <button className="np-switch" role="switch" aria-checked={openInCursor} onClick={onToggleCursor} data-testid="np-cursor">
+            <span>Also open in Cursor</span>
+            <span className={`menu-switch ${openInCursor ? 'is-on' : ''}`} aria-hidden><span className="menu-switch-thumb" /></span>
+          </button>
           {err && <div className="np-err">{err}</div>}
           <button className="np-create" onClick={submit} disabled={busy || !name.trim()}>
-            {busy ? 'Creating…' : 'Create & open in Cursor'}
+            {busy ? 'Creating…' : openInCursor ? 'Create & open in Cursor' : 'Create'}
           </button>
         </div>
       </div>

@@ -36,6 +36,19 @@ export function sanitizeChatConfig(raw) {
 /** `raw` is the parsed `tm.panes.v2` value; `kinds` the catalog ids.
  * `aliases` maps a retired kind to its successor (`usage` → `spend`), so a
  * layout saved before a split still opens something rather than nothing. */
+/** A terminal's stored config: a known launch (else a shell), strings where strings belong, a resume id of the shape main interpolates. */
+function termConfig(term, launches) {
+  const t = isRecord(term) ? term : {}
+  return {
+    launch: launches.includes(t.launch) ? t.launch : 'shell',
+    cwd: typeof t.cwd === 'string' ? t.cwd : undefined,
+    label: typeof t.label === 'string' ? t.label : undefined,
+    sessionId: typeof t.sessionId === 'string' ? t.sessionId : undefined,
+    initialCommand: typeof t.initialCommand === 'string' ? t.initialCommand : undefined,
+    resumeId: typeof t.resumeId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(t.resumeId) ? t.resumeId : undefined
+  }
+}
+
 export function sanitizePanes(raw, { kinds, isUnique, maxPanes, launches = ['shell', 'claude', 'codex'], aliases = {} }) {
   if (!Array.isArray(raw)) return []
   const known = new Set(kinds)
@@ -51,19 +64,7 @@ export function sanitizePanes(raw, { kinds, isUnique, maxPanes, launches = ['she
       seen.add(kind)
     }
     if (kind === 'terminal') {
-      const t = isRecord(term) ? term : {}
-      out.push({
-        id,
-        kind,
-        term: {
-          launch: launches.includes(t.launch) ? t.launch : 'shell',
-          cwd: typeof t.cwd === 'string' ? t.cwd : undefined,
-          label: typeof t.label === 'string' ? t.label : undefined,
-          sessionId: typeof t.sessionId === 'string' ? t.sessionId : undefined,
-          initialCommand: typeof t.initialCommand === 'string' ? t.initialCommand : undefined,
-          resumeId: typeof t.resumeId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(t.resumeId) ? t.resumeId : undefined
-        }
-      })
+      out.push({ id, kind, term: termConfig(term, launches) })
     } else if (kind === 'web') {
       // A site the pane can no longer load (not http/https) drops, like an unknown kind.
       const web = sanitizeWebConfig(item.web)
@@ -78,7 +79,11 @@ export function sanitizePanes(raw, { kinds, isUnique, maxPanes, launches = ['she
       // A folder pane keeps its folder; a missing one is the tree's own empty state.
       const folder = sanitizeFolderConfig(item.folder)
       if (!folder) continue
-      out.push({ id, kind, folder })
+      // Its own session beside the tree (0.4.78): one chat or one terminal, kept like a chat or terminal pane's.
+      const chat = isRecord(item.chat) ? sanitizeChatConfig(item.chat) : null
+      if (chat) out.push({ id, kind, folder, chat })
+      else if (isRecord(item.term)) out.push({ id, kind, folder, term: termConfig(item.term, launches) })
+      else out.push({ id, kind, folder })
     } else if (kind === 'chat') {
       // A chat pane without a provider drops; the live handle is kept (a renderer reload reattaches) and the resume id is what a restart resumes.
       const chat = sanitizeChatConfig(item.chat)

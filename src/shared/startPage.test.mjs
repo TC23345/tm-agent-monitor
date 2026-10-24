@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { MAX_FOLDERS, folderLabel, forgetFolder, rememberFolder, sanitizeFolderConfig, sanitizeFolders, whenLabel } from './startPage.mjs'
+import { MAX_FOLDERS, TREE_DEFAULT, TREE_MAX, TREE_MIN, WORK_MIN, clampTreeWidth, folderLabel, forgetFolder, pillLines, rememberFolder, sanitizeFolderConfig, sanitizeFolders, streamDuration, streamedLines, whenLabel } from './startPage.mjs'
 
 test('sanitizeFolderConfig takes an absolute folder path and drops a trailing separator', () => {
   assert.deepEqual(sanitizeFolderConfig({ path: 'C:\\Users\\x\\proj\\' }), { path: 'C:\\Users\\x\\proj' })
@@ -48,4 +48,38 @@ test('whenLabel reads as the recents list does', () => {
   assert.equal(whenLabel(now - 3 * 3_600_000, now), '3h')
   assert.match(whenLabel(now - 3 * 86_400_000, now), /^Oct \d+$/)
   assert.equal(whenLabel(0, now), '')
+})
+
+test('sanitizeFolderConfig keeps a dragged tree width, clamped, and drops a bad one', () => {
+  const p = 'C:\\p'
+  assert.deepEqual(sanitizeFolderConfig({ path: p, tree: 300.4 }), { path: p, tree: 300 })
+  assert.deepEqual(sanitizeFolderConfig({ path: p, tree: 5 }), { path: p, tree: TREE_MIN })
+  assert.deepEqual(sanitizeFolderConfig({ path: p, tree: 99999 }), { path: p, tree: TREE_MAX })
+  assert.deepEqual(sanitizeFolderConfig({ path: p, tree: 'wide' }), { path: p })
+})
+
+test('clampTreeWidth leaves the session its least width, then the tree its own', () => {
+  assert.equal(clampTreeWidth(Number.NaN), TREE_DEFAULT)
+  assert.equal(clampTreeWidth(600, 800), 800 - WORK_MIN)
+  assert.equal(clampTreeWidth(600, 300), TREE_MIN, 'a pane too narrow for both keeps the tree at its least')
+  assert.equal(clampTreeWidth(250, 2000), 250)
+})
+
+test('pillLines names the folder and offers both pills', () => {
+  const lines = pillLines('claude-watch')
+  assert.match(lines[0], /claude-watch has you/)
+  assert.ok(lines.some((l) => /red pill — Claude Code/.test(l)))
+  assert.ok(lines.some((l) => /blue pill — Codex/.test(l)))
+  assert.match(pillLines('  ')[0], /this folder/)
+})
+
+test('streamedLines types a line at a time with a pause between, and ends done', () => {
+  const lines = ['abc', 'de']
+  assert.deepEqual(streamedLines(lines, 0, 10, 100), { shown: [''], current: 0, done: false })
+  assert.deepEqual(streamedLines(lines, 25, 10, 100), { shown: ['ab'], current: 0, done: false })
+  assert.deepEqual(streamedLines(lines, 30, 10, 100), { shown: ['abc'], current: 1, done: false }, 'the pause before the next line')
+  assert.deepEqual(streamedLines(lines, 140, 10, 100), { shown: ['abc', 'd'], current: 1, done: false })
+  assert.equal(streamDuration(lines, 10, 100), 150)
+  assert.deepEqual(streamedLines(lines, 150, 10, 100), { shown: ['abc', 'de'], current: -1, done: true })
+  assert.deepEqual(streamedLines(lines, -5, 10, 100).shown, [''])
 })

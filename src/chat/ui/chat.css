@@ -650,11 +650,16 @@
 .chat-pop-item { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 6px 28px 6px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .chat-pop-item:hover, .chat-pop-item.is-active { background: rgba(127, 127, 127, 0.14); }
 .chat-pop-item.is-on .chat-pop-label { font-weight: 600; }
+/* A menu's current choice (mode, model, output style; 0.4.78, the user's call): an accent edge and an accent title and
+   icon, not a check at the far right — the check needed a 28px column on every row and left the menu half empty. */
+.chat-pop-item.is-choice { padding-right: 8px; }
+.chat-pop-item.is-choice.is-on { background: color-mix(in srgb, var(--accent, #4a7bd0) 9%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #4a7bd0) 70%, transparent); }
+.chat-pop-item.is-choice.is-on:hover { background: color-mix(in srgb, var(--accent, #4a7bd0) 14%, transparent); }
+.chat-pop-item.is-choice.is-on .chat-pop-label, .chat-pop-item.is-choice.is-on .chat-pop-label .chat-ic { color: var(--accent, #4a7bd0); }
 .chat-pop-label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .chat-pop-label.is-mono { font-family: var(--chat-mono); font-size: 12.5px; }
 .chat-pop-desc { font-size: 11.5px; color: var(--muted, #888); }
 .chat-pop.is-slash .chat-pop-desc { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-pop-check { position: absolute; right: 8px; top: 9px; color: var(--accent, #4a7bd0); }
 .chat-pop-empty { padding: 8px; color: var(--muted, #888); font-size: 12px; }
 .chat-pop-sep { height: 1px; margin: 4px 0; background: var(--chat-rule); }
 .chat-kbd { font: 10.5px var(--chat-mono); padding: 1px 5px; border: 1px solid var(--chat-rule); border-radius: 4px; text-transform: none; letter-spacing: 0; font-weight: 400; }

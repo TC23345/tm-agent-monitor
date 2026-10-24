@@ -1087,12 +1087,11 @@ function ModelMenu({ provider, transcript, options, prefs, onConfigure, onClose,
           <div onMouseLeave={() => setHoverStyle(null)}>
             {styles.map((s) => (
               <button
-                key={s.name} className={`chat-pop-item is-compact ${s.name === transcript?.outputStyle ? 'is-on' : ''}`}
+                key={s.name} className={`chat-pop-item is-compact is-choice ${s.name === transcript?.outputStyle ? 'is-on' : ''}`} aria-current={s.name === transcript?.outputStyle || undefined}
                 onClick={() => onConfigure({ outputStyle: s.name })} onMouseEnter={() => setHoverStyle(s.name)} onFocus={() => setHoverStyle(s.name)}
                 data-testid={`chat-style:${s.name}`}
               >
                 <span className="chat-pop-label">{s.name}{s.builtin ? <span className="chat-pop-tag">built in</span> : null}</span>
-                {s.name === transcript?.outputStyle ? <Check className="chat-ic chat-pop-check" /> : null}
               </button>
             ))}
           </div>
@@ -1383,13 +1382,12 @@ function OptionRow({ provider, prefs, kind, id, row, on, icon, edits, onPick, te
     )
   }
   return (
-    <button className={`chat-pop-item ${on ? 'is-on' : ''}`} onClick={onPick} onContextMenu={(e) => edits.openMenu(kind, id, e)} data-testid={testid}>
+    <button className={`chat-pop-item is-choice ${on ? 'is-on' : ''}`} aria-current={on || undefined} onClick={onPick} onContextMenu={(e) => edits.openMenu(kind, id, e)} data-testid={testid}>
       <span className="chat-pop-label">
         {icon}{shown.label}
         {isDefault ? <span className="chat-pop-tag" title="New chats start on this" data-testid={`${testid}:default`}>new chats</span> : null}
       </span>
       {shown.description ? <span className="chat-pop-desc">{shown.description}</span> : null}
-      {on ? <Check className="chat-ic chat-pop-check" /> : null}
     </button>
   )
 }

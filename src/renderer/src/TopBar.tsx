@@ -3,18 +3,19 @@ import {
 } from 'lucide-react'
 import { Settings } from './Icons'
 import mark from './assets/icon.png'
-import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
+import { MenuCheckItem, MenuItem, MenuPop, MenuSwitchItem } from './Menu'
 import { MAX_PANES, PANE_KINDS, type PaneCols, type PaneInstance, type PaneKind } from './panes'
 import type { ProjectCommand, ProviderHealth, ProviderId, SizeMode, TerminalLaunch } from '@shared/types'
 import { overallStatus } from '@shared/health.mjs'
 import type { FolderEntry } from '@shared/startPage.mjs'
 import { ProviderBadge } from './ProviderBadge'
-import { REBUILD_HINT } from './StatusBar'
 import { useNow } from './useNow'
 import { tid } from './testid'
 
-/** Provider health rolled up for the title bar — ticks so "silent for 12m"
- * stays true between snapshots, and only this chip re-renders for it. */
+export const REBUILD_HINT = 'Quit, rebuild the installer from the local checkout (npm run dist), silently reinstall, and relaunch'
+
+/** Provider health rolled up — ticks so "silent for 12m" stays true between snapshots, and only the reader re-renders
+ * for it. The title bar's chip until 0.4.78; the sidebar foot's Agent settings reads the same rule now. */
 export interface HealthInput {
   providers: Partial<Record<ProviderId, ProviderHealth>> | undefined
   mock: boolean
@@ -34,7 +35,7 @@ export function ConnChip({ health }: { health: HealthInput }) {
 /** The title-bar menus. There is no View menu: what panes and sidebar sections
  * show, the workspace size, columns, and saved layouts are *state*, and state
  * lives in the status bar's popovers (StatusBar.tsx). Menus hold verbs. */
-export type MenuName = 'file' | 'layout' | 'terminal' | 'user'
+export type MenuName = 'file' | 'layout' | 'terminal' | 'user' | 'projects'
 
 interface Props {
   waiting: number
@@ -42,7 +43,6 @@ interface Props {
   onWaitingOnly: () => void
   /** Focus the next waiting session (the chip's click). */
   onRouteWaiting: () => void
-  health: HealthInput
   panes: PaneInstance[]
   /** The folder launches and project commands use right now (the selected project badge). */
   context: { cwd?: string; label?: string }
@@ -50,6 +50,11 @@ interface Props {
   /** A chat pane: the extension's conversation with the CLI, in the grid. */
   onNewChat: (provider: 'claude' | 'codex') => void
   onNewProject: () => void
+  /** The projects menu's *Open project…*: the folder picker in the Projects folder, then a folder pane (and Cursor when on). */
+  onOpenProject: () => void
+  /** Whether a new or opened project opens in Cursor too (`tm.project.cursor.v1`). */
+  openInCursor: boolean
+  onToggleCursor: () => void
   /** File → New pane: a start page (0.4.77). */
   onNewStart: () => void
   /** File → Open folder…: the OS picker, then a folder pane. */
@@ -110,13 +115,14 @@ interface Props {
  */
 export function TopBar(props: Props) {
   const {
-    waiting, waitingOnly, onWaitingOnly, onRouteWaiting, health, panes, context, onNewTerminal, onNewChat, onNewProject, onNewStart, onOpenFolder, recentFolders, onOpenRecent, commands, onRunCommand,
+    waiting, waitingOnly, onWaitingOnly, onRouteWaiting, panes, context, onNewTerminal, onNewChat, onNewProject, onOpenProject, openInCursor, onToggleCursor, onNewStart, onOpenFolder, recentFolders, onOpenRecent, commands, onRunCommand,
     sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, fieldOn, onToggleField, sidebarHidden, onToggleSidebar, layouts, onSaveLayout, onApplyLayout, onDeleteLayout,
     canResetOrder, onResetOrder, onSettings, onKeys, openMenu, onOpenMenu, onPalette, onMinimize, onHide, onOpenPane, onActivity, hot, onFocusAgent,
     rebuild, onRebuild
   } = props
 
   const paneFull = panes.length >= MAX_PANES
+  const rebuildWarn = rebuild.msg ? /failed|no repo|no installer|dev build|could not/.test(rebuild.msg) : false
   const where = context.cwd ? (context.label ?? context.cwd) : 'your home folder'
 
   const run = (action: () => void) => () => {
@@ -162,7 +168,8 @@ export function TopBar(props: Props) {
               <MenuItem icon={<Globe strokeWidth={2} />} label="Chrome" hint="Open a new Chrome window" onClick={run(() => window.watch.openChrome())} />
               <div className="menu-sep" />
               <div className="menu-label"><FolderPlus className="menu-label-ic" strokeWidth={2} />Project</div>
-              <MenuItem icon={<FolderPlus strokeWidth={2} />} label="New project…" hint="Create a project folder and open it in Cursor" onClick={run(onNewProject)} />
+              <MenuItem icon={<FolderPlus strokeWidth={2} />} label="New project…" hint={`Create a project folder and open it here${openInCursor ? ' and in Cursor' : ''}`} onClick={run(onNewProject)} />
+              <MenuItem icon={<FolderOpen strokeWidth={2} />} label="Open project…" hint={`Browse your Projects folder for one and open it here${openInCursor ? ' and in Cursor' : ''}`} onClick={run(onOpenProject)} />
               {canResetOrder && (
                 <MenuItem icon={<ListRestart strokeWidth={2} />} label="Reset project order" hint="Forget the dragged order and sort projects by attention again" onClick={run(onResetOrder)} />
               )}
@@ -287,10 +294,45 @@ export function TopBar(props: Props) {
             </MenuPop>
           )}
         </div>
-        {/* New project, at hand in the bar (the user's call, 2026-10-22: it sat on the Activity header). */}
-        <button className="menu-btn menu-btn--icon" onClick={() => { onOpenMenu(null); onNewProject() }} title="New project — create a project folder and open it in Cursor" aria-label="New project" data-testid="launch-new-project">
-          <FolderPlus strokeWidth={2} />
-        </button>
+        {/* Projects, at hand in the bar (the user's calls: the icon left the Activity header 2026-10-22; since 0.4.78
+            it is a menu — a new project, an existing one through the folder picker, the recents, and whether
+            Cursor opens too). A project opens as a folder pane either way. */}
+        <div className="menu-wrap">
+          <button
+            className={`menu-btn menu-btn--icon ${openMenu === 'projects' ? 'menu-btn--open' : ''}`}
+            onClick={() => onOpenMenu(openMenu === 'projects' ? null : 'projects')}
+            onMouseEnter={() => { if (openMenu && openMenu !== 'projects') onOpenMenu('projects') }}
+            title="Projects — a new one, or open an existing one"
+            aria-label="Projects"
+            data-testid="launch-new-project"
+          >
+            <FolderPlus strokeWidth={2} />
+          </button>
+          {openMenu === 'projects' && (
+            <MenuPop {...away}>
+              <MenuItem icon={<FolderPlus strokeWidth={2} />} label="New project…" hint={`Create a folder in your Projects directory and open it here${openInCursor ? ' and in Cursor' : ''}`} onClick={run(onNewProject)} />
+              <MenuItem icon={<FolderOpen strokeWidth={2} />} label="Open project…" hint={`Browse for a folder (starts in your Projects directory) and open it here${openInCursor ? ' and in Cursor' : ''}`} onClick={run(onOpenProject)} />
+              {recentFolders.length > 0 && (
+                <>
+                  <div className="menu-sep" />
+                  <div className="menu-label"><Folder className="menu-label-ic" strokeWidth={2} />Recent</div>
+                  {recentFolders.slice(0, 6).map((f) => (
+                    <MenuItem key={f.cwd} icon={<Folder strokeWidth={2} />} label={f.label} hint={f.cwd} onClick={run(() => onOpenRecent(f.cwd))} />
+                  ))}
+                </>
+              )}
+              <div className="menu-sep" />
+              <MenuSwitchItem
+                icon={<Code2 strokeWidth={2} />}
+                label="Also open in Cursor"
+                hint="New and opened projects open in Cursor as well as here — remembered"
+                on={openInCursor}
+                onClick={onToggleCursor}
+                testId="projects-cursor"
+              />
+            </MenuPop>
+          )}
+        </div>
       </nav>
 
       {/* The command center: the palette's front door, where an IDE keeps its
@@ -326,7 +368,23 @@ export function TopBar(props: Props) {
             {waiting} waiting
           </button>
         )}
-        <ConnChip health={health} />
+        {/* Update, where the connection chip was (0.4.78, the user's call); the connection moved to the sidebar's
+            foot as Agent settings, with every other status. */}
+        {rebuild.msg && (
+          <span className={`update-msg ${rebuildWarn ? 'is-warn' : ''}`} title={rebuild.msg} data-testid="update-msg">
+            {rebuild.msg}
+          </span>
+        )}
+        <button
+          className={`update-btn ${rebuild.busy ? 'is-busy' : ''}`}
+          onClick={onRebuild}
+          disabled={rebuild.busy}
+          title={REBUILD_HINT}
+          data-testid="update-chip"
+        >
+          <RefreshCw className="update-ic" strokeWidth={2} />
+          {rebuild.busy ? 'Building…' : 'Update'}
+        </button>
         <div className="winctl">
           <button className="winbtn" onClick={onMinimize} title="Minimize — the hotkey or the taskbar brings it back" aria-label="Minimize" data-testid="win-minimize">
             <Minus strokeWidth={2} />

@@ -1,4 +1,4 @@
-import { ChevronUp, LayoutGrid, Pause, RefreshCw } from 'lucide-react'
+import { ChevronUp, LayoutGrid, Pause, Plus } from 'lucide-react'
 import { MenuCheckItem, MenuPop } from './Menu'
 import { MAX_PANES, PANE_KINDS, SIDEBAR_VIEWS, isUniqueKind, type PaneInstance, type PaneKind, type SidebarView } from './panes'
 import { tid } from './testid'
@@ -7,9 +7,8 @@ import { tid } from './testid'
 export type StatusMenu = 'panes'
 
 interface Props {
-  /** Rebuild & relaunch: shared busy state and main's last reply. */
-  rebuild: { busy: boolean; msg: string | null }
-  onRebuild: () => void
+  /** + New pane: a start page in the grid (0.4.78, the user's ask — the page was hard to find behind File → New). */
+  onNewPane: () => void
   /** Which panes and sidebar sections are showing, and how to flip each. */
   panes: PaneInstance[]
   onAddPane: (kind: PaneKind) => void
@@ -26,44 +25,24 @@ interface Props {
   onResumeClips?: () => void
 }
 
-export const REBUILD_HINT = 'Quit, rebuild the installer from the local checkout (npm run dist), silently reinstall, and relaunch'
-
 /**
  * The IDE-style status bar under the workspace. The title-bar menus hold
- * verbs; this bar holds *state*. Left: the one build action (Update) with
- * main's last reply beside it, then the **Panes** popover (which unique panes
- * and sidebar sections show). Right: passive facts (CDP port, version). The
- * Layout popover lived here until 0.4.74; it is the title bar's *Layout* menu
- * now (the user's call).
+ * verbs; this bar holds *state*. Left: the **Panes** popover (which unique
+ * panes and sidebar sections show) and **+ New pane** (a start page). Right:
+ * passive facts (CDP port, version). The Layout popover lived here until
+ * 0.4.74 and Update until 0.4.78; both are in the title bar now (the user's calls).
  */
 export function StatusBar(props: Props) {
   const {
-    rebuild, onRebuild, panes, onAddPane, onClosePane, sidebarViews, onToggleSidebarView,
+    onNewPane, panes, onAddPane, onClosePane, sidebarViews, onToggleSidebarView,
     openMenu, onOpenMenu, version, debugPort, clipsPaused, onResumeClips
   } = props
   const full = panes.length >= MAX_PANES
-  const warn = rebuild.msg ? /failed|no repo|no installer|dev build|could not/.test(rebuild.msg) : false
   const toggle = (menu: StatusMenu) => () => onOpenMenu(openMenu === menu ? null : menu)
 
   return (
     <footer className="statusbar" data-testid="statusbar">
       <div className="statusbar-left">
-        <button
-          className={`update-btn ${rebuild.busy ? 'is-busy' : ''}`}
-          onClick={onRebuild}
-          disabled={rebuild.busy}
-          title={REBUILD_HINT}
-          data-testid="update-chip"
-        >
-          <RefreshCw className="update-ic" strokeWidth={2} />
-          {rebuild.busy ? 'Building…' : 'Update'}
-        </button>
-        {rebuild.msg && (
-          <span className={`update-msg ${warn ? 'is-warn' : ''}`} title={rebuild.msg} data-testid="update-msg">
-            {rebuild.msg}
-          </span>
-        )}
-
         <div className="menu-wrap statusbar-menu">
           <button
             className={`status-btn ${openMenu === 'panes' ? 'status-btn--open' : ''}`}
@@ -106,7 +85,16 @@ export function StatusBar(props: Props) {
             </MenuPop>
           )}
         </div>
-
+        <button
+          className="status-btn"
+          onClick={() => { onOpenMenu(null); onNewPane() }}
+          disabled={full}
+          title={full ? 'All six panes are open' : 'A new pane on the start page — tools, suggested projects and recent folders'}
+          data-testid="status-new-pane"
+        >
+          <Plus className="status-ic" strokeWidth={2} />
+          New pane
+        </button>
       </div>
       <div className="statusbar-right">
         {clipsPaused && (

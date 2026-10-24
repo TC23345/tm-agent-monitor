@@ -2407,13 +2407,16 @@ function registerIpc(): void {
     // focusHwnd re-checks that the HWND still belongs to this pid before it acts.
     focusHwnd(hwnd, pid)
   })
-  ipcMain.handle('project:create', (_e, rawName: string) => {
+  // Since 0.4.78 Cursor is optional (the user's switch, in the dialog and the title bar's project menu); the renderer
+  // opens the new folder as a folder pane either way.
+  ipcMain.handle('project:create', (_e, rawName: string, rawOptions?: unknown) => {
     const name = sanitizeProjectName(rawName)
     if (!name) return { ok: false, error: 'Enter a valid project name.' }
+    const cursor = !(rawOptions && typeof rawOptions === 'object' && (rawOptions as { cursor?: unknown }).cursor === false)
     const dir = join(NEW_PROJECT_DIR, name)
     try {
       mkdirSync(dir, { recursive: true })
-      openInCursor(dir)
+      if (cursor) openInCursor(dir)
       return { ok: true, path: dir }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
@@ -2471,9 +2474,12 @@ function registerIpc(): void {
     }
   })
   // Open folder… (0.4.77): the OS picker; the folder chosen, or null.
-  ipcMain.handle('files:pick-folder', async (): Promise<string | null> => {
+  // `'projects'` starts the picker in the Projects folder (the title bar's *Open project…*); anything else, where Windows left it.
+  ipcMain.handle('files:pick-folder', async (_e, rawStart?: unknown): Promise<string | null> => {
     const owner = BrowserWindow.getFocusedWindow() ?? win
-    const res = owner ? await dialog.showOpenDialog(owner, { title: 'Open folder', properties: ['openDirectory'] }) : await dialog.showOpenDialog({ title: 'Open folder', properties: ['openDirectory'] })
+    const projects = rawStart === 'projects' && isDir(NEW_PROJECT_DIR)
+    const options = { title: projects ? 'Open project' : 'Open folder', properties: ['openDirectory' as const], ...(projects ? { defaultPath: NEW_PROJECT_DIR } : {}) }
+    const res = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
     const dir = res.canceled ? null : res.filePaths[0] ?? null
     return dir && isDir(dir) ? dir : null
   })

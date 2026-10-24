@@ -46,8 +46,8 @@ const VIEW_TITLE: Record<View, string> = { general: 'Settings', shortcuts: 'Keyb
 
 export function SettingsPanel({ onClose, section, onSectionShown }: {
   onClose: () => void
-  /** Open straight on a sub-page (the picker's *keys* link, `tm settings`), or on its Legend tab (F1). */
-  section?: 'shortcuts' | 'legend'
+  /** Open straight on a sub-page (the picker's *keys* link, `tm settings`, the sidebar's Agent settings → System & connections), or on its Legend tab (F1). */
+  section?: 'shortcuts' | 'legend' | 'system'
   /** Called once the requested section is on screen, so the same request can arrive again. */
   onSectionShown?: () => void
 }) {
@@ -59,7 +59,7 @@ export function SettingsPanel({ onClose, section, onSectionShown }: {
   const [updateMsg, setUpdateMsg] = useState<string | null>(null)
   const [hookMsg, setHookMsg] = useState<string | null>(null)
   const [hookBusy, setHookBusy] = useState<ProviderId | 'extension' | null>(null)
-  const [view, setView] = useState<View>(section ? 'shortcuts' : 'general')
+  const [view, setView] = useState<View>(section === 'system' ? 'system' : section ? 'shortcuts' : 'general')
   /** Keyboard shortcuts: the global chords you can change, or the legend of every key. */
   const [keysTab, setKeysTab] = useState<'chords' | 'legend'>(section === 'legend' ? 'legend' : 'chords')
   const [diagnostics, setDiagnostics] = useState<Record<string, SystemDiagnostic>>({})
@@ -197,6 +197,7 @@ export function SettingsPanel({ onClose, section, onSectionShown }: {
   const [flashShortcuts, setFlashShortcuts] = useState(false)
   useEffect(() => {
     if (!section || !s) return
+    if (section === 'system') { setView('system'); onSectionShown?.(); return }
     setView('shortcuts')
     setKeysTab(section === 'legend' ? 'legend' : 'chords')
     if (section === 'shortcuts') setFlashShortcuts(true)

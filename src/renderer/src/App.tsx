@@ -62,7 +62,8 @@ import { FilePane, type FilePaneHandle } from './FilePane'
 import { baseName as fileBaseName, fileKind, parentDir, type FilePaneConfig } from '@shared/fileTree.mjs'
 import { FOLDERS_KEY, folderLabel, forgetFolder, rememberFolder, sanitizeFolders, type FolderEntry, type FolderPaneConfig } from '@shared/startPage.mjs'
 import { StartPage, type StartTool } from './StartPage'
-import { FolderPane } from './FolderPane'
+import { FolderPane, type FolderStart } from './FolderPane'
+import { AgentStatus, type AgentStatusMenu } from './AgentStatus'
 import {
   STREAM_DEFAULT, clampStreamHeight, projectRoot, readStreamHeight, recentList, sanitizeRecent, touchRecent,
   type ProjectRoots, type ProjectTouch, type RecentMap
@@ -70,7 +71,7 @@ import {
 import {
   AppWindow, ArrowLeft, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Clipboard, Code2, Code2 as CursorIcon, Columns3, Copy,
   ExternalLink, Eye, EyeOff, Filter, Folder, FolderOpen, FolderPlus, Globe, Keyboard, LayoutGrid, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
-  NotebookPen, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, RotateCw, Rss, Ruler, Save, Shrink, Sparkles, SquareSlash,
+  NotebookPen, PanelLeft, PanelRight, PanelRightClose, PenLine, Play, Power, RefreshCw, RotateCw, Rss, Ruler, Save, Shrink, Sparkles, SquareSlash,
   History as HistoryIcon, ListCollapse, MessageSquare, Plus, Search, SquareTerminal, Terminal, Trash2, X
 } from 'lucide-react'
 import type { DesktopWindow } from '@shared/types'
@@ -118,7 +119,7 @@ export function App() {
   const snapRef = useRef<StatusSnapshot | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   /** Where Settings opens scrolled to (the picker's "keys" link asks for the shortcuts table). */
-  const [settingsSection, setSettingsSection] = useState<'shortcuts' | 'legend' | undefined>(undefined)
+  const [settingsSection, setSettingsSection] = useState<'shortcuts' | 'legend' | 'system' | undefined>(undefined)
   // First-run hook installation from the Agents pane's empty state.
   const [hookSetup, setHookSetup] = useState<{ busy: 'claude' | 'codex' | null; msg: string | null }>({ busy: null, msg: null })
   // Rebuild & relaunch: one state shared by the title-bar chip, File menu, and
@@ -139,11 +140,19 @@ export function App() {
       })
   }
   const [newProjectOpen, setNewProjectOpen] = useState(false)
+  /** Whether a new or opened project opens in Cursor too (0.4.78, the user's switch: the projects menu and the dialog). */
+  const [openInCursor, setOpenInCursor] = useState<boolean>(() => {
+    try { return localStorage.getItem('tm.project.cursor.v1') !== '0' } catch { return true }
+  })
+  const toggleCursor = () => setOpenInCursor((v) => {
+    try { localStorage.setItem('tm.project.cursor.v1', v ? '0' : '1') } catch { /* preference only */ }
+    return !v
+  })
   const [menu, setMenu] = useState<MenuState | null>(null)
   // One menu open at a time across the whole window — the title-bar menus and
   // the project badge menu share this, so opening one closes the other
   // and the Escape chain below sees every one of them.
-  const [openMenu, setOpenMenu] = useState<MenuName | 'sidebar' | NavMenu | StatusMenu | null>(null)
+  const [openMenu, setOpenMenu] = useState<MenuName | 'sidebar' | NavMenu | StatusMenu | AgentStatusMenu | null>(null)
   const [waitingOnly, setWaitingOnly] = useState(false)
   const [allCollapsed, setAllCollapsed] = useState(false)
   const { order, save: saveOrder, clear: clearOrder } = useGroupOrder()
@@ -768,6 +777,15 @@ export function App() {
   const pickFolder = (replaceId?: string) => {
     void window.watch.pickFolder().then((dir) => { if (dir) openFolder(dir, replaceId) })
   }
+  /** A project (0.4.78): its folder pane here, and Cursor too while the switch is on (main opened Cursor for a new one). */
+  const openProject = (path: string, cursorDone = false) => {
+    openFolder(path)
+    if (openInCursor && !cursorDone) window.watch.openCursor(path)
+  }
+  /** The projects menu's *Open project…*: the picker, starting in the Projects folder. */
+  const pickProject = () => {
+    void window.watch.pickFolder('projects').then((dir) => { if (dir) openProject(dir) })
+  }
   /** A start page's tool (0.4.77): in a start pane it takes that pane's slot; from the empty grid it is a new pane. */
   const startTool = (tool: StartTool, replaceId?: string) => {
     switch (tool) {
@@ -872,12 +890,12 @@ export function App() {
   const openClipboard = () => openUnique('clipboard')
 
   useEffect(() => {
-    if (focusedPane && panes.some((p) => p.id === focusedPane && p.kind === 'terminal')) setLastTermPane(focusedPane)
+    if (focusedPane && panes.some((p) => p.id === focusedPane && (p.kind === 'terminal' || p.kind === 'folder') && p.term)) setLastTermPane(focusedPane)
   }, [focusedPane, panes])
 
   /** Open terminal panes a clip can be pasted into (the Clipboard pane's *Paste into ▸*, the palette's Ctrl+Enter). */
   const pasteTargets = (): PasteTarget[] => panes
-    .filter((p) => p.kind === 'terminal' && p.term?.sessionId)
+    .filter((p) => (p.kind === 'terminal' || p.kind === 'folder') && p.term?.sessionId)
     .map((p) => ({
       id: p.id,
       label: `${terminalName(p.term!.launch)} · ${p.term!.label ?? p.term!.cwd?.split(/[\\/]/).filter(Boolean).pop() ?? 'home'}`,
@@ -1022,7 +1040,7 @@ export function App() {
   // that provider, so its title says what it runs and a restart resumes it.
   useEffect(() => {
     for (const p of panes) {
-      if (p.kind !== 'terminal' || !p.term || !p.term.sessionId) continue
+      if ((p.kind !== 'terminal' && p.kind !== 'folder') || !p.term || !p.term.sessionId) continue
       const agent = agentForTerminal(agents, p.term)
       if (!agent || agent.terminalId !== p.term.sessionId) continue
       const launch = agent.provider === 'claude' ? 'claude' : agent.provider === 'codex' ? 'codex' : null
@@ -1055,6 +1073,80 @@ export function App() {
     setPaneDrag(null)
     setPaneDrop(null)
   }
+
+  /** A chat pane's body — and a folder pane's own chat beside its tree (0.4.78): same handles, same config route. */
+  const chatElement = (pane: PaneInstance) => (
+    <ChatPane
+      ref={(handle) => {
+        if (handle) chatRefs.current.set(pane.id, handle)
+        else chatRefs.current.delete(pane.id)
+      }}
+      bridge={window.watch.chat}
+      config={pane.chat!}
+      onConfig={(patch) => updateChat(pane.id, patch)}
+      draftKey={pane.id}
+      openUrl={(url) => { void window.watch.openExternal(url) }}
+      renderText={(text) => <MarkdownView source={text} chat={{ cwd: pane.chat?.cwd, openPath: openFile }} />}
+      copyText={(text) => window.watch.copyText(text, { cwd: pane.chat?.cwd })}
+      openFile={openFile}
+      listFiles={(cwd) => window.watch.listChatFiles(cwd)}
+      saveText={(name, text) => window.watch.saveChat(name, text)}
+      pathForFile={(file) => window.watch.pathForFile(file) || null}
+      onFocus={() => { if (focusedPane !== pane.id) setFocusedPane(pane.id) }}
+      stepStore={chatStepStore}
+      spell={window.watch.spellWord}
+    />
+  )
+  /** A terminal pane's body — and a folder pane's own terminal. */
+  const termElement = (pane: PaneInstance) => (
+    <Suspense fallback={<div className="empty">Starting terminal…</div>}>
+      <TerminalPane
+        ref={(handle) => {
+          if (handle) termRefs.current.set(pane.id, handle)
+          else termRefs.current.delete(pane.id)
+        }}
+        config={pane.term!}
+        onConfig={(patch) => updateTerm(pane.id, patch)}
+      />
+    </Suspense>
+  )
+
+  /**
+   * A folder pane's own session (0.4.78, the user's `|`): the first chat or terminal started from the pane runs inside
+   * it, beside the tree. Ending it disposes the shell or closes the chat and brings the pills back.
+   */
+  const startHere = (paneId: string, kind: FolderStart) => {
+    const pane = panes.find((p) => p.id === paneId)
+    if (!pane?.folder || pane.chat || pane.term) return
+    const cwd = pane.folder.path
+    const label = folderLabel(cwd)
+    setPanes((current) => current.map((p) => (p.id !== paneId ? p
+      : kind === 'shell' ? { ...p, term: { launch: 'shell', cwd, label } }
+        : { ...p, chat: { provider: kind, cwd } })))
+    touchProjects([{ cwd, label, at: Date.now() }])
+    rememberFolderUsed(cwd, label)
+    setFocusedPane(paneId)
+  }
+  const endHere = (paneId: string) => {
+    const pane = panes.find((p) => p.id === paneId)
+    if (!pane) return
+    if (pane.term?.sessionId) window.watch.disposeTerminal(pane.term.sessionId)
+    if (pane.chat?.chatId) void window.watch.chat.close(pane.chat.chatId)
+    setPanes((current) => current.map((p) => {
+      if (p.id !== paneId) return p
+      const next = { ...p }
+      delete next.chat
+      delete next.term
+      return next
+    }))
+  }
+  const setFolderTree = (paneId: string, width: number | null) => setPanes((current) => current.map((p) => {
+    if (p.id !== paneId || !p.folder || p.folder.tree === (width ?? undefined)) return p
+    const folder = { ...p.folder }
+    if (width === null) delete folder.tree
+    else folder.tree = width
+    return { ...p, folder }
+  }))
 
   const paneBody = (pane: PaneInstance) => {
     switch (pane.kind) {
@@ -1089,7 +1181,17 @@ export function App() {
           />
         )
       case 'folder':
-        return <FolderPane key={pane.folder!.path} path={pane.folder!.path} onOpen={openFile} />
+        return (
+          <FolderPane
+            key={pane.folder!.path}
+            path={pane.folder!.path}
+            tree={pane.folder!.tree}
+            onTree={(width) => setFolderTree(pane.id, width)}
+            onOpen={openFile}
+            session={pane.chat ? chatElement(pane) : pane.term ? termElement(pane) : null}
+            onStart={(kind) => startHere(pane.id, kind)}
+          />
+        )
       case 'start':
         return (
           <StartPage
@@ -1117,41 +1219,9 @@ export function App() {
           />
         )
       case 'chat':
-        return (
-          <ChatPane
-            ref={(handle) => {
-              if (handle) chatRefs.current.set(pane.id, handle)
-              else chatRefs.current.delete(pane.id)
-            }}
-            bridge={window.watch.chat}
-            config={pane.chat!}
-            onConfig={(patch) => updateChat(pane.id, patch)}
-            draftKey={pane.id}
-            openUrl={(url) => { void window.watch.openExternal(url) }}
-            renderText={(text) => <MarkdownView source={text} chat={{ cwd: pane.chat?.cwd, openPath: openFile }} />}
-            copyText={(text) => window.watch.copyText(text, { cwd: pane.chat?.cwd })}
-            openFile={openFile}
-            listFiles={(cwd) => window.watch.listChatFiles(cwd)}
-            saveText={(name, text) => window.watch.saveChat(name, text)}
-            pathForFile={(file) => window.watch.pathForFile(file) || null}
-            onFocus={() => { if (focusedPane !== pane.id) setFocusedPane(pane.id) }}
-            stepStore={chatStepStore}
-            spell={window.watch.spellWord}
-          />
-        )
+        return chatElement(pane)
       case 'terminal':
-        return (
-          <Suspense fallback={<div className="empty">Starting terminal…</div>}>
-            <TerminalPane
-              ref={(handle) => {
-                if (handle) termRefs.current.set(pane.id, handle)
-                else termRefs.current.delete(pane.id)
-              }}
-              config={pane.term!}
-              onConfig={(patch) => updateTerm(pane.id, patch)}
-            />
-          </Suspense>
-        )
+        return termElement(pane)
     }
   }
 
@@ -1189,13 +1259,33 @@ export function App() {
   const paneTools = (pane: PaneInstance) => {
     if (pane.kind === 'folder' && pane.folder) {
       // The folder pane's bar (0.4.77, the user's ask): a chat or a terminal in this root, the editors, another folder.
+      // Since 0.4.78 the first one runs inside this pane, beside the tree; once it holds one, the next go to new panes.
       const target = { cwd: pane.folder.path, label: folderLabel(pane.folder.path) }
-      const full = panes.length >= MAX_PANES
+      const busy = !!(pane.chat || pane.term)
+      const full = busy && panes.length >= MAX_PANES
+      const start = (kind: FolderStart) => (busy ? startIn(kind, target) : startHere(pane.id, kind))
+      const where = busy ? ' in a new pane' : ' here, beside the files'
+      const chatHandle = () => chatRefs.current.get(pane.id)
       return (
         <>
-          {tool(full ? 'New TaylorMade CC — all six panes are open' : 'New TaylorMade CC here', <ProviderBadge provider="claude" />, () => startIn('claude', target), full)}
-          {tool(full ? 'New TaylorMade Codex — all six panes are open' : 'New TaylorMade Codex here', <ProviderBadge provider="codex" />, () => startIn('codex', target), full)}
-          {tool(full ? 'New terminal here (opens a window — all six panes are open)' : 'New terminal here', ic(Terminal), () => startIn('shell', target))}
+          {pane.chat && (
+            <>
+              {tool('Find in conversation (Ctrl+F)', ic(Search), () => chatHandle()?.find())}
+              {tool('Sessions', ic(HistoryIcon), () => chatHandle()?.pickSession())}
+              {tool('New session', ic(Plus), () => chatHandle()?.newSession())}
+              {tool(`End the ${pane.chat.provider === 'claude' ? 'TaylorMade CC' : 'TaylorMade Codex'} chat beside the files`, ic(PanelRightClose), () => endHere(pane.id))}
+              <span className="gpane-divider" aria-hidden />
+            </>
+          )}
+          {pane.term && (
+            <>
+              {tool('Close the terminal beside the files', ic(PanelRightClose), () => endHere(pane.id))}
+              <span className="gpane-divider" aria-hidden />
+            </>
+          )}
+          {tool(full ? 'New TaylorMade CC — all six panes are open' : `New TaylorMade CC${where}`, <ProviderBadge provider="claude" />, () => start('claude'), full)}
+          {tool(full ? 'New TaylorMade Codex — all six panes are open' : `New TaylorMade Codex${where}`, <ProviderBadge provider="codex" />, () => start('codex'), full)}
+          {tool(full ? 'New terminal (opens a window — all six panes are open)' : `New terminal${where}`, ic(Terminal), () => start('shell'))}
           {tool('Open in Cursor', ic(Code2), () => window.watch.openCursor(pane.folder!.path))}
           {tool('Open in Explorer', ic(ExternalLink), () => window.watch.openPath(pane.folder!.path))}
           {tool('Open another folder…', ic(FolderOpen), () => pickFolder(pane.id))}
@@ -1455,7 +1545,7 @@ export function App() {
     cmd('new-codex-chat', 'New TaylorMade Codex', () => newChat('codex'), { icon: <ProviderBadge provider="codex" />, keywords: ['agent', 'chat', 'conversation', 'thread', 'session', 'codex'], pinned: true, detail: full ? 'all six panes are open' : context.label })
     cmd('new-terminal', 'New terminal', () => newTerminal('shell'), { icon: <Terminal strokeWidth={2} />, keywords: ['shell', 'powershell'], keys: ['Ctrl', 'Shift', '`'], pinned: true, detail: full ? 'opens a window — all six panes are open' : context.label })
     cmd('ext-terminal', 'Open external terminal', () => window.watch.openTerminal(context.cwd, 'shell'), { icon: <SquareTerminal strokeWidth={2} />, detail: context.label ?? 'home folder' })
-    const focusedChat = panes.find((p) => p.id === focusedPane && p.kind === 'chat')
+    const focusedChat = panes.find((p) => p.id === focusedPane && (p.kind === 'chat' || p.kind === 'folder') && p.chat)
     if (focusedChat) {
       cmd('chat-sessions', 'Chat: pick a session', () => chatRefs.current.get(focusedChat.id)?.pickSession(), { icon: <MessageSquare strokeWidth={2} />, keywords: ['history', 'resume', 'thread'] })
       cmd('chat-new-session', 'Chat: new session', () => chatRefs.current.get(focusedChat.id)?.newSession(), { icon: <MessageSquare strokeWidth={2} />, keywords: ['fresh', 'conversation'] })
@@ -1468,7 +1558,7 @@ export function App() {
     }
     // Snippets act on the focused terminal pane (they used to be a header
     // menu; 4.3-plan.md item 5). No focused terminal, no snippets.
-    const focusedTerm = panes.find((p) => p.id === focusedPane && p.kind === 'terminal' && p.term?.sessionId)
+    const focusedTerm = panes.find((p) => p.id === focusedPane && (p.kind === 'terminal' || p.kind === 'folder') && p.term?.sessionId)
     if (focusedTerm?.term?.sessionId) {
       const sid = focusedTerm.term.sessionId
       for (const snip of SNIPPETS[focusedTerm.term.launch]) {
@@ -1651,12 +1741,14 @@ export function App() {
         waitingOnly={waitingOnly}
         onWaitingOnly={() => setWaitingOnly((v) => !v)}
         onRouteWaiting={routeToWaiting}
-        health={health}
         panes={panes}
         context={context}
         onNewTerminal={newTerminal}
         onNewChat={newChat}
         onNewProject={() => setNewProjectOpen(true)}
+        onOpenProject={pickProject}
+        openInCursor={openInCursor}
+        onToggleCursor={toggleCursor}
         onNewStart={() => addPane('start')}
         onOpenFolder={() => pickFolder()}
         recentFolders={folders}
@@ -1683,7 +1775,7 @@ export function App() {
         onKeys={openLegend}
         rebuild={rebuild}
         onRebuild={rebuildApp}
-        openMenu={openMenu === 'file' || openMenu === 'layout' || openMenu === 'terminal' || openMenu === 'user' ? openMenu : null}
+        openMenu={openMenu === 'file' || openMenu === 'layout' || openMenu === 'terminal' || openMenu === 'user' || openMenu === 'projects' ? openMenu : null}
         onOpenMenu={setOpenMenu}
         onPalette={() => { setOpenMenu(null); setPalette((v) => !v) }}
         onMinimize={() => { setOpenMenu(null); window.watch.minimize() }}
@@ -1732,6 +1824,19 @@ export function App() {
             onReset={() => setStreamH(STREAM_DEFAULT)}
           />
           {activeViews.map((v, i) => sideSection(v, i === 0, i === activeViews.length - 1))}
+          {/* The status of everything, where the title bar's connection chip was (0.4.78, the user's call). */}
+          <AgentStatus
+            health={health}
+            open={openMenu === 'agent-status'}
+            onOpen={(on) => setOpenMenu(on ? 'agent-status' : null)}
+            onSettings={(section) => { setSettingsSection(section); setSettingsOpen(true) }}
+            hooks={hookSetup}
+            onHooks={setUpHooks}
+            clipsPaused={clipsPaused}
+            onResumeClips={() => { void window.watch.pauseClips(null) }}
+            version={appInfo.version}
+            debugPort={appInfo.debugPort}
+          />
         </aside>
 
         <Splitter
@@ -1880,8 +1985,7 @@ export function App() {
       </div>
 
       <StatusBar
-        rebuild={rebuild}
-        onRebuild={rebuildApp}
+        onNewPane={() => addPane('start')}
         panes={panes}
         onAddPane={addPane}
         onClosePane={closePane}
@@ -1897,7 +2001,7 @@ export function App() {
 
       {palette && <CommandPalette items={paletteItems()} onClose={() => setPalette(false)} />}
       {settingsOpen && <SettingsPanel section={settingsSection} onSectionShown={() => setSettingsSection(undefined)} onClose={() => { setSettingsOpen(false); setSettingsSection(undefined) }} />}
-      {newProjectOpen && <NewProject onClose={() => setNewProjectOpen(false)} />}
+      {newProjectOpen && <NewProject onClose={() => setNewProjectOpen(false)} onCreated={(path) => openProject(path, true)} openInCursor={openInCursor} onToggleCursor={toggleCursor} />}
       {layoutDialog && (
         <NameDialog
           title="Save layout"

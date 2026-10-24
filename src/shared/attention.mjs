@@ -20,6 +20,11 @@ function launchFor(provider) {
  * (where the user may have typed the command themselves). Null when the
  * session has no folder, the provider has no CLI launch, or nothing matches.
  */
+/** The chat a pane holds: a chat pane's, or the session a folder pane runs beside its tree (0.4.78). */
+const chatOf = (pane) => (pane && (pane.kind === 'chat' || pane.kind === 'folder') ? pane.chat : undefined)
+/** The terminal a pane holds: a terminal pane's, or a folder pane's own. */
+const termOf = (pane) => (pane && (pane.kind === 'terminal' || pane.kind === 'folder') ? pane.term : undefined)
+
 export function paneForAgent(panes, agent) {
   if (!agent || !Array.isArray(panes)) return null
   // Exact: the session's hooks carried the pane's id (TM_TERMINAL_ID) — a
@@ -27,8 +32,8 @@ export function paneForAgent(panes, agent) {
   if (agent.terminalId) {
     for (const pane of panes) {
       if (!pane) continue
-      if (pane.kind === 'terminal' && pane.term?.sessionId === agent.terminalId) return pane
-      if (pane.kind === 'chat' && pane.chat?.chatId === agent.terminalId) return pane
+      if (termOf(pane)?.sessionId === agent.terminalId) return pane
+      if (chatOf(pane)?.chatId === agent.terminalId) return pane
     }
   }
   const launch = launchFor(agent.provider)
@@ -38,7 +43,8 @@ export function paneForAgent(panes, agent) {
   // a Codex chat this is the only exact match there is.
   if (agent.rawSessionId) {
     for (const pane of panes) {
-      if (pane?.kind === 'chat' && pane.chat?.provider === launch && pane.chat.resumeId === agent.rawSessionId) return pane
+      const chat = chatOf(pane)
+      if (chat?.provider === launch && chat.resumeId === agent.rawSessionId) return pane
     }
   }
   if (!agent.cwd) return null
@@ -47,11 +53,13 @@ export function paneForAgent(panes, agent) {
   for (const pane of panes) {
     if (!pane) continue
     // A chat pane already holding another session is not this one's.
-    if (pane.kind === 'chat' && pane.chat && pane.chat.provider === launch && canonical(pane.chat.cwd) === cwd
-      && !(pane.chat.resumeId && agent.rawSessionId && pane.chat.resumeId !== agent.rawSessionId)) return pane
-    if (pane.kind !== 'terminal' || !pane.term || canonical(pane.term.cwd) !== cwd) continue
-    if (pane.term.launch === launch) return pane
-    if (pane.term.launch === 'shell' && !shell) shell = pane
+    const chat = chatOf(pane)
+    if (chat && chat.provider === launch && canonical(chat.cwd) === cwd
+      && !(chat.resumeId && agent.rawSessionId && chat.resumeId !== agent.rawSessionId)) return pane
+    const term = termOf(pane)
+    if (!term || canonical(term.cwd) !== cwd) continue
+    if (term.launch === launch) return pane
+    if (term.launch === 'shell' && !shell) shell = pane
   }
   return shell
 }

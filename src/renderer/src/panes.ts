@@ -84,11 +84,12 @@ export function newPane(kind: PaneKind, term?: TerminalPaneConfig, web?: WebPane
   return {
     id: crypto.randomUUID(),
     kind,
-    term: kind === 'terminal' ? (term ?? { launch: 'shell' }) : undefined,
+    // A folder pane may run its own chat or terminal beside its tree (0.4.78); every other kind holds neither.
+    term: kind === 'terminal' ? (term ?? { launch: 'shell' }) : kind === 'folder' ? term : undefined,
     ...(kind === 'web' && web ? { web } : {}),
     ...(kind === 'file' && file ? { file } : {}),
     ...(kind === 'folder' && folder ? { folder } : {}),
-    ...(kind === 'chat' && chat ? { chat } : {})
+    ...((kind === 'chat' || kind === 'folder') && chat ? { chat } : {})
   }
 }
 

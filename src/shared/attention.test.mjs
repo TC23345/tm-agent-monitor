@@ -76,3 +76,14 @@ test('agentForTerminal prefers the session whose hooks named this pane, else the
   assert.equal(agentForTerminal([a, b, c], { launch: 'codex', cwd: 'C:/proj', sessionId: 'pty-9' }), null)
   assert.equal(agentForTerminal([a], { launch: 'claude', sessionId: 'pty-1' }), a)
 })
+
+test('a session in a folder pane’s own chat or terminal maps to that folder pane (0.4.78)', () => {
+  const path = 'C:\\Projects\\api'
+  const folderChat = { id: 'fc', kind: 'folder', folder: { path }, chat: { provider: 'claude', cwd: path, chatId: 'h1' } }
+  const folderTerm = { id: 'ft', kind: 'folder', folder: { path }, term: { launch: 'shell', cwd: path, sessionId: 'pty-1' } }
+  const bare = { id: 'fb', kind: 'folder', folder: { path } }
+  assert.equal(paneForAgent([bare, folderChat], agent('a', { cwd: path, terminalId: 'h1' })).id, 'fc')
+  assert.equal(paneForAgent([bare, folderTerm], agent('b', { cwd: path, terminalId: 'pty-1' })).id, 'ft')
+  assert.equal(paneForAgent([bare, folderTerm], agent('c', { cwd: path })).id, 'ft', 'a shell in the folder, by folder')
+  assert.equal(paneForAgent([bare], agent('d', { cwd: path })), null, 'a folder pane with nothing running is no session’s')
+})

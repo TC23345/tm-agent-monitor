@@ -2,6 +2,7 @@ import type { AllSizes, PaneCols, PaneInstance, SidebarView } from './panes'
 import { newPane } from './panes'
 import { sanitizeWebConfig } from '@shared/webPane.mjs'
 import { sanitizeFileConfig } from '@shared/fileTree.mjs'
+import { sanitizeFolderConfig } from '@shared/startPage.mjs'
 
 /**
  * Named workspace layouts: a snapshot of the pane set, the dragged sizes, the
@@ -69,8 +70,9 @@ export function panesFromLayout(layout: SavedLayout): PaneInstance[] {
   // Saved layouts are read back unsanitized; a web pane's URL is checked here
   // (and again by main before the page attaches). One it cannot load drops.
   return layout.panes
-    .filter((p) => (p.kind !== 'web' || sanitizeWebConfig(p.web)) && (p.kind !== 'file' || sanitizeFileConfig(p.file)))
-    .map((p) => newPane(p.kind, p.term ? { ...p.term, sessionId: undefined } : undefined, sanitizeWebConfig(p.web) ?? undefined, sanitizeFileConfig(p.file) ?? undefined, p.chat ? { ...p.chat, chatId: undefined } : undefined))
+    .filter((p) => (p.kind !== 'web' || sanitizeWebConfig(p.web)) && (p.kind !== 'file' || sanitizeFileConfig(p.file)) && (p.kind !== 'folder' || sanitizeFolderConfig(p.folder)))
+    // A folder pane keeps its folder (0.4.77 dropped it here, leaving the pane nothing to show) and its own session's config.
+    .map((p) => newPane(p.kind, p.term ? { ...p.term, sessionId: undefined } : undefined, sanitizeWebConfig(p.web) ?? undefined, sanitizeFileConfig(p.file) ?? undefined, p.chat ? { ...p.chat, chatId: undefined } : undefined, sanitizeFolderConfig(p.folder) ?? undefined))
 }
 
 export const LAYOUT_NAME_MAX = 40

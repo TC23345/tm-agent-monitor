@@ -28,7 +28,72 @@ export function sanitizeFolderConfig(raw) {
   if (!isAbsolutePath(path) || /[\0\r\n]/.test(path)) return null
   if (!/^[A-Za-z]:[\\/]$/.test(path)) path = path.replace(/[\\/]+$/, '')
   if (!path) return null
-  return { path }
+  // The file tree's dragged width beside the pane's own session (0.4.78); absent = TREE_DEFAULT.
+  const tree = Number.isFinite(raw.tree) ? clampTreeWidth(raw.tree) : undefined
+  return tree === undefined ? { path } : { path, tree }
+}
+
+/** The folder pane's file tree beside its session (0.4.78, the user's `|`): its default, least and most width in px. */
+export const TREE_DEFAULT = 260
+export const TREE_MIN = 160
+export const TREE_MAX = 720
+/** The session side never gets narrower than this; a narrow pane squeezes the tree first. */
+export const WORK_MIN = 300
+
+/** A dragged tree width, whole pixels within [TREE_MIN, TREE_MAX]; with `paneWidth`, also leaving WORK_MIN for the session. */
+export function clampTreeWidth(width, paneWidth) {
+  let w = Math.round(Number.isFinite(width) ? width : TREE_DEFAULT)
+  if (Number.isFinite(paneWidth) && paneWidth > 0) w = Math.min(w, paneWidth - WORK_MIN)
+  return Math.max(TREE_MIN, Math.min(TREE_MAX, w))
+}
+
+/**
+ * The empty session side's lines (0.4.78, the user's ask: "a reference to the Matrix … taking the red or the blue
+ * pill — choosing between Claude Code and Codex"). Morpheus's offer, cast for a folder.
+ */
+export function pillLines(label) {
+  const name = String(label ?? '').trim() || 'this folder'
+  return [
+    `Wake up… ${name} has you.`,
+    'This is your last chance. After this, there is no turning back.',
+    'Take the red pill — Claude Code — and I show you how deep the rabbit hole goes.',
+    'Take the blue pill — Codex — and the thread begins. You believe whatever you want to believe.'
+  ]
+}
+
+/** Typing speed and the beat between lines for the streamed text. */
+export const TYPE_MS = 32
+export const LINE_PAUSE_MS = 520
+
+/**
+ * How much of each line has streamed in after `elapsed` ms: a line types one character per TYPE_MS, the next starts
+ * LINE_PAUSE_MS after it ends. Returns the visible text per line (lines not reached yet are absent), the line being
+ * typed (-1 once all are done) and whether everything is out.
+ */
+export function streamedLines(lines, elapsed, typeMs = TYPE_MS, pauseMs = LINE_PAUSE_MS) {
+  const shown = []
+  let t = Math.max(0, Number.isFinite(elapsed) ? elapsed : 0)
+  for (let i = 0; i < lines.length; i++) {
+    const line = String(lines[i])
+    const chars = [...line]
+    const typing = chars.length * typeMs
+    if (t < typing) {
+      shown.push(chars.slice(0, Math.floor(t / typeMs)).join(''))
+      return { shown, current: i, done: false }
+    }
+    shown.push(line)
+    t -= typing
+    if (i < lines.length - 1) {
+      if (t < pauseMs) return { shown, current: i + 1, done: false }
+      t -= pauseMs
+    }
+  }
+  return { shown, current: -1, done: true }
+}
+
+/** The whole stream's length in ms (reduced motion skips straight to it). */
+export function streamDuration(lines, typeMs = TYPE_MS, pauseMs = LINE_PAUSE_MS) {
+  return lines.reduce((sum, line) => sum + [...String(line)].length * typeMs, 0) + Math.max(0, lines.length - 1) * pauseMs
 }
 
 /** The stored list, with anything malformed dropped, duplicates folded (slash- and case-insensitive), newest first, capped. @returns {FolderEntry[]} */

@@ -99,3 +99,22 @@ export function MenuCheckItem({ icon, label, hint, checked, disabled, onClick, t
     </button>
   )
 }
+
+/** A setting inside a menu (0.4.78): the label, then an on/off switch at the right. Stays open on click, like a radio
+ * group, so the change can be seen; `role="switch"` so it reads as one. */
+export function MenuSwitchItem({ icon, label, hint, on, onClick, testId }: {
+  icon?: ReactNode
+  label: string
+  hint?: string
+  on: boolean
+  onClick: () => void
+  testId?: string
+}) {
+  return (
+    <button className="menu-item menu-switch-row" role="switch" aria-checked={on} onClick={onClick} title={hint} data-testid={testId ?? tid('menu', label)}>
+      <span className="menu-item-ic">{icon}</span>
+      {label}
+      <span className={`menu-switch ${on ? 'is-on' : ''}`} aria-hidden><span className="menu-switch-thumb" /></span>
+    </button>
+  )
+}

@@ -145,3 +145,19 @@ test('panes: folder panes keep an absolute folder and drop without one', () => {
   ], o)
   assert.deepEqual(panes, [{ id: 'a', kind: 'folder', folder: { path: 'C:\\p\\a' } }, { id: 'd', kind: 'start' }])
 })
+
+test('panes: a folder pane keeps its own session beside the tree — a chat, else a terminal (0.4.78)', () => {
+  const o = { kinds: ['folder'], isUnique: () => false, maxPanes: 6 }
+  const path = 'C:\\p\\a'
+  const [withChat, withTerm, junk] = sanitizePanes([
+    { id: 'a', kind: 'folder', folder: { path, tree: 300 }, chat: { provider: 'claude', cwd: path, chatId: 'h1' } },
+    { id: 'b', kind: 'folder', folder: { path }, term: { launch: 'nope', cwd: path, resumeId: 'bad id!' } },
+    { id: 'c', kind: 'folder', folder: { path }, chat: { provider: 'gpt' } }
+  ], o)
+  assert.equal(withChat.chat.provider, 'claude')
+  assert.equal(withChat.folder.tree, 300)
+  assert.equal(withChat.term, undefined)
+  assert.equal(withTerm.term.launch, 'shell', 'an unknown launch is a shell')
+  assert.equal(withTerm.term.resumeId, undefined, 'a resume id main could not interpolate drops')
+  assert.deepEqual(junk, { id: 'c', kind: 'folder', folder: { path } }, 'a chat without a provider leaves the chooser')
+})

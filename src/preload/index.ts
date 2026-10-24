@@ -153,8 +153,8 @@ const api = {
     ipcRenderer.invoke('extension:manage', action),
   /** Open the unpacked extension folder in Explorer, to load it from chrome://extensions. */
   openExtensionFolder: () => ipcRenderer.send('extension:open-folder'),
-  createProject: (name: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
-    ipcRenderer.invoke('project:create', name),
+  createProject: (name: string, options?: { cursor?: boolean }): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('project:create', name, { cursor: options?.cursor !== false }),
   hide: () => ipcRenderer.send('window:hide'),
   /** The grip strip on a side edge was pulled `delta` screen px; main decides whether that flips the size mode. */
   edgeDrag: (edge: 'left' | 'right', delta: number) => ipcRenderer.send('window:edge-drag', edge, delta),
@@ -189,7 +189,7 @@ const api = {
   /** A folder pane or a file pane? What an absolute path is on disk. */
   statPath: (p: string): Promise<'file' | 'dir' | null> => ipcRenderer.invoke('files:stat', p),
   /** Open folder…: the OS folder picker; the folder chosen, or null. */
-  pickFolder: (): Promise<string | null> => ipcRenderer.invoke('files:pick-folder'),
+  pickFolder: (start?: 'projects'): Promise<string | null> => ipcRenderer.invoke('files:pick-folder', start === 'projects' ? 'projects' : undefined),
   /** A file pane's content: text (≤ 2 MiB, no NUL bytes), an image as a data URL, or just its size when binary. */
   readFile: (path: string): Promise<FileContent | null> => ipcRenderer.invoke('files:read', path),
   /** Ctrl+S / Save in a file pane: only a file `readFile` served as text this session; written atomically. */
