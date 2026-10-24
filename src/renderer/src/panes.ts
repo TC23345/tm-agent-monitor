@@ -1,7 +1,8 @@
-import { Activity, Bot, Clipboard, Coins, FileText, Globe, Keyboard, MessageSquare, NotebookPen, Terminal, ChartColumn, History } from 'lucide-react'
+import { Activity, Bot, Clipboard, Coins, FileText, FolderOpen, Globe, Keyboard, LayoutGrid, MessageSquare, NotebookPen, Terminal, ChartColumn, History } from 'lucide-react'
 import type { WebPaneConfig } from '@shared/webPane.mjs'
 import type { ChatPaneConfig } from '../../chat/ui/ChatPane'
 import type { FilePaneConfig } from '@shared/fileTree.mjs'
+import type { FolderPaneConfig } from '@shared/startPage.mjs'
 import type { TerminalLaunch } from '@shared/types'
 import { sanitizeSectionHeights, type SizeBucket } from '@shared/layout.mjs'
 import {
@@ -26,7 +27,7 @@ function readJson(key: string): unknown {
  * pane just drops), so neither costs a pane. At-a-glance status — open windows and limit bars — stacks in the
  * sidebar as toggleable sections; see `SidebarView`.
  */
-export type PaneKind = 'agents' | 'terminal' | 'spend' | 'insights' | 'history' | 'notes' | 'clipboard' | 'keys' | 'web' | 'file' | 'chat'
+export type PaneKind = 'agents' | 'terminal' | 'spend' | 'insights' | 'history' | 'notes' | 'clipboard' | 'keys' | 'web' | 'file' | 'folder' | 'start' | 'chat'
 
 /** Retired kinds and what a persisted layout holding one becomes. The old
  * `usage` pane stacked Spend, Insights, and History; it comes back as Spend. */
@@ -55,6 +56,8 @@ export interface PaneInstance {
   web?: WebPaneConfig
   /** `file` panes: the project file it shows (a click in a project's tree). */
   file?: FilePaneConfig
+  /** `folder` panes: the folder whose tree it shows (a path clicked in a chat, a recent, Open folder…). */
+  folder?: FolderPaneConfig
   /** `chat` panes: the provider, the folder, the live handle (main's, dies with the app) and the provider session to resume. */
   chat?: ChatPaneConfig
 }
@@ -69,19 +72,22 @@ export const PANE_KINDS: { id: PaneKind; label: string; icon: typeof Activity; h
   { id: 'clipboard', label: 'Clipboard', icon: Clipboard, hint: 'Everything you copy, in any app — searchable, starred, grouped, and pasteable into a pane' },
   { id: 'web', label: 'Web', icon: Globe, hint: 'A site in a pane — its own signed-in browser session, shared by every web pane' },
   { id: 'file', label: 'File', icon: FileText, hint: 'A project file — click one in a project’s tree (a badge’s left-click)' },
+  { id: 'folder', label: 'Folder', icon: FolderOpen, hint: 'A folder’s files, with a chat or a terminal there one click away (File → Open folder…, a path in a chat, a recent)' },
+  { id: 'start', label: 'Start', icon: LayoutGrid, hint: 'The start page — tools, suggested projects and recent folders (File → New pane)' },
   { id: 'chat', label: 'Chat', icon: MessageSquare, hint: 'TaylorMade CC (Claude Code) or TaylorMade Codex — the extensions’ chat over the same CLI, with its own history (File menu)' },
   { id: 'keys', label: 'Keys', icon: Keyboard, hint: 'Every keyboard shortcut — the workspace’s, and the ones Claude Code, Codex and the shell keep (F1)' }
 ]
 
 export const MAX_PANES = 6
 
-export function newPane(kind: PaneKind, term?: TerminalPaneConfig, web?: WebPaneConfig, file?: FilePaneConfig, chat?: ChatPaneConfig): PaneInstance {
+export function newPane(kind: PaneKind, term?: TerminalPaneConfig, web?: WebPaneConfig, file?: FilePaneConfig, chat?: ChatPaneConfig, folder?: FolderPaneConfig): PaneInstance {
   return {
     id: crypto.randomUUID(),
     kind,
     term: kind === 'terminal' ? (term ?? { launch: 'shell' }) : undefined,
     ...(kind === 'web' && web ? { web } : {}),
     ...(kind === 'file' && file ? { file } : {}),
+    ...(kind === 'folder' && folder ? { folder } : {}),
     ...(kind === 'chat' && chat ? { chat } : {})
   }
 }
@@ -93,9 +99,9 @@ export function defaultPanes(): PaneInstance[] {
 }
 
 /** Kinds that may appear only once. Terminals repeat — one shell per pane —
- * and so do web panes (one site each), file panes (one file each) and chat panes (one conversation each). */
+ * and so do web panes (one site each), file and folder panes (one path each), start pages and chat panes (one conversation each). */
 export function isUniqueKind(kind: PaneKind): boolean {
-  return kind !== 'terminal' && kind !== 'web' && kind !== 'file' && kind !== 'chat'
+  return kind !== 'terminal' && kind !== 'web' && kind !== 'file' && kind !== 'folder' && kind !== 'start' && kind !== 'chat'
 }
 
 const STORAGE_KEY = 'tm.panes.v3'

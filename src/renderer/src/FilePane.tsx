@@ -1,6 +1,6 @@
 import { forwardRef, lazy, Suspense, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { FileContent } from '@shared/types'
-import { baseName, fileKind } from '@shared/fileTree.mjs'
+import { baseName, fileKind, parentDir } from '@shared/fileTree.mjs'
 import { MarkdownView } from './MarkdownView'
 
 const CodeEditor = lazy(() => import('./CodeEditor'))
@@ -26,7 +26,7 @@ function sizeLabel(bytes: number): string {
  * size with a way to open it elsewhere. `onDirty` tells App whether the pane
  * holds unsaved typing, so the next file from the tree takes a clean pane.
  */
-export const FilePane = forwardRef<FilePaneHandle, { path: string; preview: boolean; onDirty: (dirty: boolean) => void }>(function FilePane({ path, preview, onDirty }, ref) {
+export const FilePane = forwardRef<FilePaneHandle, { path: string; preview: boolean; onDirty: (dirty: boolean) => void; onOpenFolder?: (dir: string) => void }>(function FilePane({ path, preview, onDirty, onOpenFolder }, ref) {
   const [content, setContent] = useState<FileContent | null | 'loading'>('loading')
   const [text, setText] = useState('')
   const [dirty, setDirty] = useState(false)
@@ -75,7 +75,10 @@ export const FilePane = forwardRef<FilePaneHandle, { path: string; preview: bool
         <div className="filepane-center">
           <div className="filepane-note">
             <span>{baseName(path)} could not be read — moved, deleted, or not a file.</span>
-            <button type="button" className="picker-btn is-small" onClick={() => load()}>Try again</button>
+            <span className="filepane-acts">
+              {onOpenFolder ? <button type="button" className="picker-btn is-small" onClick={() => onOpenFolder(parentDir(path))} data-testid="file-open-folder">Open its folder</button> : null}
+              <button type="button" className="picker-btn is-small" onClick={() => load()}>Try again</button>
+            </span>
           </div>
         </div>
       </div>

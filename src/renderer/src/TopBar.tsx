@@ -1,5 +1,5 @@
 import {
-  Code2, Columns3, Folder, FolderPlus, Globe, Keyboard, LayoutTemplate, ListRestart, Minus, Monitor, PanelLeft, PanelRight, Play, Power, RefreshCw, Rss, Ruler, Save, Search, Sparkles, SquareTerminal, Terminal, Trash2, X
+  Code2, Columns3, Folder, FolderOpen, FolderPlus, Globe, Keyboard, LayoutGrid, LayoutTemplate, ListRestart, Minus, Monitor, PanelLeft, PanelRight, Play, Plus, Power, RefreshCw, Rss, Ruler, Save, Search, Sparkles, SquareTerminal, Terminal, Trash2, X
 } from 'lucide-react'
 import { Settings } from './Icons'
 import mark from './assets/icon.png'
@@ -7,6 +7,7 @@ import { MenuCheckItem, MenuItem, MenuPop } from './Menu'
 import { MAX_PANES, PANE_KINDS, type PaneCols, type PaneInstance, type PaneKind } from './panes'
 import type { ProjectCommand, ProviderHealth, ProviderId, SizeMode, TerminalLaunch } from '@shared/types'
 import { overallStatus } from '@shared/health.mjs'
+import type { FolderEntry } from '@shared/startPage.mjs'
 import { ProviderBadge } from './ProviderBadge'
 import { REBUILD_HINT } from './StatusBar'
 import { useNow } from './useNow'
@@ -49,6 +50,13 @@ interface Props {
   /** A chat pane: the extension's conversation with the CLI, in the grid. */
   onNewChat: (provider: 'claude' | 'codex') => void
   onNewProject: () => void
+  /** File → New pane: a start page (0.4.77). */
+  onNewStart: () => void
+  /** File → Open folder…: the OS picker, then a folder pane. */
+  onOpenFolder: () => void
+  /** File → Open's recent rows (`tm.folders.v1`, newest first). */
+  recentFolders: FolderEntry[]
+  onOpenRecent: (cwd: string) => void
   /** The Layout menu (the status bar's popover until 0.4.74, the user's call): workspace size (persisted; also the
    * half-view side), grid columns, the sidebar, pace streaks, saved layouts, and the dragged sizes' way back. */
   sizeMode: SizeMode
@@ -102,7 +110,7 @@ interface Props {
  */
 export function TopBar(props: Props) {
   const {
-    waiting, waitingOnly, onWaitingOnly, onRouteWaiting, health, panes, context, onNewTerminal, onNewChat, onNewProject, commands, onRunCommand,
+    waiting, waitingOnly, onWaitingOnly, onRouteWaiting, health, panes, context, onNewTerminal, onNewChat, onNewProject, onNewStart, onOpenFolder, recentFolders, onOpenRecent, commands, onRunCommand,
     sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, fieldOn, onToggleField, sidebarHidden, onToggleSidebar, layouts, onSaveLayout, onApplyLayout, onDeleteLayout,
     canResetOrder, onResetOrder, onSettings, onKeys, openMenu, onOpenMenu, onPalette, onMinimize, onHide, onOpenPane, onActivity, hot, onFocusAgent,
     rebuild, onRebuild
@@ -137,16 +145,24 @@ export function TopBar(props: Props) {
           {menuButton('file', 'File')}
           {openMenu === 'file' && (
             <MenuPop {...away}>
-              {/* New: Claude Code and Codex start as chat panes, a terminal is a plain shell (type `claude` there for a CLI session). */}
+              {/* In sections (0.4.77, the user's call): New, Open, Project, then the app. Claude Code and Codex start as chat panes; a terminal is a plain shell. */}
+              <div className="menu-label"><Plus className="menu-label-ic" strokeWidth={2} />New</div>
               <MenuItem icon={<ProviderBadge provider="claude" />} label="New TaylorMade CC" hint={paneFull ? 'All six panes are open' : `A TaylorMade CC pane (Claude Code) in ${where} — pick up any earlier session from its history`} onClick={run(() => onNewChat('claude'))} disabled={paneFull} />
               <MenuItem icon={<ProviderBadge provider="codex" />} label="New TaylorMade Codex" hint={paneFull ? 'All six panes are open' : `A TaylorMade Codex pane in ${where} — pick up any earlier thread from its history`} onClick={run(() => onNewChat('codex'))} disabled={paneFull} />
               <MenuItem icon={<Terminal strokeWidth={2} />} label="New terminal" hint={paneFull ? 'All six panes are open — opens a window instead' : `Open a PowerShell terminal in a pane in ${where} (Ctrl+Shift+\`)`} onClick={run(() => onNewTerminal('shell'))} />
+              <MenuItem icon={<LayoutGrid strokeWidth={2} />} label="New pane" hint={paneFull ? 'All six panes are open' : 'A start page: tools, suggested projects and recent folders — pick what the pane becomes'} onClick={run(onNewStart)} disabled={paneFull} />
               <div className="menu-sep" />
+              <div className="menu-label"><FolderOpen className="menu-label-ic" strokeWidth={2} />Open</div>
+              <MenuItem icon={<FolderOpen strokeWidth={2} />} label="Open folder…" hint="Any folder: its files in a pane, with a chat or a terminal there one click away" onClick={run(onOpenFolder)} />
+              {recentFolders.slice(0, 5).map((f) => (
+                <MenuItem key={f.cwd} icon={<Folder strokeWidth={2} />} label={f.label} hint={f.cwd} onClick={run(() => onOpenRecent(f.cwd))} />
+              ))}
+              <MenuItem icon={<Folder strokeWidth={2} />} label="Projects folder" hint="Open the Projects folder in File Explorer" onClick={run(() => window.watch.openProjectsDir())} />
+              <MenuItem icon={<Code2 strokeWidth={2} />} label="In Cursor" hint={context.cwd ? `Open ${where} in Cursor` : 'Open a new Cursor window'} onClick={run(() => window.watch.openCursor(context.cwd))} />
+              <MenuItem icon={<Globe strokeWidth={2} />} label="Chrome" hint="Open a new Chrome window" onClick={run(() => window.watch.openChrome())} />
+              <div className="menu-sep" />
+              <div className="menu-label"><FolderPlus className="menu-label-ic" strokeWidth={2} />Project</div>
               <MenuItem icon={<FolderPlus strokeWidth={2} />} label="New project…" hint="Create a project folder and open it in Cursor" onClick={run(onNewProject)} />
-              <MenuItem icon={<Folder strokeWidth={2} />} label="Open Projects folder" hint="Open the Projects folder in File Explorer" onClick={run(() => window.watch.openProjectsDir())} />
-              <div className="menu-sep" />
-              <MenuItem icon={<Code2 strokeWidth={2} />} label="Open in Cursor" hint={context.cwd ? `Open ${where} in Cursor` : 'Open a new Cursor window'} onClick={run(() => window.watch.openCursor(context.cwd))} />
-              <MenuItem icon={<Globe strokeWidth={2} />} label="Open Chrome" hint="Open a new Chrome window" onClick={run(() => window.watch.openChrome())} />
               {canResetOrder && (
                 <MenuItem icon={<ListRestart strokeWidth={2} />} label="Reset project order" hint="Forget the dragged order and sort projects by attention again" onClick={run(onResetOrder)} />
               )}

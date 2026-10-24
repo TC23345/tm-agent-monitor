@@ -2459,6 +2459,24 @@ function registerIpc(): void {
       return null
     }
   })
+  // What a path is (0.4.77): a folder opens as a folder pane, a file as a file pane; the renderer asks before it picks.
+  ipcMain.handle('files:stat', async (_e, p: unknown): Promise<'file' | 'dir' | null> => {
+    const path = filePath(p)
+    if (!path) return null
+    try {
+      const st = await fsp.stat(path)
+      return st.isDirectory() ? 'dir' : st.isFile() ? 'file' : null
+    } catch {
+      return null
+    }
+  })
+  // Open folder… (0.4.77): the OS picker; the folder chosen, or null.
+  ipcMain.handle('files:pick-folder', async (): Promise<string | null> => {
+    const owner = BrowserWindow.getFocusedWindow() ?? win
+    const res = owner ? await dialog.showOpenDialog(owner, { title: 'Open folder', properties: ['openDirectory'] }) : await dialog.showOpenDialog({ title: 'Open folder', properties: ['openDirectory'] })
+    const dir = res.canceled ? null : res.filePaths[0] ?? null
+    return dir && isDir(dir) ? dir : null
+  })
   ipcMain.handle('files:read', async (_e, p: unknown): Promise<FileContent | null> => {
     const path = filePath(p)
     if (!path) return null

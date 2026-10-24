@@ -23,12 +23,15 @@ function FileIcon({ name }: { name: string }) {
  * show. A file click opens it in a file pane (App decides which); the back
  * circle, or the badge again, returns to the stream.
  */
-export function FileTree({ root, label, height, onOpen, onClose }: {
+export function FileTree({ root, label, height, onOpen, onClose, fill }: {
   root: string
   label: string
-  height: number
+  /** The sidebar head's height; a pane's tree (`fill`) takes the pane. */
+  height?: number
   onOpen: (path: string) => void
-  onClose: () => void
+  /** The back circle; a folder pane has none. */
+  onClose?: () => void
+  fill?: boolean
 }) {
   /** Listings by folder: undefined = not asked yet, null = could not be read. */
   const [dirs, setDirs] = useState<Map<string, DirListing | null>>(new Map())
@@ -112,11 +115,13 @@ export function FileTree({ root, label, height, onOpen, onClose }: {
   }
 
   return (
-    <div className="ptree" style={{ height }} data-testid="project-tree">
+    <div className={`ptree ${fill ? 'is-fill' : ''}`} style={fill ? undefined : { height }} data-testid="project-tree">
       <div className="ptree-head">
-        <button type="button" className="iconbtn iconbtn--sm" onClick={onClose} title="Back to the activity stream" aria-label="Back to the activity stream" data-testid="tree-back">
-          <ArrowLeft className="gear gear--sm" strokeWidth={2} />
-        </button>
+        {onClose ? (
+          <button type="button" className="iconbtn iconbtn--sm" onClick={onClose} title="Back to the activity stream" aria-label="Back to the activity stream" data-testid="tree-back">
+            <ArrowLeft className="gear gear--sm" strokeWidth={2} />
+          </button>
+        ) : null}
         <span className="ptree-root" title={root}>{label}</span>
         <button type="button" className="iconbtn iconbtn--sm" onClick={() => window.watch.openPath(root)} title="Open the folder in Explorer" aria-label="Open the folder in Explorer" data-testid="tree-explorer">
           <ExternalLink className="gear gear--sm" strokeWidth={2} />

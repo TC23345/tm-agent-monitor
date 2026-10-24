@@ -773,6 +773,49 @@ kbd {
 }
 .gridempty kbd { margin: 0 2px; }
 .gridempty-hint { max-width: 380px; line-height: 1.6; }
+/* The empty grid is the start page: the page scrolls, left-aligned like a pane's. */
+.gridempty.is-start { align-items: stretch; justify-content: flex-start; overflow: auto; color: var(--text); text-align: left; }
+
+/* ---- the start page (0.4.77): tools, suggested, recents ---- */
+.startpage { display: flex; flex-direction: column; gap: 22px; width: min(760px, 100%); margin: 0 auto; padding: 18px 20px 28px; }
+.start-section { display: flex; flex-direction: column; gap: 8px; }
+.start-title { font-size: 12px; font-weight: 600; color: var(--text); }
+/* Two columns where they fit, one in a narrow pane — a tile's label is never cut to a letter. */
+.start-tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; }
+.start-tool { display: flex; align-items: center; gap: 10px; min-width: 0; height: 40px; padding: 0 12px; border: 1px solid var(--hairline); border-radius: var(--r-control); background: var(--elev); color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.start-tool:hover:not(:disabled) { background: var(--elev-2, var(--elev)); border-color: var(--line); }
+.start-tool:disabled { opacity: 0.5; cursor: default; }
+.start-tool:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.start-tool-ic { display: grid; place-items: center; flex: 0 0 auto; width: 18px; height: 18px; color: var(--muted); }
+.start-tool-ic svg { width: 15px; height: 15px; }
+.start-tool-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.start-keys { flex: 0 0 auto; padding: 1px 6px; border: 1px solid var(--hairline); border-radius: 4px; font: 10.5px var(--mono, monospace); color: var(--faint); }
+.start-suggested { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
+.start-suggest { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; padding: 14px 8px 10px; border: 1px solid transparent; border-radius: var(--r-control); background: transparent; color: var(--text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.start-suggest:hover { background: var(--elev); border-color: var(--hairline); }
+.start-suggest-ic { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; background: var(--elev); color: var(--muted); }
+.start-suggest-ic svg { width: 20px; height: 20px; }
+.start-suggest-label { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.start-recents { display: flex; flex-direction: column; }
+.start-recent { display: flex; align-items: center; gap: 4px; min-width: 0; border-bottom: 1px solid var(--hairline); }
+.start-recent:last-child { border-bottom: 0; }
+.start-recent-main { display: flex; align-items: center; gap: 12px; flex: 1 1 auto; min-width: 0; height: 48px; padding: 0 6px; border: 0; border-radius: var(--r-control); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.start-recent-main:hover { background: var(--elev); }
+.start-recent-ic { display: grid; place-items: center; flex: 0 0 auto; width: 28px; height: 28px; border-radius: 8px; background: var(--elev); color: var(--muted); }
+.start-recent-ic svg { width: 15px; height: 15px; }
+.start-recent-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; gap: 1px; }
+.start-recent-name { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.start-recent-path { font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.start-recent-when { flex: 0 0 auto; font-size: 11px; color: var(--faint); }
+.start-recent-acts { display: none; flex: 0 0 auto; align-items: center; gap: 2px; }
+.start-recent:hover .start-recent-acts, .start-recent:focus-within .start-recent-acts { display: flex; }
+.start-empty { padding: 10px 6px; font-size: 12px; color: var(--faint); line-height: 1.5; }
+
+/* ---- a folder pane: the project tree filling the pane ---- */
+.folderpane { flex: 1 1 auto; height: 100%; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ptree.is-fill { flex: 1 1 auto; height: auto; margin: 0; padding: 6px 8px 8px; }
+.ptree.is-fill .ptree-head { padding: 2px 4px 8px; }
+.filepane-acts { display: flex; gap: 8px; }
 
 /* Text settings (push URL, minutes). */
 .sinput { width: 260px; max-width: 100%; padding: 5px 8px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 12.5px; }

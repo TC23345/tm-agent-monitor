@@ -186,6 +186,10 @@ const api = {
   describePath: (path: string): Promise<{ dir: string; label: string } | null> => ipcRenderer.invoke('path:describe', path),
   /** The project tree (a badge's left-click): one folder's entries, folders first, `.git` and `node_modules` left out, capped. */
   listDir: (dir: string): Promise<DirListing | null> => ipcRenderer.invoke('files:list', dir),
+  /** A folder pane or a file pane? What an absolute path is on disk. */
+  statPath: (p: string): Promise<'file' | 'dir' | null> => ipcRenderer.invoke('files:stat', p),
+  /** Open folder…: the OS folder picker; the folder chosen, or null. */
+  pickFolder: (): Promise<string | null> => ipcRenderer.invoke('files:pick-folder'),
   /** A file pane's content: text (≤ 2 MiB, no NUL bytes), an image as a data URL, or just its size when binary. */
   readFile: (path: string): Promise<FileContent | null> => ipcRenderer.invoke('files:read', path),
   /** Ctrl+S / Save in a file pane: only a file `readFile` served as text this session; written atomically. */

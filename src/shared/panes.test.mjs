@@ -137,3 +137,11 @@ test('a terminal pane keeps a well-formed resumeId and drops a malformed one', (
   const [bad] = sanitizePanes([{ id: 'b', kind: 'terminal', term: { launch: 'claude', resumeId: 'nope; rm -rf' } }], opts)
   assert.equal(bad.term.resumeId, undefined)
 })
+
+test('panes: folder panes keep an absolute folder and drop without one', () => {
+  const o = { kinds: ['folder', 'start'], isUnique: () => false, maxPanes: 6 }
+  const panes = sanitizePanes([
+    { id: 'a', kind: 'folder', folder: { path: 'C:\\p\\a\\' } }, { id: 'b', kind: 'folder' }, { id: 'c', kind: 'folder', folder: { path: 'rel' } }, { id: 'd', kind: 'start' }
+  ], o)
+  assert.deepEqual(panes, [{ id: 'a', kind: 'folder', folder: { path: 'C:\\p\\a' } }, { id: 'd', kind: 'start' }])
+})

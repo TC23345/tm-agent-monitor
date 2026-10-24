@@ -8,6 +8,7 @@
 
 import { sanitizeWebConfig } from './webPane.mjs'
 import { sanitizeFileConfig } from './fileTree.mjs'
+import { sanitizeFolderConfig } from './startPage.mjs'
 
 function isRecord(v) {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -73,6 +74,11 @@ export function sanitizePanes(raw, { kinds, isUnique, maxPanes, launches = ['she
       const file = sanitizeFileConfig(item.file)
       if (!file) continue
       out.push({ id, kind, file })
+    } else if (kind === 'folder') {
+      // A folder pane keeps its folder; a missing one is the tree's own empty state.
+      const folder = sanitizeFolderConfig(item.folder)
+      if (!folder) continue
+      out.push({ id, kind, folder })
     } else if (kind === 'chat') {
       // A chat pane without a provider drops; the live handle is kept (a renderer reload reattaches) and the resume id is what a restart resumes.
       const chat = sanitizeChatConfig(item.chat)

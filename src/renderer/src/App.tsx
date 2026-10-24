@@ -60,13 +60,16 @@ import { ProjectStrip, WEB_LINKS, type LaunchTarget, type NavMenu, type StripPro
 import { FileTree } from './FileTree'
 import { FilePane, type FilePaneHandle } from './FilePane'
 import { baseName as fileBaseName, fileKind, parentDir, type FilePaneConfig } from '@shared/fileTree.mjs'
+import { FOLDERS_KEY, folderLabel, forgetFolder, rememberFolder, sanitizeFolders, type FolderEntry, type FolderPaneConfig } from '@shared/startPage.mjs'
+import { StartPage, type StartTool } from './StartPage'
+import { FolderPane } from './FolderPane'
 import {
   STREAM_DEFAULT, clampStreamHeight, projectRoot, readStreamHeight, recentList, sanitizeRecent, touchRecent,
   type ProjectRoots, type ProjectTouch, type RecentMap
 } from '@shared/projectStrip.mjs'
 import {
   AppWindow, ArrowLeft, BellRing, ChevronDown, ChevronsDownUp, ChevronsUpDown, Clipboard, Code2, Code2 as CursorIcon, Columns3, Copy,
-  ExternalLink, Eye, EyeOff, Filter, Folder, FolderPlus, Globe, Keyboard, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
+  ExternalLink, Eye, EyeOff, Filter, Folder, FolderOpen, FolderPlus, Globe, Keyboard, LayoutGrid, LayoutTemplate, Maximize2, Minimize2, Minus, Monitor,
   NotebookPen, PanelLeft, PanelRight, PenLine, Play, Power, RefreshCw, RotateCw, Rss, Ruler, Save, Shrink, Sparkles, SquareSlash,
   History as HistoryIcon, ListCollapse, MessageSquare, Plus, Search, SquareTerminal, Terminal, Trash2, X
 } from 'lucide-react'
@@ -253,6 +256,15 @@ export function App() {
   useEffect(() => {
     try { localStorage.setItem(RECENT_KEY, JSON.stringify(recentMap)) } catch { /* the strip rebuilds from live activity */ }
   }, [recentMap])
+  // Every folder a pane, a chat or a terminal was opened in, newest first (`tm.folders.v1`, 0.4.77): the start
+  // page's Recents and File → Open's recent rows. Long-lived, unlike the strip's four-hour badges.
+  const [folders, setFolders] = useState<FolderEntry[]>(() => {
+    try { return sanitizeFolders(JSON.parse(localStorage.getItem(FOLDERS_KEY) ?? 'null')) } catch { return [] }
+  })
+  useEffect(() => {
+    try { localStorage.setItem(FOLDERS_KEY, JSON.stringify(folders)) } catch { /* the list rebuilds as folders are opened */ }
+  }, [folders])
+  const rememberFolderUsed = (cwd?: string, label?: string) => { if (cwd) setFolders((current) => rememberFolder(current, cwd, Date.now(), label)) }
   // Each sidebar section's dragged height (the handle under it, `tm.sidebar.sections.v1`); absent = its default sizing.
   const [sectionH, setSectionH] = useState<SectionHeights>(loadSectionHeights)
   useEffect(() => {
@@ -677,17 +689,29 @@ export function App() {
   )
 
   /** Add a pane of `kind` if the layout allows it. Terminals repeat; others don't. */
-  const addPane = (kind: PaneKind, term?: TerminalPaneConfig, web?: WebPaneConfig, file?: FilePaneConfig, chat?: ChatPaneConfig) => {
+  /**
+   * Put a pane in the grid: at the end, or in another pane's slot (`replaceId` — a start page's tools take its own
+   * slot, a dead file pane becomes its folder's). A kind that may appear once is only focused when it is open.
+   */
+  const placePane = (pane: PaneInstance, replaceId?: string): boolean => {
+    const taken = isUniqueKind(pane.kind) ? panes.find((p) => p.kind === pane.kind) : undefined
+    if (taken) { focusPane(taken.id); return false }
+    if (replaceId && panes.some((p) => p.id === replaceId)) setPanes(panes.map((p) => (p.id === replaceId ? pane : p)))
+    else if (panes.length >= MAX_PANES) return false
+    else setPanes([...panes, pane])
+    setFocusedPane(pane.id)
+    // A terminal (or a chat) opened in a folder is activity there, and the folder is one the user works in.
+    if (pane.term?.cwd) touchProjects([{ cwd: pane.term.cwd, label: pane.term.label, at: Date.now() }])
+    if (pane.chat?.cwd) touchProjects([{ cwd: pane.chat.cwd, at: Date.now() }])
+    rememberFolderUsed(pane.term?.cwd ?? pane.chat?.cwd ?? pane.folder?.path, pane.term?.label)
+    // One agent list: the pane replaces the sidebar section.
+    if (pane.kind === 'agents') setSidebarViews((current) => current.filter((v) => v !== 'agents'))
+    return true
+  }
+  const addPane = (kind: PaneKind, term?: TerminalPaneConfig, web?: WebPaneConfig, file?: FilePaneConfig, chat?: ChatPaneConfig, folder?: FolderPaneConfig) => {
     if (panes.length >= MAX_PANES) return
     if (isUniqueKind(kind) && panes.some((p) => p.kind === kind)) return
-    const pane = newPane(kind, term, web, file, chat)
-    setPanes([...panes, pane])
-    setFocusedPane(pane.id)
-    // A terminal (or a chat) opened in a folder is activity there.
-    if (term?.cwd) touchProjects([{ cwd: term.cwd, label: term.label, at: Date.now() }])
-    if (chat?.cwd) touchProjects([{ cwd: chat.cwd, at: Date.now() }])
-    // One agent list: the pane replaces the sidebar section.
-    if (kind === 'agents') setSidebarViews((current) => current.filter((v) => v !== 'agents'))
+    placePane(newPane(kind, term, web, file, chat, folder))
   }
 
   /** Give a pane the keyboard: a terminal or a web page takes real focus, anything else the slot. */
@@ -706,6 +730,10 @@ export function App() {
    * file in its own app instead.
    */
   const openFile = (path: string) => {
+    // A folder (a path a chat names, a tree's root) opens as a folder pane, not a file pane that cannot read it (0.4.77).
+    void window.watch.statPath(path).then((kind) => { if (kind === 'dir') openFolder(path); else openFileAs(path) })
+  }
+  const openFileAs = (path: string) => {
     const already = panes.find((p) => p.kind === 'file' && p.file?.path === path)
     if (already) {
       if (zoom && zoom !== already.id) setZoom(already.id)
@@ -722,6 +750,45 @@ export function App() {
     }
     if (panes.length >= MAX_PANES) { window.watch.openPath(path); return }
     addPane('file', undefined, undefined, { path })
+  }
+  /** A folder's files in a pane (0.4.77): the open one comes forward, else a new pane — in `replaceId`'s slot when given. */
+  const openFolder = (path: string, replaceId?: string) => {
+    const key = launchKey(path)
+    const already = panes.find((p) => p.kind === 'folder' && p.folder && launchKey(p.folder.path) === key)
+    if (already) {
+      if (zoom && zoom !== already.id) setZoom(already.id)
+      focusPane(already.id)
+      rememberFolderUsed(path)
+      return
+    }
+    if (!replaceId && panes.length >= MAX_PANES) { window.watch.openPath(path); return }
+    placePane(newPane('folder', undefined, undefined, undefined, undefined, { path: path.replace(/[\\/]+$/, '') || path }), replaceId)
+  }
+  /** Open folder…: the OS picker, then a folder pane (in `replaceId`'s slot when given). */
+  const pickFolder = (replaceId?: string) => {
+    void window.watch.pickFolder().then((dir) => { if (dir) openFolder(dir, replaceId) })
+  }
+  /** A start page's tool (0.4.77): in a start pane it takes that pane's slot; from the empty grid it is a new pane. */
+  const startTool = (tool: StartTool, replaceId?: string) => {
+    switch (tool) {
+      case 'claude':
+      case 'codex':
+        placePane(newPane('chat', undefined, undefined, undefined, { provider: tool, cwd: context.cwd ?? '' }), replaceId)
+        return
+      case 'terminal':
+        if (replaceId) placePane(newPane('terminal', { launch: 'shell', cwd: context.cwd, label: context.label }), replaceId)
+        else newTerminal('shell')
+        return
+      case 'folder':
+        pickFolder(replaceId)
+        return
+      case 'notes':
+      case 'clipboard':
+        placePane(newPane(tool), replaceId)
+        return
+      case 'project':
+        setNewProjectOpen(true)
+    }
   }
   /** A badge: the launch target; by left-click also the head's file tree for that project (the same badge again: the stream). */
   const selectProject = (target: LaunchTarget, via: 'click' | 'menu') => {
@@ -1018,6 +1085,22 @@ export function App() {
             path={pane.file!.path}
             preview={filePreview[pane.id] ?? fileKind(pane.file!.path) === 'markdown'}
             onDirty={(dirty) => setFileDirty((current) => (current[pane.id] === dirty ? current : { ...current, [pane.id]: dirty }))}
+            onOpenFolder={(dir) => openFolder(dir, pane.id)}
+          />
+        )
+      case 'folder':
+        return <FolderPane key={pane.folder!.path} path={pane.folder!.path} onOpen={openFile} />
+      case 'start':
+        return (
+          <StartPage
+            context={context}
+            suggested={stripProjects}
+            folders={folders}
+            paneFull={false}
+            onTool={(tool) => startTool(tool, pane.id)}
+            onOpenFolder={(cwd) => openFolder(cwd, pane.id)}
+            onStartIn={(kind, cwd, label) => startIn(kind, { cwd, label })}
+            onForget={(cwd) => setFolders((current) => forgetFolder(current, cwd))}
           />
         )
       case 'web':
@@ -1091,7 +1174,9 @@ export function App() {
       : pane.kind === 'notes' ? "TC's Notes"
       : pane.kind === 'clipboard' ? 'TaylorMade Clipboard'
         : pane.kind === 'web' ? pane.web?.label
-          : pane.kind === 'file' && pane.file ? `${fileBaseName(pane.file.path)}${fileDirty[pane.id] ? ' •' : ''}` : undefined
+          : pane.kind === 'file' && pane.file ? `${fileBaseName(pane.file.path)}${fileDirty[pane.id] ? ' •' : ''}`
+            : pane.kind === 'folder' && pane.folder ? folderLabel(pane.folder.path)
+              : pane.kind === 'start' ? 'Start' : undefined
 
   const tool = (title: string, icon: ReactNode, onClick: () => void, disabled = false, active = false) => (
     <button className={`iconbtn iconbtn--sm ${active ? 'is-on' : ''}`} onClick={onClick} title={title} aria-label={title} aria-pressed={active || undefined} disabled={disabled} data-testid={tid('pane-tool', title)}>
@@ -1102,6 +1187,24 @@ export function App() {
 
   /** The header tool strip, per kind — an editor title bar's actions. */
   const paneTools = (pane: PaneInstance) => {
+    if (pane.kind === 'folder' && pane.folder) {
+      // The folder pane's bar (0.4.77, the user's ask): a chat or a terminal in this root, the editors, another folder.
+      const target = { cwd: pane.folder.path, label: folderLabel(pane.folder.path) }
+      const full = panes.length >= MAX_PANES
+      return (
+        <>
+          {tool(full ? 'New TaylorMade CC — all six panes are open' : 'New TaylorMade CC here', <ProviderBadge provider="claude" />, () => startIn('claude', target), full)}
+          {tool(full ? 'New TaylorMade Codex — all six panes are open' : 'New TaylorMade Codex here', <ProviderBadge provider="codex" />, () => startIn('codex', target), full)}
+          {tool(full ? 'New terminal here (opens a window — all six panes are open)' : 'New terminal here', ic(Terminal), () => startIn('shell', target))}
+          {tool('Open in Cursor', ic(Code2), () => window.watch.openCursor(pane.folder!.path))}
+          {tool('Open in Explorer', ic(ExternalLink), () => window.watch.openPath(pane.folder!.path))}
+          {tool('Open another folder…', ic(FolderOpen), () => pickFolder(pane.id))}
+        </>
+      )
+    }
+    if (pane.kind === 'start') {
+      return <>{tool('Open folder…', ic(FolderOpen), () => pickFolder(pane.id))}</>
+    }
     if (pane.kind === 'file' && pane.file) {
       const path = pane.file.path
       const previewing = filePreview[pane.id] ?? fileKind(path) === 'markdown'
@@ -1387,6 +1490,9 @@ export function App() {
       })
       cmd(`web-ext:${w.url}`, `Open ${w.label} in your browser`, () => openWeb(w, true), { icon: <ExternalLink strokeWidth={2} />, keywords: ['browser', 'web', 'site', 'external'] })
     }
+    cmd('new-start', 'New pane (start page)', () => addPane('start'), { icon: <LayoutGrid strokeWidth={2} />, keywords: ['home', 'tools', 'recents'], detail: full ? 'all six panes are open' : undefined })
+    cmd('open-folder', 'Open folder…', () => pickFolder(), { icon: <FolderOpen strokeWidth={2} />, keywords: ['directory', 'tree', 'browse'] })
+    for (const f of folders.slice(0, 8)) cmd(`recent:${f.cwd}`, `Open recent: ${f.label}`, () => openFolder(f.cwd), { icon: <Folder strokeWidth={2} />, detail: f.cwd, keywords: ['folder'] })
     cmd('new-project', 'New project…', () => setNewProjectOpen(true), { icon: <FolderPlus strokeWidth={2} /> })
     cmd('projects-dir', 'Open Projects folder', () => window.watch.openProjectsDir(), { icon: <Folder strokeWidth={2} />, keywords: ['explorer'] })
     cmd('activity', 'Activity stream', showStream, {
@@ -1428,7 +1534,8 @@ export function App() {
         ? `Terminal${pane.term?.label ? ` · ${pane.term.label}` : ''}`
         : pane.kind === 'web' && pane.web ? pane.web.label
           : pane.kind === 'file' && pane.file ? fileBaseName(pane.file.path)
-            : PANE_KINDS.find((k) => k.id === pane.kind)!.label
+            : pane.kind === 'folder' && pane.folder ? folderLabel(pane.folder.path)
+              : PANE_KINDS.find((k) => k.id === pane.kind)!.label
       if (panes.length > 1) {
         cmd(`zoom:${pane.id}`, zoomed === pane.id ? `Restore grid` : `Zoom pane: ${kindLabel}`, () => setZoom(zoomed === pane.id ? null : pane.id), { icon: zoomed === pane.id ? <Minimize2 strokeWidth={2} /> : <Maximize2 strokeWidth={2} />, keywords: ['maximize', 'focus'] })
       }
@@ -1550,6 +1657,10 @@ export function App() {
         onNewTerminal={newTerminal}
         onNewChat={newChat}
         onNewProject={() => setNewProjectOpen(true)}
+        onNewStart={() => addPane('start')}
+        onOpenFolder={() => pickFolder()}
+        recentFolders={folders}
+        onOpenRecent={(cwd) => openFolder(cwd)}
         sizeMode={sizeMode}
         onSizeMode={applySizeMode}
         paneCols={paneCols}
@@ -1664,12 +1775,18 @@ export function App() {
           }}
         >
           {panes.length === 0 && (
-            <div className="gridempty" data-testid="grid-empty">
-              <SquareTerminal strokeWidth={1.5} style={{ width: 28, height: 28 }} />
-              <div className="gridempty-hint">
-                Nothing open. Right-click a project at the top of the sidebar to start TaylorMade CC or TaylorMade Codex there (File has them too).
-                <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>`</kbd> opens a terminal; <kbd>Ctrl</kbd><kbd>K</kbd> finds everything else.
-              </div>
+            // The empty grid is the start page (0.4.77): its tools open the first pane.
+            <div className="gridempty is-start" data-testid="grid-empty">
+              <StartPage
+                context={context}
+                suggested={stripProjects}
+                folders={folders}
+                paneFull={false}
+                onTool={(tool) => startTool(tool)}
+                onOpenFolder={(cwd) => openFolder(cwd)}
+                onStartIn={(kind, cwd, label) => startIn(kind, { cwd, label })}
+                onForget={(cwd) => setFolders((current) => forgetFolder(current, cwd))}
+              />
             </div>
           )}
           {panes.map((pane, index) => (
@@ -1704,13 +1821,14 @@ export function App() {
                 title={paneTitle(pane)}
                 icon={pane.kind === 'clipboard' ? <img className="gpane-ic gpane-mark" src={brandMark} alt="" draggable={false} /> : undefined}
                 context={paneContext(pane)}
-                path={pane.kind === 'terminal' ? pane.term?.cwd : pane.kind === 'chat' ? pane.chat?.cwd : pane.kind === 'notes' ? notesDir : pane.kind === 'web' ? (webState[pane.id]?.url ?? pane.web?.url) : pane.kind === 'file' && pane.file ? parentDir(pane.file.path) : undefined}
+                path={pane.kind === 'terminal' ? pane.term?.cwd : pane.kind === 'chat' ? pane.chat?.cwd : pane.kind === 'notes' ? notesDir : pane.kind === 'web' ? (webState[pane.id]?.url ?? pane.web?.url) : pane.kind === 'file' && pane.file ? parentDir(pane.file.path) : pane.kind === 'folder' && pane.folder ? pane.folder.path : undefined}
                 onCopyPath={
                   pane.kind === 'terminal' && pane.term?.cwd ? () => window.watch.copyText(pane.term!.cwd!)
                     : pane.kind === 'notes' && notesDir ? () => window.watch.copyText(notesDir)
                       : pane.kind === 'web' ? () => window.watch.copyText(webState[pane.id]?.url ?? pane.web?.url ?? '')
                         : pane.kind === 'file' && pane.file ? () => window.watch.copyText(pane.file!.path)
-                          : undefined
+                          : pane.kind === 'folder' && pane.folder ? () => window.watch.copyText(pane.folder!.path)
+                            : undefined
                 }
                 tools={paneTools(pane)}
                 attention={paneAttention.get(pane.id)}
