@@ -68,8 +68,8 @@ test('clampTreeWidth leaves the session its least width, then the tree its own',
 test('pillLines names the folder and offers both pills', () => {
   const lines = pillLines('claude-watch')
   assert.match(lines[0], /claude-watch has you/)
-  assert.ok(lines.some((l) => /red pill — Claude Code/.test(l)))
-  assert.ok(lines.some((l) => /blue pill — Codex/.test(l)))
+  assert.ok(lines.some((l) => /red pill \[Claude Code\]/.test(l)))
+  assert.ok(lines.some((l) => /blue pill \[Codex\]/.test(l)))
   assert.match(pillLines('  ')[0], /this folder/)
 })
 
@@ -93,4 +93,29 @@ test('suggestProjects puts the active projects first, fills from the recents, fo
   assert.equal(suggestProjects(active, many).length, MAX_SUGGESTED)
   assert.equal(MAX_SUGGESTED, 10)
   assert.deepEqual(suggestProjects([], []), [])
+})
+
+test('pillSegments cuts a line into text and inline pills with their offsets', async () => {
+  const { pillSegments, pillLines } = await import('./startPage.mjs')
+  const line = pillLines('x')[2]
+  const segs = pillSegments(line)
+  assert.deepEqual(segs.map((s) => s.pill ?? 'text'), ['text', 'claude', 'text'])
+  const pill = segs[1]
+  assert.equal(pill.label, 'Claude Code')
+  assert.equal(line.slice(pill.start, pill.start + pill.text.length), '[Claude Code]')
+  assert.equal(segs.map((s) => s.text).join(''), line, 'the pieces are the line')
+  assert.deepEqual(pillSegments('plain'), [{ text: 'plain', start: 0 }])
+  assert.equal(pillSegments(pillLines('x')[3])[1].pill, 'codex')
+})
+
+test('rainLevel: full for the intro, dimmed under the text, then gone — the scene ends', async () => {
+  const { rainLevel, sceneDuration, RAIN_INTRO_MS, RAIN_DIM, RAIN_DIM_MS } = await import('./startPage.mjs')
+  const textMs = 5000
+  assert.equal(rainLevel(0, textMs), 1)
+  assert.equal(rainLevel(RAIN_INTRO_MS, textMs), 1)
+  assert.ok(Math.abs(rainLevel(RAIN_INTRO_MS + RAIN_DIM_MS, textMs) - RAIN_DIM) < 1e-9)
+  assert.ok(rainLevel(RAIN_INTRO_MS + RAIN_DIM_MS / 2, textMs) < 1)
+  assert.equal(rainLevel(sceneDuration(textMs), textMs), 0)
+  assert.equal(rainLevel(sceneDuration(textMs) + 1000, textMs), 0)
+  assert.ok(rainLevel(sceneDuration(textMs) - 100, textMs) > 0)
 })

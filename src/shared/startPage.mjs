@@ -53,12 +53,60 @@ export function clampTreeWidth(width, paneWidth) {
  */
 export function pillLines(label) {
   const name = String(label ?? '').trim() || 'this folder'
+  // `[Claude Code]` and `[Codex]` are drawn as small pills inline (0.4.78, the user's ask); the brackets are their
+  // place in the typing timeline (the `[` is when the pill appears), never shown.
   return [
     `Wake up… ${name} has you.`,
     'This is your last chance. After this, there is no turning back.',
-    'Take the red pill — Claude Code — and I show you how deep the rabbit hole goes.',
-    'Take the blue pill — Codex — and the thread begins. You believe whatever you want to believe.'
+    'Take the red pill [Claude Code] and I show you how deep the rabbit hole goes.',
+    'Take the blue pill [Codex] and the thread begins. You believe whatever you want to believe.'
   ]
+}
+
+/**
+ * One line cut into text and inline pills, each with its offset in the line (the typing timeline's units: every line
+ * here is in the Basic Multilingual Plane, so code units and code points agree).
+ * @returns {({ text: string, start: number } | { pill: 'claude' | 'codex', label: string, text: string, start: number })[]}
+ */
+export function pillSegments(line) {
+  const s = String(line ?? '')
+  const out = []
+  const re = /\[(Claude Code|Codex)\]/g
+  let at = 0
+  let m
+  while ((m = re.exec(s))) {
+    if (m.index > at) out.push({ text: s.slice(at, m.index), start: at })
+    out.push({ pill: m[1] === 'Codex' ? 'codex' : 'claude', label: m[1], text: m[0], start: m.index })
+    at = m.index + m[0].length
+  }
+  if (at < s.length) out.push({ text: s.slice(at), start: at })
+  return out
+}
+
+/** The rain falls alone this long before the first line types; then it dims under the text and fades once it is out. */
+export const RAIN_INTRO_MS = 1400
+export const RAIN_DIM = 0.3
+export const RAIN_DIM_MS = 1500
+export const RAIN_OUT_MS = 1800
+
+/**
+ * How strong the digital rain is `t` ms into the scene, given how long the text takes to type (`textMs`): full during
+ * the intro, easing to RAIN_DIM while the lines type, then out to 0 — after which nothing draws. Never an
+ * always-on effect: the scene ends.
+ */
+export function rainLevel(t, textMs) {
+  if (!Number.isFinite(t) || t < 0) return 1
+  if (t <= RAIN_INTRO_MS) return 1
+  const dimmed = Math.min(1, (t - RAIN_INTRO_MS) / RAIN_DIM_MS)
+  const level = 1 - (1 - RAIN_DIM) * dimmed
+  const end = RAIN_INTRO_MS + Math.max(0, textMs)
+  if (t <= end) return level
+  return Math.max(0, level * (1 - (t - end) / RAIN_OUT_MS))
+}
+
+/** When the whole scene is over (the rain is gone). */
+export function sceneDuration(textMs) {
+  return RAIN_INTRO_MS + Math.max(0, textMs) + RAIN_OUT_MS
 }
 
 /** Typing speed and the beat between lines for the streamed text. */

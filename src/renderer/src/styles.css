@@ -843,7 +843,26 @@ kbd {
 
 /* The empty session side: Morpheus's offer types itself out, then the red pill or the blue pill (the user's ask, 0.4.78).
    Red and blue here are the two pills, not states — the scene is the only place they mean that. */
-.pillchoice { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; padding: 28px 24px; overflow: auto; }
+.pillchoice { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; padding: 28px 24px; overflow: auto; isolation: isolate; }
+/* The rain fills the side behind everything and never takes a click; the scene's own clock clears it when it ends. */
+.pillchoice-rain { position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; pointer-events: none; }
+.pillchoice-decode { color: #d6ffe0; text-shadow: 0 0 10px rgba(120, 255, 160, 0.7); }
+/* The names in the lines are pills of their own (the user's ask): a mini capsule and the name, in the line's flow. */
+.pill-inline {
+  --pill: #e5484d;
+  display: inline-flex; align-items: center; gap: 6px; margin: 0 2px; padding: 0 8px 0 6px; vertical-align: 1px;
+  border: 1px solid color-mix(in srgb, var(--pill) 65%, transparent); border-radius: 999px;
+  background: color-mix(in srgb, var(--pill) 18%, transparent);
+  color: var(--text); font: inherit; font-weight: 650; line-height: 1.5; text-shadow: none; cursor: pointer;
+  animation: pill-in 320ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  transition: box-shadow 140ms ease, background 140ms ease;
+}
+.pill-inline.is-blue { --pill: #3b82f6; }
+.pill-inline:hover { background: color-mix(in srgb, var(--pill) 30%, transparent); box-shadow: 0 0 12px color-mix(in srgb, var(--pill) 45%, transparent); }
+.pill-inline:focus-visible { outline: 2px solid var(--pill); outline-offset: 2px; }
+.pill-inline.is-pending { visibility: hidden; animation: none; }
+.pill-inline .pillchoice-rest { color: transparent; }
+.pill-capsule.is-mini { width: 16px; height: 7px; transform: rotate(-32deg); box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.45), 0 0 6px color-mix(in srgb, var(--pill) 55%, transparent); }
 .pillchoice-text { width: min(520px, 100%); font: 13px/1.65 ui-monospace, 'Cascadia Mono', Consolas, monospace; color: #6fdc8c; text-shadow: 0 0 8px rgba(80, 220, 120, 0.28); }
 .pillchoice-line { margin: 0 0 6px; white-space: pre-wrap; }
 .pillchoice-line.is-wake { color: #9cf0b2; }

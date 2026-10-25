@@ -20,3 +20,11 @@ export function forgetFolder(list: FolderEntry[], cwd: string): FolderEntry[]
 export function whenLabel(at: number, now?: number): string
 export const MAX_SUGGESTED: number
 export function suggestProjects(active: { cwd: string; label: string }[], folders: FolderEntry[], max?: number): { cwd: string; label: string; active: boolean }[]
+export type PillSegment = { text: string; start: number; pill?: undefined } | { pill: 'claude' | 'codex'; label: string; text: string; start: number }
+export function pillSegments(line: string): PillSegment[]
+export const RAIN_INTRO_MS: number
+export const RAIN_DIM: number
+export const RAIN_DIM_MS: number
+export const RAIN_OUT_MS: number
+export function rainLevel(t: number, textMs: number): number
+export function sceneDuration(textMs: number): number
