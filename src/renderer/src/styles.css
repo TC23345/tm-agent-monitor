@@ -870,7 +870,15 @@ kbd {
 .pillchoice-caret { display: inline-block; width: 7px; height: 1.05em; margin: 0 1px -2px; background: #6fdc8c; box-shadow: 0 0 6px rgba(80, 220, 120, 0.45); }
 .pillchoice-caret.is-rest { animation: pill-caret 1.05s steps(1) infinite; }
 @keyframes pill-caret { 50% { opacity: 0; } }
-.pillchoice-pills { display: flex; flex-direction: column; gap: 12px; width: min(320px, 100%); }
+.pillchoice-pills { display: flex; flex-direction: column; gap: 12px; width: min(320px, 100%); margin-top: 52px; }
+/* Laid out from the first frame (nothing moves) but unseen and unclickable until the text is out; then each rises in
+   slowly, red, blue, then the door. The inline pills in the text are the way in meanwhile. */
+.pillchoice-pills .pill-btn, .pillchoice-door { opacity: 0; transform: translateY(14px); visibility: hidden; transition: opacity 1100ms ease, transform 1100ms cubic-bezier(0.23, 1, 0.32, 1), visibility 0s linear 1100ms; }
+.pillchoice-pills.is-shown .pill-btn, .pillchoice-door.is-shown { opacity: 1; transform: none; visibility: visible; transition: opacity 1100ms ease, transform 1100ms cubic-bezier(0.23, 1, 0.32, 1), visibility 0s; }
+.pillchoice-pills.is-shown .pill-btn.is-red { transition-delay: 250ms; }
+.pillchoice-pills.is-shown .pill-btn.is-blue { transition-delay: 600ms; }
+.pillchoice-door.is-shown { transition-delay: 1000ms; }
+.pillchoice-pills.is-shown .pill-btn:hover { transform: translateY(-1px); transition-delay: 0s; transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms ease, background 160ms ease; }
 .pill-btn {
   --pill: #e5484d;
   display: flex; align-items: center; gap: 14px; width: 100%; padding: 12px 18px; border-radius: 999px; cursor: pointer;
@@ -878,9 +886,8 @@ kbd {
   background: linear-gradient(180deg, color-mix(in srgb, var(--pill) 22%, transparent), color-mix(in srgb, var(--pill) 10%, transparent));
   color: var(--text); font: inherit; text-align: left;
   transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms ease, background 160ms ease;
-  animation: pill-in 420ms cubic-bezier(0.23, 1, 0.32, 1) both;
 }
-.pill-btn.is-blue { --pill: #3b82f6; animation-delay: 90ms; }
+.pill-btn.is-blue { --pill: #3b82f6; }
 .pill-btn:hover { transform: translateY(-1px); box-shadow: 0 0 0 1px color-mix(in srgb, var(--pill) 80%, transparent), 0 6px 22px color-mix(in srgb, var(--pill) 30%, transparent); background: linear-gradient(180deg, color-mix(in srgb, var(--pill) 30%, transparent), color-mix(in srgb, var(--pill) 15%, transparent)); }
 .pill-btn:focus-visible { outline: 2px solid var(--pill); outline-offset: 3px; }
 @keyframes pill-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
@@ -897,7 +904,7 @@ kbd {
 .pillchoice-door svg { width: 13px; height: 13px; }
 .pillchoice-door:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
 @media (prefers-reduced-motion: reduce) {
-  .pill-btn { animation: none; transition: none; }
+  .pill-btn, .pillchoice-door { transition: none !important; }
   .pillchoice-caret.is-rest { animation: none; }
 }
 .ptree.is-fill { flex: 1 1 auto; height: auto; margin: 0; padding: 6px 8px 8px; }

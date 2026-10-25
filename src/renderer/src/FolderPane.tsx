@@ -221,17 +221,18 @@ function PillChoice({ label, onStart }: { label: string; onStart: (kind: FolderS
           <p key={i} className={`pillchoice-line ${i === 0 ? 'is-wake' : ''}`}>{renderLine(line, i)}</p>
         ))}
       </div>
-      <div className="pillchoice-pills">
-        <button className="pill-btn is-red" onClick={() => onStart('claude')} title={title('claude')} data-testid="pill:claude">
+      {/* The big pills and the door wait for the last word, then rise in one after another (the user's call). */}
+      <div className={`pillchoice-pills ${done ? 'is-shown' : ''}`} aria-hidden={!done || undefined}>
+        <button className="pill-btn is-red" tabIndex={done ? 0 : -1} onClick={() => onStart('claude')} title={title('claude')} data-testid="pill:claude">
           <span className="pill-capsule" aria-hidden />
           <span className="pill-text"><span className="pill-name">Claude Code</span><span className="pill-sub">the red pill · TaylorMade CC</span></span>
         </button>
-        <button className="pill-btn is-blue" onClick={() => onStart('codex')} title={title('codex')} data-testid="pill:codex">
+        <button className="pill-btn is-blue" tabIndex={done ? 0 : -1} onClick={() => onStart('codex')} title={title('codex')} data-testid="pill:codex">
           <span className="pill-capsule" aria-hidden />
           <span className="pill-text"><span className="pill-name">Codex</span><span className="pill-sub">the blue pill · TaylorMade Codex</span></span>
         </button>
       </div>
-      <button className="pillchoice-door" onClick={() => onStart('shell')} title={`A PowerShell terminal in ${label}, here beside the files`} data-testid="pill:shell">
+      <button className={`pillchoice-door ${done ? 'is-shown' : ''}`} tabIndex={done ? 0 : -1} aria-hidden={!done || undefined} onClick={() => onStart('shell')} title={`A PowerShell terminal in ${label}, here beside the files`} data-testid="pill:shell">
         <Terminal strokeWidth={2} />Or no pill: a terminal here
       </button>
     </div>
