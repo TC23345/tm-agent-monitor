@@ -344,3 +344,13 @@ test('limits, sign-in, memories, notifications and end reasons are rows', async 
   f = foldSdkMessage(fresh(), { type: 'result', subtype: 'success', is_error: false, terminal_reason: 'stop_hook_prevented', usage: {} })
   assert.deepEqual([f.transcript.items[0].text, f.transcript.status], ['A hook stopped Claude from finishing.', 'idle'])
 })
+
+test('a compaction drops the stale context figure, or takes the size after when the boundary has it', () => {
+  let f = fresh()
+  f = { ...f, transcript: { ...f.transcript, usage: { ...f.transcript.usage, contextTokens: 435000, contextWindow: 1000000 } } }
+  const live = foldSdkMessage(f, { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'manual', pre_tokens: 435000 }, uuid: 'cb', session_id: 's' })
+  assert.equal(live.transcript.usage.contextTokens, undefined, 'the size before is not what the window holds now')
+  assert.equal(live.transcript.usage.contextWindow, 1000000)
+  const sized = foldSdkMessage(f, { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'manual', pre_tokens: 435000, post_tokens: 21000 }, uuid: 'cb2', session_id: 's' })
+  assert.equal(sized.transcript.usage.contextTokens, 21000)
+})

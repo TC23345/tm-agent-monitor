@@ -241,6 +241,8 @@ export class ClaudeSession extends EventEmitter {
   private outputStyles: string[] = []
   /** Stop was pressed: the result that ends this turn reads as *Interrupted*. */
   private interrupting = false
+  /** A compaction happened this turn: re-read the context window when the turn ends. */
+  private compacted = false
   /** The CLI's process id (the SDK's `onProcessSpawned`), so close can end what it started too. */
   private pid: number | null = null
   /** Ends what the host keeps of this CLI's processes (`adoptProcess`). */
@@ -339,6 +341,10 @@ export class ClaudeSession extends EventEmitter {
     }
     const next = foldSdkMessage(this.fold, msg, { interrupted: this.interrupting })
     if (msg.type === 'result') this.interrupting = false
+    // After a compaction, ask the CLI what the window holds now — at the boundary and again when its turn ends,
+    // because the boundary's own metadata carries only the size before (the pie stayed at it until the next reply).
+    if (msg.type === 'system' && msg.subtype === 'compact_boundary') { this.compacted = true; void this.readContext() }
+    else if (msg.type === 'result' && this.compacted) { this.compacted = false; void this.readContext() }
     if (next !== this.fold) {
       this.fold = next
       if (next.transcript !== this.transcript) {
@@ -553,6 +559,18 @@ export class ClaudeSession extends EventEmitter {
       this.update({ ...this.transcript, usage: { ...u, contextWindow: r.maxTokens, ...(fill ? { contextTokens: r.totalTokens } : {}) } })
     } catch {
       /* an older CLI without the call, or the session already ended */
+    }
+  }
+
+  /** What the context window holds right now, overwriting the figure the last call left (a compaction's re-read). */
+  private async readContext(): Promise<void> {
+    try {
+      const r = await this.live().getContextUsage({ detail: 'summary' })
+      if (typeof r?.totalTokens !== 'number' || r.totalTokens <= 0) return
+      const u = this.transcript.usage
+      this.update({ ...this.transcript, usage: { ...u, contextTokens: r.totalTokens, ...(typeof r.maxTokens === 'number' && r.maxTokens > 0 ? { contextWindow: r.maxTokens } : {}) } })
+    } catch {
+      /* an older CLI without the call, or the session already ended: the next call's usage fills it */
     }
   }
 

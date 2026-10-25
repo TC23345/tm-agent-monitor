@@ -280,6 +280,19 @@ function compactItem(id, meta, at) {
   return { kind: 'system', id, text: meta?.trigger === 'auto' ? 'Context compacted automatically' : 'Context compacted', level: 'info', at, variant: 'compact', ...(tokens ? { tokens } : {}) }
 }
 
+/**
+ * A compaction empties most of the context window, so the figure from the last call before it is stale: take the
+ * size the boundary reports (`post_tokens` live, `postTokens` stored) when it has one, else drop the figure until
+ * the next call (or the session's own re-read, `ClaudeSession`) says what is left — never keep showing the old one.
+ */
+export function afterCompact(t, meta) {
+  const post = meta?.post_tokens ?? meta?.postTokens
+  const usage = { ...t.usage }
+  if (typeof post === 'number' && post > 0) usage.contextTokens = post
+  else delete usage.contextTokens
+  return { ...t, usage }
+}
+
 const TASK_WORDS = { completed: 'finished', failed: 'failed', stopped: 'was stopped' }
 
 /**
@@ -317,7 +330,7 @@ export function foldSdkMessage(f, msg, opts = {}) {
       }
       if (msg.subtype === 'compact_boundary') {
         const id = `compact:${msg.uuid ?? at}`
-        return { ...keep({ ...appendItem(t, compactItem(id, msg.compact_metadata, at)), activity: null }), compactId: id }
+        return { ...keep({ ...afterCompact(appendItem(t, compactItem(id, msg.compact_metadata, at)), msg.compact_metadata), activity: null }), compactId: id }
       }
       if (msg.subtype === 'permission_denied') return keep(appendItem(t, { kind: 'system', id: `denied:${msg.tool_use_id ?? at}`, text: msg.message ?? `${msg.tool_name} was denied`, level: 'error', at }))
       if (msg.subtype === 'api_retry') return keep({ ...t, retry: { attempt: num(msg.attempt, 1), max: num(msg.max_retries, 0) } })
@@ -638,7 +651,8 @@ export function sessionMessagesToTranscript(meta, messages) {
       if (context) t = addUsage(t, { contextTokens: context })
       step(at)
     } else if (m.type === 'system' && (inner?.subtype ?? m.subtype) === 'compact_boundary') {
-      t = appendItem(t, compactItem(`compact:${m.uuid}`, inner.compact_metadata ?? inner.compactMetadata ?? m.compactMetadata, at))
+      const meta = inner.compact_metadata ?? inner.compactMetadata ?? m.compactMetadata
+      t = afterCompact(appendItem(t, compactItem(`compact:${m.uuid}`, meta, at)), meta)
     }
   }
   close()
