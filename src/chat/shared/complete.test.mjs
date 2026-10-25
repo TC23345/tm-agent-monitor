@@ -33,3 +33,13 @@ test('cleanCompletion bounds the length at a sentence end', () => {
   const noStop = cleanCompletion(Array.from({ length: 80 }, () => 'word').join(' '), 'go')
   assert.ok(noStop.length <= MAX_COMPLETION && noStop.endsWith('word'))
 })
+
+test('samplePrompt gives the instructions and the draft, no reply excerpt (the thread holds the conversation)', async () => {
+  const { samplePrompt, SYSTEM } = await import('./complete.mjs')
+  const p = samplePrompt('please refactor the')
+  assert.ok(p.startsWith(SYSTEM))
+  assert.ok(p.endsWith('<message>please refactor the</message>'))
+  assert.ok(!p.includes('<reply>'))
+  const long = samplePrompt('x'.repeat(9000))
+  assert.equal(long.slice(long.indexOf('<message>') + '<message>'.length, long.indexOf('</message>')).length, 4000, 'the draft is bounded like the one-shot prompt')
+})

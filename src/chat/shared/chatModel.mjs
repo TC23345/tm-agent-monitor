@@ -239,9 +239,9 @@ import { changeLines, countChanges, splitLines } from './diff.mjs'
  */
 /**
  * One MCP server as the session sees it.
- * @typedef {{ name: string, status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled', error?: string, tools: number, scope?: string }} McpServer
+ * @typedef {{ name: string, status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled', error?: string, tools: number, scope?: string, locked?: string, signIn?: boolean }} McpServer
  */
-/** @typedef {{ op: 'list' } | { op: 'toggle', name: string, enabled: boolean } | { op: 'reconnect', name: string }} McpRequest */
+/** @typedef {{ op: 'list' } | { op: 'toggle', name: string, enabled: boolean } | { op: 'reconnect', name: string } | { op: 'login', name: string }} McpRequest */
 
 export const MAX_ITEMS = 2000
 export const MAX_TOOL_OUTPUT = 64 * 1024

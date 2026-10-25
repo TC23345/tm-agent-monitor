@@ -169,8 +169,9 @@ export interface UndoResult { ok: boolean; message: string }
 
 export interface RewindResult { canRewind: boolean; files: string[]; insertions: number; deletions: number; error?: string }
 export interface ContextUsage { total: number; max: number; percent: number; categories: { name: string; tokens: number; kind: string }[]; memoryFiles: { path: string; tokens: number }[]; limits?: RateLimits | null }
-export interface McpServer { name: string; status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled'; error?: string; tools: number; scope?: string }
-export type McpRequest = { op: 'list' } | { op: 'toggle'; name: string; enabled: boolean } | { op: 'reconnect'; name: string }
+/** `locked`: why the panel's switch cannot change this server (a Codex built-in or plugin server); `signIn`: an OAuth sign-in is on offer. */
+export interface McpServer { name: string; status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled'; error?: string; tools: number; scope?: string; locked?: string; signIn?: boolean }
+export type McpRequest = { op: 'list' } | { op: 'toggle'; name: string; enabled: boolean } | { op: 'reconnect'; name: string } | { op: 'login'; name: string }
 
 export interface SessionSummary {
   provider: Provider

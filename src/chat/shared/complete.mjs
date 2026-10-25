@@ -39,6 +39,16 @@ export function completionPrompt(draft, context) {
 }
 
 /**
+ * The prompt for Codex's `thread/sample` (0.164+): the same instructions and the draft, no reply excerpt — the
+ * sample runs on the thread's own context, which already holds the conversation (and is cached).
+ * @param {string} draft
+ */
+export function samplePrompt(draft) {
+  const d = String(draft ?? '').slice(-MAX_DRAFT)
+  return `${SYSTEM}\n\nThe message so far (continue from its very end):\n<message>${d}</message>`
+}
+
+/**
  * The model's answer as text to put after the draft: quotes and fences it may have wrapped it in are dropped, an
  * echo of the draft is cut off, the length is bounded, and a leading space is kept only when the draft needs one.
  * Empty when nothing usable came back.

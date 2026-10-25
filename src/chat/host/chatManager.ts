@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ClaudeSession, listClaudeSessions, loadClaudeTranscript } from '../claude/session'
 import { completeDraft } from '../claude/complete'
+import { cleanCompletion, samplePrompt } from '../shared/complete.mjs'
 import type { AdoptProcess } from '../shared/processTree.mjs'
 import { CodexAppServer, CodexThread, type CodexServerMode } from '../codex/appServer'
 import {
@@ -36,6 +37,8 @@ export interface ChatManagerOptions {
   allowBypass?: boolean
   /** The permission mode a new Claude chat starts in when the request names none (the user's own default, set in the mode menu, still wins). */
   defaultMode?: string
+  /** Open a web page in the user's browser (an MCP server's OAuth sign-in). Without it the sign-in reports the URL instead. */
+  openExternal?: (url: string) => void
 }
 
 interface Live {
@@ -235,7 +238,8 @@ export class ChatManager extends EventEmitter implements ChatBridge {
 
   async mcp(id: string, req: McpRequest): Promise<McpServer[]> {
     const l = this.must(id)
-    return l.claude ? l.claude.mcp(req) : l.codex!.mcp(req)
+    if (l.claude && req.op === 'login') throw new Error('Sign in to Claude Code\'s MCP servers with /mcp in a terminal')
+    return l.claude ? l.claude.mcp(req) : l.codex!.mcp(req, this.config.openExternal)
   }
 
   async background(id: string, toolUseId?: string): Promise<boolean> {
@@ -290,6 +294,18 @@ export class ChatManager extends EventEmitter implements ChatBridge {
   async complete(id: string, draft: string): Promise<string> {
     const l = this.must(id)
     const t = (l.claude ?? l.codex)!.transcript
+    // A Codex chat with a finished turn completes on its own thread (`thread/sample`, 0.164+): the whole conversation
+    // as context, from the cache, nothing added to the thread. Anything else — no turn yet, a running one, an older
+    // Codex — falls back to the one-shot Haiku call.
+    if (l.codex) {
+      try {
+        const text = await l.codex.sample(samplePrompt(draft))
+        const clean = text === null ? '' : cleanCompletion(text, draft)
+        if (clean) return clean
+      } catch (err) {
+        this.config.log?.(`codex sample fell back: ${(err as Error).message}`)
+      }
+    }
     const last = [...t.items].reverse().find((x) => x.kind === 'assistant' && 'text' in x && x.text) as { text: string } | undefined
     return completeDraft({
       cwd: l.cwd, draft, context: last?.text ?? null, claudePath: this.config.claudePath,

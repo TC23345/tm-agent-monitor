@@ -402,6 +402,8 @@ export class CodexThread extends EventEmitter {
   threadId: string | null
   readonly server: CodexAppServer
   private turnId: string | null = null
+  /** The thread's newest finished turn — `thread/sample` runs on it (completed, failed or interrupted, never a live one). */
+  private doneTurnId: string | null = null
   /** The composer's picks; sent with every turn (they persist server-side for the turns after too). */
   private overrides: { model?: string | null; effort?: string | null; mode?: CodexMode; serviceTier?: string } = {}
   private approvals = new Map<string, ServerRequest>()
@@ -443,6 +445,7 @@ export class CodexThread extends EventEmitter {
     if (!mine) return
     if (n.method === 'turn/completed') {
       this.turnId = null
+      if (p.turn?.id) this.doneTurnId = String(p.turn.id)
       this.refreshBackground()
       void this.requestPrediction(p.turn?.id)
       // The next queued prompt goes as its own turn, unless an interrupt paused the queue.
@@ -720,16 +723,76 @@ export class CodexThread extends EventEmitter {
     this.update(appendItem(t, { kind: 'system', id: `status:${Date.now()}`, text: 'Status', level: 'info', at: Date.now(), variant: 'status', detail: lines.join('\n') }))
   }
 
-  /** MCP servers as the panel lists them (`mcpServerStatus/list`). Codex keeps their switches in config.toml, so the panel only reads. */
-  async mcp(req: McpRequest): Promise<McpServer[]> {
-    if (req.op !== 'list') throw new Error('Codex keeps its MCP servers in config.toml — change them there or with `codex mcp` in a terminal')
+  /**
+   * The MCP panel (0.4.78, from the app-server's own config API rather than a pointer to config.toml):
+   * a server the user's config.toml declares switches through `config/batchWrite` (`mcp_servers.<name>.enabled`,
+   * `reloadUserConfig`) — the same key `codex mcp` writes, and a round trip on the real file came back byte for
+   * byte — then `config/mcpServer/reload`; Reconnect is that reload; a server that wants OAuth signs in through
+   * `mcpServer/oauth/login`, whose authorization URL the host opens (`openExternal`). Codex's built-in servers
+   * (`codex_apps`, the bundled plugins' `codex_app` / `cua_repl`) are not in config.toml: they list, locked.
+   */
+  async mcp(req: McpRequest, openExternal?: (url: string) => void): Promise<McpServer[]> {
+    let own = await this.userMcpServers()
+    if (req.op === 'toggle') {
+      if (!own.has(req.name)) throw new Error(`${req.name} is built into Codex, not set in your config.toml`)
+      await this.server.request('config/batchWrite', { edits: [{ keyPath: `mcp_servers.${req.name}.enabled`, value: req.enabled, mergeStrategy: 'upsert' }], reloadUserConfig: true })
+      await this.server.request('config/mcpServer/reload', undefined).catch(() => undefined)
+      own = await this.userMcpServers() // the list below must show the switch where it now is
+    } else if (req.op === 'reconnect') {
+      await this.server.request('config/mcpServer/reload', undefined)
+    } else if (req.op === 'login') {
+      const res = await this.server.request<{ authorizationUrl?: string }>('mcpServer/oauth/login', { name: req.name, ...(this.threadId ? { threadId: this.threadId } : {}) })
+      const url = typeof res?.authorizationUrl === 'string' ? res.authorizationUrl : ''
+      if (!/^https?:\/\//i.test(url)) throw new Error(`${req.name} gave no sign-in page`)
+      if (!openExternal) throw new Error(`Open this page to sign in to ${req.name}: ${url}`)
+      openExternal(url)
+    }
     const res = await this.server.request<{ data?: any[] }>('mcpServerStatus/list', { detail: 'toolsAndAuthOnly', limit: 100, ...(this.threadId ? { threadId: this.threadId } : {}) })
-    return (res.data ?? []).map((s) => ({
-      name: String(s.name),
-      status: s.runtimeStatus === 'connected' ? 'connected' : s.runtimeStatus === 'failed' || s.toolsError ? 'failed' : s.runtimeStatus === 'authenticationRequired' || s.authStatus === 'notLoggedIn' ? 'needs-auth' : s.runtimeStatus === 'disabled' ? 'disabled' : 'pending',
-      ...(s.toolsError ? { error: String(s.toolsError) } : {}),
-      tools: Object.keys(s.tools ?? {}).length
-    }))
+    return (res.data ?? []).map((s) => {
+      const name = String(s.name)
+      const configured = own.get(name)
+      const off = configured === false || s.runtimeStatus === 'disabled'
+      const needsAuth = s.runtimeStatus === 'authenticationRequired' || s.authStatus === 'notLoggedIn'
+      return {
+        name,
+        // A server whose catalogue failed to load is failed even when its runtime says connected (0 tools beside a startup error read as working).
+        status: off ? 'disabled' : s.runtimeStatus === 'failed' || (s.toolsError && !Object.keys(s.tools ?? {}).length) ? 'failed' : s.runtimeStatus === 'connected' ? 'connected' : needsAuth ? 'needs-auth' : 'pending',
+        ...(s.toolsError ? { error: String(s.toolsError) } : {}),
+        tools: Object.keys(s.tools ?? {}).length,
+        ...(configured === undefined ? { locked: s.pluginId ? `Part of the ${String(s.pluginId).split('@')[0]} plugin — manage it in Codex` : 'Built into Codex — not in your config.toml' } : {}),
+        ...(needsAuth || (s.authStatus === 'oAuth' && (s.runtimeStatus === 'failed' || s.toolsError)) ? { signIn: true } : {}),
+        ...(s.httpOrigin ? { scope: String(s.httpOrigin).replace(/^https?:\/\//, '') } : {})
+      } satisfies McpServer
+    })
+  }
+
+  /** The MCP servers the user's own config declares, and whether each is on (`config/read`); empty when it cannot be read. */
+  private async userMcpServers(): Promise<Map<string, boolean>> {
+    try {
+      const res = await this.server.request<{ config?: { mcp_servers?: Record<string, { enabled?: boolean }> } }>('config/read', { cwd: this.transcript.cwd })
+      return new Map(Object.entries(res?.config?.mcp_servers ?? {}).map(([k, v]) => [k, v?.enabled !== false]))
+    } catch {
+      return new Map()
+    }
+  }
+
+  /**
+   * A one-off answer on the thread's own (cached) context, added to nothing (`thread/sample`, Codex 0.164+): the
+   * composer's Shift+Tab completion. Null when there is no finished turn to sample on, a turn is running, or the
+   * server is older — the caller falls back.
+   */
+  async sample(prompt: string): Promise<string | null> {
+    if (!this.threadId || this.turnId) return null
+    let turn = this.doneTurnId
+    if (!turn) {
+      for (let i = this.transcript.items.length - 1; i >= 0 && !turn; i--) {
+        const x = this.transcript.items[i] as { turnId?: string }
+        if (x?.turnId) turn = x.turnId
+      }
+    }
+    if (!turn) return null
+    const res = await this.server.request<{ text?: string | null }>('thread/sample', { threadId: this.threadId, expectedTurnId: turn, prompt, effort: 'low' })
+    return typeof res?.text === 'string' ? res.text : null
   }
 
   /** Background terminals still running after their command row (experimental `thread/backgroundTerminals/list`), debounced. */

@@ -669,7 +669,7 @@ export const ChatPane = forwardRef<ChatPaneHandle, Props>(function ChatPane(prop
       {notice ? <div className="chat-notice" role="alert">{notice}<button className="chat-iconbtn" aria-label="Dismiss" onClick={() => setNotice(null)}><X className="chat-ic" /></button></div> : null}
       {transcript?.error && transcript.status === 'error' ? <div className="chat-notice is-error" role="alert">{transcript.error}</div> : null}
       {picker ? <SessionPicker bridge={bridge} provider={config.provider} cwd={config.cwd} onPick={pick} onClose={() => setPicker(false)} /> : null}
-      {panel === 'mcp' && chatId ? <McpPanel load={(req: McpRequest) => bridge.mcp(chatId, req)} onClose={() => setPanel(null)} /> : null}
+      {panel === 'mcp' && chatId ? <McpPanel load={(req: McpRequest) => bridge.mcp(chatId, req)} onClose={() => setPanel(null)} provider={config.provider} /> : null}
       <div className="chat-main">
         <div className="chat-scroll-wrap">
           {finding ? <FindBar root={scrollEl} version={items} onClose={() => setFinding(false)} /> : null}

@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { Bookmark, Check, ChevronDown, ChevronRight, ChevronUp, Copy, MessageSquareQuote, MessageSquarePlus, Plug, RotateCw, Send, X } from 'lucide-react'
 import { WORKING_VERBS, fmtTokens, limitLines, relPath, verbDelay } from '../shared/present.mjs'
-import type { ContextUsage, McpServer, Provider, RewindResult } from '../shared/chatModel.mjs'
+import type { ContextUsage, McpRequest, McpServer, Provider, RewindResult } from '../shared/chatModel.mjs'
 
 /** Escape (and the host's `tm-escape`) closes whatever `ref` holds while `active`. */
 export function useEscape(ref: RefObject<HTMLElement | null>, onClose: () => void, active = true) {
@@ -397,28 +397,52 @@ export function SidePanel({ ask, renderText, onClose }: { ask: (q: string) => Pr
 
 const MCP_WORDS: Record<McpServer['status'], string> = { connected: 'Connected', failed: 'Failed', 'needs-auth': 'Needs sign-in', pending: 'Connecting…', disabled: 'Off' }
 
-/** The session's MCP servers: status, tools, on/off and reconnect. Adding, removing and sign-in stay in the CLI (`/mcp`). */
-export function McpPanel({ load, onClose }: { load: (req: { op: 'list' } | { op: 'toggle'; name: string; enabled: boolean } | { op: 'reconnect'; name: string }) => Promise<McpServer[]>; onClose: () => void }) {
+/**
+ * The session's MCP servers: status, tools, on/off, reconnect and — for a server that wants OAuth — sign-in.
+ * Claude switches and reconnects through the SDK; Codex (0.4.78) through its app-server's config API: the switch
+ * writes `mcp_servers.<name>.enabled` in config.toml and reloads, a built-in or plugin server is locked with the
+ * reason, and *Sign in* opens the server's sign-in page in the browser, then the list follows until it connects.
+ * Adding and removing servers stay in the CLI.
+ */
+export function McpPanel({ load, onClose, provider }: { load: (req: McpRequest) => Promise<McpServer[]>; onClose: () => void; provider?: Provider }) {
   const ref = useRef<HTMLDivElement | null>(null)
   const [servers, setServers] = useState<McpServer[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /** The server a sign-in is waiting on (its page is open in the browser). */
+  const [signing, setSigning] = useState<string | null>(null)
   useEscape(ref, onClose)
-  const run = useCallback((req: Parameters<typeof load>[0], name: string | null) => {
+  const run = useCallback((req: McpRequest, name: string | null) => {
     setBusy(name)
     setError(null)
-    load(req).then(setServers, (err: Error) => setError(err.message)).finally(() => setBusy(null))
+    return load(req).then((list) => { setServers(list); return list }, (err: Error) => { setError(err.message); return null }).finally(() => setBusy(null))
   }, [load])
-  useEffect(() => run({ op: 'list' }, null), [run])
+  useEffect(() => { void run({ op: 'list' }, null) }, [run])
+  // While a sign-in is out, re-read the list every 3 s (for two minutes) until that server no longer needs it.
+  useEffect(() => {
+    if (!signing) return
+    let tries = 0
+    const t = window.setInterval(() => {
+      tries++
+      load({ op: 'list' }).then((list) => {
+        setServers(list)
+        const s = list.find((x) => x.name === signing)
+        if (!s || s.status !== 'needs-auth' || tries >= 40) setSigning(null)
+      }, () => { if (tries >= 40) setSigning(null) })
+    }, 3000)
+    return () => window.clearInterval(t)
+  }, [signing, load])
+  const signIn = (name: string) => { void run({ op: 'login', name }, name).then((list) => { if (list) setSigning(name) }) }
   return (
     <div ref={ref} className="chat-picker chat-mcp" data-escape-close="" data-testid="chat-mcp">
       <div className="chat-panel-head">
         <Plug className="chat-ic" aria-hidden />
         <span className="chat-panel-title">MCP servers</span>
-        <span className="chat-panel-hint">Add, remove or sign in with /mcp in a terminal</span>
+        <span className="chat-panel-hint">{provider === 'codex' ? 'Add or remove with `codex mcp` in a terminal' : 'Add, remove or sign in with /mcp in a terminal'}</span>
         <button className="chat-iconbtn" aria-label="Close MCP servers" title="Close (Esc)" onClick={onClose}><X className="chat-ic" /></button>
       </div>
       {error ? <div className="chat-mcp-error">{error}</div> : null}
+      {signing ? <div className="chat-mcp-note" data-testid="chat-mcp-signing">Finish signing in to {signing} in your browser — this list updates when you are done.</div> : null}
       <div className="chat-picker-list">
         {servers === null ? <div className="chat-empty">Loading…</div> : servers.length === 0 ? <div className="chat-empty">No MCP servers in this session.</div> : servers.map((s) => (
           <div key={s.name} className="chat-mcp-row" data-testid={`chat-mcp:${s.name}`}>
@@ -427,10 +451,16 @@ export function McpPanel({ load, onClose }: { load: (req: { op: 'list' } | { op:
               <span className={`chat-mcp-status is-${s.status}`}>{MCP_WORDS[s.status] ?? s.status}{s.status === 'connected' ? ` · ${s.tools} tool${s.tools === 1 ? '' : 's'}` : ''}{s.scope ? ` · ${s.scope}` : ''}</span>
               {s.error ? <span className="chat-mcp-detail" title={s.error}>{s.error}</span> : null}
             </div>
-            <button className="chat-iconbtn" aria-label={`Reconnect ${s.name}`} title="Reconnect" disabled={busy !== null || s.status === 'disabled'} onClick={() => run({ op: 'reconnect', name: s.name }, s.name)}><RotateCw className={`chat-ic ${busy === s.name ? 'is-spinning' : ''}`} /></button>
+            {s.signIn ? (
+              <button className="chat-btn chat-mcp-signin" disabled={busy !== null || signing === s.name} onClick={() => signIn(s.name)} title={`Open ${s.name}'s sign-in page in your browser`} data-testid={`chat-mcp-signin:${s.name}`}>
+                {signing === s.name ? 'Waiting…' : 'Sign in'}
+              </button>
+            ) : null}
+            <button className="chat-iconbtn" aria-label={`Reconnect ${s.name}`} title={provider === 'codex' ? 'Reload the MCP servers' : 'Reconnect'} disabled={busy !== null || s.status === 'disabled'} onClick={() => { void run({ op: 'reconnect', name: s.name }, s.name) }}><RotateCw className={`chat-ic ${busy === s.name ? 'is-spinning' : ''}`} /></button>
             <button
               className={`chat-switch ${s.status !== 'disabled' ? 'is-on' : ''}`} role="switch" aria-checked={s.status !== 'disabled'} aria-label={`${s.name} on or off`}
-              disabled={busy !== null} onClick={() => run({ op: 'toggle', name: s.name, enabled: s.status === 'disabled' }, s.name)}
+              title={s.locked ?? (s.status === 'disabled' ? `Turn ${s.name} on` : `Turn ${s.name} off`)}
+              disabled={busy !== null || !!s.locked} onClick={() => { void run({ op: 'toggle', name: s.name, enabled: s.status === 'disabled' }, s.name) }}
             ><span className="chat-switch-thumb" /></button>
           </div>
         ))}

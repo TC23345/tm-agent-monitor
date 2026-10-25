@@ -220,6 +220,8 @@ const chats = new ChatManager({
   // The user's call (2026-10-22, 0.4.76): a new Claude chat starts in Bypass; the mode menu's own default (a
   // right-click on a mode) still wins, and the chip switches it live.
   defaultMode: 'bypassPermissions',
+  // An MCP server's sign-in page (Codex's mcpServer/oauth/login): the browser, and only ever an http(s) page.
+  openExternal: (url) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url) },
   log: (line) => console.log(`[chat] ${line}`),
   // Each CLI in a job of its own (0.4.68): closing the chat ends every MCP server it started, even one whose
   // npx/cmd parent had already exited, which the tree kill cannot find; and the app dying ends them too.
@@ -2269,6 +2271,8 @@ function registerIpc(): void {
     if (r.op === 'list') return settle(() => chats.mcp(id, { op: 'list' }))
     if (r.op === 'toggle' && name(r.name) && typeof r.enabled === 'boolean') return settle(() => chats.mcp(id, { op: 'toggle', name: r.name as string, enabled: r.enabled as boolean }))
     if (r.op === 'reconnect' && name(r.name)) return settle(() => chats.mcp(id, { op: 'reconnect', name: r.name as string }))
+    // A Codex server's OAuth sign-in (0.4.78): the app-server hands back the page, ChatManager's openExternal opens it.
+    if (r.op === 'login' && name(r.name)) return settle(() => chats.mcp(id, { op: 'login', name: r.name as string }))
     return null
   })
   ipcMain.handle('chat:background', async (_e, id: unknown, toolUseId: unknown) => (validTermId(id) && (toolUseId === undefined || validItemId(toolUseId)) ? settle(() => chats.background(id, toolUseId as string | undefined)) : null))
