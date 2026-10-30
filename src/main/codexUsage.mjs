@@ -131,6 +131,7 @@ export function parseCodexRolloutLines(lines, { source = '<memory>' } = {}) {
   let currentCwd
   let currentModel
   let rateLimits
+  let lastTokenAt
   let lineNumber = 0
 
   for (const text of lines) {
@@ -186,6 +187,7 @@ export function parseCodexRolloutLines(lines, { source = '<memory>' } = {}) {
     for (const [, key] of COUNTERS) delta[key] = reset || !havePrevious ? current[key] : current[key] - previous[key]
     previous = current
     havePrevious = true
+    lastTokenAt = row.timestamp
     addTokens(totals, delta)
 
     if (Object.values(delta).some((n) => n > 0)) {
@@ -207,6 +209,8 @@ export function parseCodexRolloutLines(lines, { source = '<memory>' } = {}) {
     source,
     session,
     totals,
+    lastCounters: havePrevious ? previous : undefined,
+    lastTokenAt,
     usageEvents,
     rateLimits,
     diagnostics,
@@ -256,7 +260,7 @@ async function recentRollouts(root, cutoff, out = []) {
  * Defaults to the start of the oldest local day in the seven-day insights
  * window. This keeps the local week view complete without requiring MongoDB.
  */
-export async function scanCodexUsage({
+export async function readCodexRollouts({
   rootDir = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'sessions'),
   now = Date.now(),
   lookbackMs
@@ -274,6 +278,14 @@ export async function scanCodexUsage({
   // Promise.all would retain every file buffer at once on a busy machine.
   const results = []
   for (const file of files) results.push(await parseCodexRolloutFile(file.path))
+  return { results, cutoff, filesScanned: files.length }
+}
+
+export async function scanCodexUsage(options = {}) {
+  return aggregateCodexRollouts(await readCodexRollouts(options))
+}
+
+export function aggregateCodexRollouts({ results, cutoff, filesScanned }) {
   const totals = zeroTokens()
   const days = new Map()
   const diagnostics = []
@@ -337,7 +349,7 @@ export async function scanCodexUsage({
     totals,
     byDay,
     rateLimits: latestRateLimits,
-    filesScanned: files.length,
+    filesScanned,
     diagnostics,
     schemaDrift: results.some((r) => r.schemaDrift)
   }

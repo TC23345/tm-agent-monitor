@@ -60,6 +60,7 @@ const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', '
 export class ChatManager extends EventEmitter implements ChatBridge {
   private live = new Map<string, Live>()
   private codex: CodexAppServer | null = null
+  private keepCodex = false
   private readonly config: ChatManagerOptions
 
   constructor(options: ChatManagerOptions = {}) {
@@ -70,6 +71,11 @@ export class ChatManager extends EventEmitter implements ChatBridge {
   private server(): CodexAppServer {
     if (this.codex?.alive) return this.codex
     const server = new CodexAppServer({ codexPath: this.config.codexPath, mode: this.config.codexMode ?? 'own', log: this.config.log, adoptProcess: this.config.adoptProcess })
+    server.on('notification', (message) => {
+      const threadId = message.params?.threadId
+      const live = [...this.live.values()].find((entry) => entry.codex?.transcript.sessionId === threadId)
+      this.emit('codex-notification', message, live ? { cwd: live.cwd, model: live.codex?.transcript.model } : undefined)
+    })
     server.on('exit', () => {
       if (this.codex === server) this.codex = null
     })
@@ -80,6 +86,23 @@ export class ChatManager extends EventEmitter implements ChatBridge {
   /** How the Codex connection reached a server, once it has. */
   codexTransport(): 'own' | 'daemon' | null {
     return this.codex?.transport ?? null
+  }
+
+  /** Read-only account RPCs share the chat connection, including while no pane is open. */
+  async readCodexAccount(method: 'account/rateLimits/read' | 'account/usage/read'): Promise<unknown> {
+    this.keepCodex = true
+    const server = this.server()
+    try {
+      await server.start()
+      return await server.request(method, {}, 10_000)
+    } catch (error) {
+      // A failed handshake must be retryable, without ending healthy chat sessions.
+      if (!server.info) {
+        server.close()
+        if (this.codex === server) this.codex = null
+      }
+      throw error
+    }
   }
 
   async create(req: ChatCreateRequest): Promise<{ id: string; transcript: Transcript }> {
@@ -325,7 +348,7 @@ export class ChatManager extends EventEmitter implements ChatBridge {
     this.live.delete(id)
     l.claude?.close()
     l.codex?.dispose()
-    if (![...this.live.values()].some((x) => x.provider === 'codex') && this.codex) {
+    if (!this.keepCodex && ![...this.live.values()].some((x) => x.provider === 'codex') && this.codex) {
       this.codex.close()
       this.codex = null
     }

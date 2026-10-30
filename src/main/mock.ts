@@ -18,6 +18,7 @@ export function mockUsageInsights(): UsageInsights {
   const rows = (items: Array<[string, number, ('claude' | 'codex')[]]>) => items.map(([name, usedPct, providers]) => ({ name, usedPct, providers, tokens: Math.round(1_640_000 * usedPct / 100) }))
   return {
     generatedAt: Date.now(), available: true,
+    codexAccount: { available: true, updatedAt: Date.now(), summary: { lifetimeTokens: 120_800_000, peakDailyTokens: 9_400_000, currentStreakDays: 6, longestStreakDays: 21, longestRunningTurnSec: 5400 }, dailyUsageBuckets: [{ startDate: '2026-10-29', tokens: 6_100_000 }, { startDate: '2026-10-30', tokens: 2_700_000 }] },
     day: {
       totalTokens: 1_640_000, sessions: 8, byProvider: { claude: 1_200_000, codex: 440_000 },
       metrics: [

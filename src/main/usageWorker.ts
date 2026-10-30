@@ -5,13 +5,14 @@
 // Node entry so it can be reasoned about (and tested through its pure
 // protocol, `usageWorkerProtocol.mjs`) without an Electron runtime.
 import { LocalUsage } from './localUsageCore.mjs'
-import { scanCodexUsage } from './codexUsage.mjs'
+import { CodexUsageLedger } from './codexLiveUsage.mjs'
 import { scanUsageInsights } from './usageInsightsCore.mjs'
 import { errorResponse, okResponse, parseRequest, type WorkerRequest } from '../shared/usageWorkerProtocol.mjs'
 
 // One ledger per transcript root — main always asks for the same one, but the
 // worker does not assume it.
 const ledgers = new Map<string, LocalUsage>()
+const codex = new CodexUsageLedger()
 
 function ledgerFor(projectsDir: unknown): LocalUsage {
   const key = typeof projectsDir === 'string' && projectsDir ? projectsDir : ''
@@ -31,7 +32,9 @@ async function handle(request: WorkerRequest): Promise<unknown> {
       return ledger.snapshot()
     }
     case 'codex-scan':
-      return scanCodexUsage()
+      return codex.refresh()
+    case 'codex-live':
+      return codex.ingest(request.args.event)
     case 'insights': {
       const claudeRoot = typeof request.args.claudeRoot === 'string' ? request.args.claudeRoot : undefined
       return scanUsageInsights(claudeRoot ? { claudeRoot } : {})

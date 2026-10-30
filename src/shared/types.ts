@@ -225,11 +225,21 @@ export interface UsageInsightPeriod {
 }
 
 export interface UsageInsights {
+  codexAccount?: CodexAccountUsage
   generatedAt: number
   available: boolean
   note?: string
   day: UsageInsightPeriod
   week: UsageInsightPeriod
+}
+
+export interface CodexAccountUsage {
+  available: boolean
+  stale?: boolean
+  updatedAt?: number
+  note?: string
+  summary?: { lifetimeTokens: number; peakDailyTokens: number; longestRunningTurnSec: number; currentStreakDays: number; longestStreakDays: number }
+  dailyUsageBuckets?: Array<{ startDate: string; tokens: number }>
 }
 
 /** Compatibility aliases for provider-specific services. */

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { ProviderId, UsageInsightMetric, UsageInsightPeriod, UsageInsightRow, UsageInsights } from '@shared/types'
+import type { CodexAccountUsage, ProviderId, UsageInsightMetric, UsageInsightPeriod, UsageInsightRow, UsageInsights } from '@shared/types'
 import { compactNumber } from './format'
 import { ProviderBadge } from './ProviderBadge'
 
@@ -96,6 +96,28 @@ function Period({ data, kind }: { data: UsageInsightPeriod; kind: PeriodKey }) {
   )
 }
 
+function AccountUsage({ data }: { data: CodexAccountUsage }) {
+  const summary = data.summary
+  return <section className="ins-breakdown ins-account" data-testid="codex-account-usage" aria-label="Codex account usage">
+    <div className="ins-section-title">Codex · Account usage</div>
+    <p className="ins-note">Reported by Codex across your account. Separate from this machine’s local totals and estimated spend.</p>
+    {data.note && <p className="uzone-note" role="status">{data.note}</p>}
+    {data.available && summary && <>
+      {([
+        ['Lifetime tokens', compactNumber(summary.lifetimeTokens)],
+        ['Peak daily tokens', compactNumber(summary.peakDailyTokens)],
+        ['Current / longest streak', `${summary.currentStreakDays} / ${summary.longestStreakDays} days`],
+        ['Longest running turn', `${Math.round(summary.longestRunningTurnSec / 60)} min`]
+      ] as const).map(([label, value]) => <div className="ins-row" key={label}><span>{label}</span><strong>{value}</strong></div>)}
+      {!!data.dailyUsageBuckets?.length && <details data-testid="codex-account-days">
+        <summary>Daily account tokens ({data.dailyUsageBuckets.length} days reported)</summary>
+        {data.dailyUsageBuckets.slice().reverse().map((day) => <div className="ins-row" key={day.startDate}><span>{day.startDate}</span><span>{compactNumber(day.tokens)}</span></div>)}
+      </details>}
+      {data.updatedAt && <p className="ins-note">{data.stale ? 'Last successful update' : 'Updated'} {new Date(data.updatedAt).toLocaleString()}</p>}
+    </>}
+  </section>
+}
+
 export function UsageInsightsView() {
   const [insights, setInsights] = useState<UsageInsights | null>(null)
   const [period, setPeriod] = useState<PeriodKey>('day')
@@ -133,8 +155,9 @@ export function UsageInsightsView() {
     <div className="insights">
       <div className="ins-heading">
         <div className="ins-title">Usage insights</div>
-        <span className="ins-local">Local · Claude + Codex</span>
+        <span className="ins-local">Account + local usage</span>
       </div>
+      {insights.codexAccount && <AccountUsage data={insights.codexAccount} />}
       <div className="ins-section-title">What’s contributing to local usage?</div>
       <div className="ins-tabs" role="tablist" aria-label="Usage insights period">
         <button id="insights-day-tab" className={period === 'day' ? 'is-active' : ''} onClick={() => setPeriod('day')} role="tab" aria-controls="insights-panel" aria-selected={period === 'day'}>Day</button>

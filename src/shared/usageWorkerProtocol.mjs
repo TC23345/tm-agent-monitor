@@ -5,7 +5,7 @@
  * carries a plain-object args bag; a response echoes the id with either a
  * result or an error string. Anything else is dropped, never thrown on.
  */
-export const WORKER_KINDS = /** @type {const} */ (['claude-refresh', 'codex-scan', 'insights'])
+export const WORKER_KINDS = /** @type {const} */ (['claude-refresh', 'codex-scan', 'codex-live', 'insights'])
 export const WORKER_TIMEOUT_MS = 60_000
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/

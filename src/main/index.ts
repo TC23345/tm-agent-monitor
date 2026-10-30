@@ -24,7 +24,8 @@ import { LocalUsageView, type LocalUsageSnapshot } from './localUsageCore.mjs'
 import { UsageHistorySync } from './history.js'
 import { bootstrapConfig } from './config.js'
 import { readPersonalToken, fetchWindow } from './subscriptionUsage.js'
-import { readCodexAuth, fetchCodexWindow } from './codexSubscriptionUsage.js'
+import { CodexAccount } from './codexAccount.mjs'
+import { normalizeLiveUsage } from './codexLiveUsage.mjs'
 import type { scanCodexUsage, CodexRateLimits } from './codexUsage.mjs'
 import { PendingCalls, WORKER_TIMEOUT_MS, type WorkerKind } from '../shared/usageWorkerProtocol.mjs'
 import { mockSnapshot, mockHistory, mockUsageInsights, mockWindows, mockEvents } from './mock.js'
@@ -242,6 +243,14 @@ chats.on('open-url', (_id: string, url: string) => {
   if (typeof url === 'string' && url.length <= 2048 && /^https?:\/\//i.test(url)) void shell.openExternal(url)
 })
 app.on('before-quit', () => chats.closeAll())
+const codexAccount = new CodexAccount((method) => chats.readCodexAccount(method))
+chats.on('codex-notification', (message) => codexAccount.notification(message))
+chats.on('codex-notification', (message, metadata) => {
+  if (mockMode || message.method !== 'thread/tokenUsage/updated') return
+  const event = normalizeLiveUsage(message.params, metadata)
+  if (event) void callWorker<CodexScan | null>('codex-live', { event })
+    .then((result) => { if (result) applyCodexUsage(result) }).catch(() => { /* periodic disk scan recovers */ })
+})
 
 /**
  * The chat `@` picker's list for a folder that is not a git repository: a
@@ -1646,18 +1655,9 @@ async function refreshWindows(): Promise<void> {
   // else: keep the last-good value through transient blips after a good load
 }
 
-let codexWindowLoaded = false
 async function refreshCodexWindow(): Promise<void> {
   if (mockMode) return
-  const next = await fetchCodexWindow('Codex', readCodexAuth())
-  const terminal = next.note === 'auth expired' || next.note === 'not connected'
-  if (next.available) {
-    codexPersonal = next
-    codexWindowLoaded = true
-  } else if (terminal || !codexWindowLoaded) {
-    codexPersonal = next
-  }
-  // Preserve the last-good window through transient HTTP/network failures.
+  codexPersonal = await codexAccount.get('limits')
 }
 
 async function refreshApi(): Promise<void> {
@@ -1709,32 +1709,36 @@ async function refreshCodexUsage(): Promise<void> {
   if (codexRefresh) return codexRefresh
   codexRefresh = (async () => {
     const result = await callWorker<CodexScan>('codex-scan')
-    codexRateLimits = result.rateLimits
-    if (result.schemaDrift) {
-      codexUsageNote = 'Local usage schema changed; live monitoring is still active.'
-      codexToday = { tokensOut: 0, costUsd: 0, valueComplete: false, byProject: [], byModel: [] }
-      // Keep the last verified seven-day ledger for history sync. Replacing it
-      // with an empty map would make the next Claude-only flush overwrite
-      // persisted Codex provider totals after a rollout-schema change.
-      return
-    }
-    codexUsageNote = undefined
-    codexDays = new Map(result.byDay.map((day) => [day.date, codexDayTotals(day)]))
-    codexToday = codexDays.get(localDay()) ?? { tokensOut: 0, costUsd: 0, valueComplete: true, byProject: [], byModel: [] }
+    applyCodexUsage(result)
   })().catch((error) => {
     codexUsageNote = `Codex usage unavailable: ${error instanceof Error ? error.message : String(error)}`
   }).finally(() => { codexRefresh = null })
   return codexRefresh
 }
 
+function applyCodexUsage(result: CodexScan): void {
+  codexRateLimits = result.rateLimits
+  if (result.schemaDrift) {
+    codexUsageNote = 'Local usage schema changed; live monitoring is still active.'
+    codexToday = { tokensOut: 0, costUsd: 0, valueComplete: false, byProject: [], byModel: [] }
+    // Keep the last verified seven-day ledger for history sync. Replacing it
+    // with an empty map would make the next Claude-only flush overwrite
+    // persisted Codex provider totals after a rollout-schema change.
+    return
+  }
+  codexUsageNote = undefined
+  codexDays = new Map(result.byDay.map((day) => [day.date, codexDayTotals(day)]))
+  codexToday = codexDays.get(localDay()) ?? { tokensOut: 0, costUsd: 0, valueComplete: true, byProject: [], byModel: [] }
+}
+
 async function getUsageInsights(): Promise<UsageInsights> {
   if (mockMode) return mockUsageInsights()
-  if (insightsCache && Date.now() - insightsCache.generatedAt < 5 * 60_000) return insightsCache
-  if (insightsRefresh) return insightsRefresh
-  insightsRefresh = callWorker<UsageInsights>('insights', { claudeRoot: config.transcriptDir })
-    .then((value) => (insightsCache = value))
-    .finally(() => { insightsRefresh = null })
-  return insightsRefresh
+  const local = insightsCache && Date.now() - insightsCache.generatedAt < 5 * 60_000
+    ? Promise.resolve(insightsCache)
+    : insightsRefresh ?? (insightsRefresh = callWorker<UsageInsights>('insights', { claudeRoot: config.transcriptDir })
+      .then((value) => (insightsCache = value)).finally(() => { insightsRefresh = null }))
+  const [value, account] = await Promise.all([local, codexAccount.get('usage')])
+  return { ...value, codexAccount: account }
 }
 
 // Auto-update from the public release feed (packaged builds only). Downloads in

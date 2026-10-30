@@ -41,6 +41,9 @@ if (!real) env.CLAUDE_WATCH_MOCK = '1'
 env.CLAUDE_WATCH_PORT ??= '7460'
 
 const userData = mkdtempSync(join(tmpdir(), 'tm-agent-debug-'))
+// Packaged defaults use the installed endpoint even with a temporary userData.
+// Pin this explicitly for BOTH builds so a packaged review cannot redirect live hooks.
+env.TM_AGENT_MONITOR_ENDPOINT_FILE = join(userData, 'hook-endpoint.debug.json')
 const flags = [`--remote-debugging-port=${port}`, `--user-data-dir=${userData}`]
 
 let command

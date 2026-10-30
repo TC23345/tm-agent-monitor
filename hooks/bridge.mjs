@@ -12,6 +12,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Worker } from 'node:worker_threads'
+import { request } from 'node:http'
 
 export const BRIDGE_SCHEMA_VERSION = 1
 export const OWNER_MARKER = 'tm-agent-monitor-hook-v1'
@@ -294,6 +295,19 @@ async function boundedFocus(discover, providerEvent, deadlineAt) {
 }
 
 /** Deliver one already-parsed hook. Exposed for focused tests. */
+export function postLoopback(url, options) {
+  // A one-shot local POST needs no fetch/Undici pool. Avoid its cold-start cost
+  // on every hook, and explicitly close the socket before the process exits.
+  return new Promise((resolve) => {
+    const req = request(url, { method: 'POST', headers: { ...options.headers, connection: 'close' }, signal: options.signal }, (res) => {
+      res.destroy() // No response body is needed; a streaming body must not hold the hook open.
+      resolve({ ok: res.statusCode >= 200 && res.statusCode < 300 })
+    })
+    req.on('error', () => resolve({ ok: false }))
+    req.end(options.body)
+  })
+}
+
 export async function deliverHook(provider, hook, options = {}) {
   try {
     const deadlineAt = Number(options.deadlineAt) || (Date.now() + (Number(options.timeoutMs) || DEFAULT_TIMEOUT_MS))
@@ -314,7 +328,7 @@ export async function deliverHook(provider, hook, options = {}) {
     const timeoutMs = Math.max(1, Math.min(Number(options.timeoutMs) || DEFAULT_TIMEOUT_MS, remainingMs, 250))
     const timer = setTimeout(() => ctrl.abort(), timeoutMs)
     try {
-      const fetchImpl = options.fetchImpl || fetch
+      const fetchImpl = options.fetchImpl || postLoopback
       const res = await fetchImpl(`http://127.0.0.1:${endpoint.port}/v1/events`, {
         method: 'POST',
         headers: {
@@ -335,7 +349,7 @@ export async function deliverHook(provider, hook, options = {}) {
   }
 }
 
-export async function runBridge({ provider: forcedProvider, stdin = readStdin() } = {}) {
+export async function runBridge({ provider: forcedProvider, stdin = readStdin(), fetchImpl } = {}) {
   try {
     const deadlineAt = Date.now() + DEFAULT_TIMEOUT_MS
     const args = process.argv.slice(2)
@@ -346,6 +360,7 @@ export async function runBridge({ provider: forcedProvider, stdin = readStdin() 
     let hook
     try { hook = JSON.parse(stdin || '{}') } catch { return false }
     return await deliverHook(provider, hook, {
+      ...(fetchImpl ? { fetchImpl } : {}),
       deadlineAt,
       ...(endpointIndex >= 0 && args[endpointIndex + 1] ? { endpointPath: args[endpointIndex + 1] } : {})
     })

@@ -33,6 +33,8 @@ export interface CodexRolloutResult {
   source: string
   session: { id?: string; cwd?: string; model?: string; modelProvider?: string }
   totals: CodexTokenTotals
+  lastCounters?: CodexTokenTotals
+  lastTokenAt?: string
   usageEvents: Array<{
     date?: string
     timestamp?: string
@@ -69,3 +71,7 @@ export function scanCodexUsage(options?: {
   diagnostics: CodexUsageDiagnostic[]
   schemaDrift: boolean
 }>
+
+export interface CodexRolloutBatch { results: CodexRolloutResult[]; cutoff: number; filesScanned: number }
+export function readCodexRollouts(options?: Parameters<typeof scanCodexUsage>[0]): Promise<CodexRolloutBatch>
+export function aggregateCodexRollouts(batch: CodexRolloutBatch): Awaited<ReturnType<typeof scanCodexUsage>>

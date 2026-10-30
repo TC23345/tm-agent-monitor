@@ -2,6 +2,16 @@
 
 Releases are GitHub Releases on `TC23345/tm-agent-monitor`; installed apps update from `latest.yml` there. Local builds land in `dist/` as `tm-agent-monitor-<version>-x64.exe`.
 
+## 0.4.79 — 2026-10-30
+
+- **Codex account usage in Insights.** Account totals, daily history, streaks and longest running turn appear separately from local session analysis and estimated spend.
+- **Shared Codex account connection.** Limits and usage use the installed CLI's app-server with cached, coalesced reads. The monitor no longer reads Codex's token file or calls its private usage endpoint directly. Stale and unavailable account data are labelled.
+- **Live token updates.** Connected Codex panes update the usage ledger without a full file scan. Cumulative counters reconcile with transcript history to avoid double counting; external sessions and restart recovery retain the existing rollout fallback.
+- **Lower hook overhead.** A bounded, one-shot HTTP request replaces cold fetch initialization. Hooks remain synchronous, authenticated and fail-open, with no retries.
+- **Isolated packaged previews.** The debug launcher pins a separate endpoint so a preview cannot redirect installed hooks.
+
+Validation: 567 monitor tests and 170 chat-panes tests passed, with TypeScript, production-build, Windows-package and installed-app checks. See [the verification report](docs/codex-usage-update-2026-10-30.md) for measurement scope and limitations.
+
 ## 0.4.68 — 2026-10-21
 
 - **Unsent messages survive a restart.** What you've typed in a chat, its waiting cards and its pasted images are kept per pane and come back after an Update, a crash or a reload. Sending clears them. Up to 24 drafts are kept, for two weeks, with about 3 MB of images each; past that the text and cards are still kept.
