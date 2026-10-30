@@ -3,12 +3,31 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer } from 'node:http'
 import {
   BRIDGE_SCHEMA_VERSION,
   deliverHook,
   mapHookInput,
   readEndpoint
 } from './bridge.mjs'
+
+test('one-shot HTTP transport authenticates, closes streaming responses and bounds a stalled sink', async () => {
+  let requests = 0
+  const server = createServer((req, res) => {
+    requests++
+    assert.equal(req.headers.authorization, 'Bearer isolated-test-token')
+    req.resume()
+    if (requests === 1) { res.writeHead(200); res.write('never-ending body') }
+  })
+  await new Promise((r) => server.listen(0, '127.0.0.1', r))
+  const endpoint = { port: server.address().port, token: 'isolated-test-token' }
+  try {
+    const hook = { hook_event_name: 'PostToolUse', session_id: 'isolated' }
+    assert.equal(await deliverHook('codex', hook, { endpoint, discoverFocus: false }), true)
+    assert.equal(await deliverHook('codex', hook, { endpoint, discoverFocus: false, timeoutMs: 30 }), false)
+    assert.equal(requests, 2)
+  } finally { server.closeAllConnections(); await new Promise((r) => server.close(r)) }
+})
 
 // These tests may run inside one of the app's panes, where TM_TERMINAL_ID is
 // set; the default env is process.env, so pin it for the deep-equal cases.

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { mapHookInput } from '../../hooks/bridge.mjs'
 
 // Compile the real TypeScript store into an isolated ESM fixture. This keeps the
 // production module authoritative without adding a runtime TS loader dependency.
@@ -30,6 +31,18 @@ after(() => rmSync(fixtureRoot, { recursive: true, force: true }))
 const { AgentStore, validateMutableSettingsPatch } = await import(pathToFileURL(join(fixtureRoot, 'main', 'store.js')).href)
 const AT = Date.UTC(2026, 6, 17, 12)
 const DEFAULT_STALE_MINUS_ONE = 15 * 60 * 1000 - 1
+
+test('async ordering gate: arrival timestamps cannot recover a delayed tool-start without provider time', () => {
+  const store = new AgentStore()
+  const input = { session_id: 'async-probe', tool_name: 'shell_command', tool_use_id: 'tool-1' }
+  store.applyEvent(mapHookInput('codex', { ...input, hook_event_name: 'Stop' }, { now: AT }))
+  assert.equal(store.snapshot(AT)[0].state, 'complete')
+  // Simulates an earlier PreToolUse whose background process started later.
+  store.applyEvent(mapHookInput('codex', { ...input, hook_event_name: 'PreToolUse' }, { now: AT + 10 }))
+  assert.equal(store.snapshot(AT + 10)[0].state, 'running')
+  assert.equal(store.snapshot(AT + 10)[0].updatedAt, AT + 10)
+  // Keep lifecycle hooks synchronous: provider event time is needed before async is safe.
+})
 
 function event(provider, sessionId, eventId, kind, extra = {}) {
   return {

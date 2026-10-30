@@ -1462,6 +1462,10 @@ body.notes-dragging, body.notes-dragging * { cursor: grabbing !important; user-s
 .ins-callout-title strong { color: #f4f1ec; font-weight: 650; }
 .ins-callout-detail { margin: 4px 0 0 13px; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
 .ins-breakdown { margin-top: 19px; }
+.ins-account { padding-bottom: 14px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+.ins-account summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.ins-account summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.ins-account .ins-row strong { text-align: right; font-variant-numeric: tabular-nums; }
 .ins-breakdown-head {
   display: flex;
   justify-content: space-between;

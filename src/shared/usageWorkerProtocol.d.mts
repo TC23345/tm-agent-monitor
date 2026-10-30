@@ -1,4 +1,4 @@
-export const WORKER_KINDS: readonly ['claude-refresh', 'codex-scan', 'insights']
+export const WORKER_KINDS: readonly ['claude-refresh', 'codex-scan', 'codex-live', 'insights']
 export type WorkerKind = (typeof WORKER_KINDS)[number]
 export const WORKER_TIMEOUT_MS: number
 
