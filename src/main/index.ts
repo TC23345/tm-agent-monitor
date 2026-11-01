@@ -24,7 +24,7 @@ import { LocalUsageView, type LocalUsageSnapshot } from './localUsageCore.mjs'
 import { UsageHistorySync } from './history.js'
 import { bootstrapConfig } from './config.js'
 import { readPersonalToken, fetchWindow } from './subscriptionUsage.js'
-import { CodexAccount } from './codexAccount.mjs'
+import { CodexAccount, accountStatusLine, type CodexAccountStatus } from './codexAccount.mjs'
 import { normalizeLiveUsage } from './codexLiveUsage.mjs'
 import type { scanCodexUsage, CodexRateLimits } from './codexUsage.mjs'
 import { PendingCalls, WORKER_TIMEOUT_MS, type WorkerKind } from '../shared/usageWorkerProtocol.mjs'
@@ -373,6 +373,8 @@ async function flushHistory(): Promise<void> {
 }
 let personal: PlanWindow = { available: false, label: 'You · Max' }
 let codexPersonal: PlanWindow = { available: false, label: 'Codex' }
+let codexStatus: CodexAccountStatus | null = null
+const MOCK_CODEX_STATUS: CodexAccountStatus = { available: true, signedIn: true, requiresAuth: true, method: 'chatgpt', plan: 'pro' }
 let api: ApiUsage = { available: false, label: ORG_LABEL }
 let codexToday: ProviderUsageTotals = { tokensOut: 0, costUsd: 0, valueComplete: true, byProject: [], byModel: [] }
 let codexRateLimits: CodexRateLimits | undefined
@@ -1657,7 +1659,7 @@ async function refreshWindows(): Promise<void> {
 
 async function refreshCodexWindow(): Promise<void> {
   if (mockMode) return
-  codexPersonal = await codexAccount.get('limits')
+  ;[codexPersonal, codexStatus] = await Promise.all([codexAccount.get('limits'), codexAccount.get('status')])
 }
 
 async function refreshApi(): Promise<void> {
@@ -1804,7 +1806,10 @@ function settingsView() {
         detail: 'OAuth usage windows, including model-scoped weekly limits — the list is what the last response carried',
         configured: !!readPersonalToken()
       },
-      { id: 'codex-auth', label: 'Codex subscription', value: existsSync(join(home, '.codex', 'auth.json')) ? 'connected' : 'not connected', detail: 'Local Codex rate limits and usage', configured: existsSync(join(home, '.codex', 'auth.json')) }
+      (() => {
+        const line = accountStatusLine(mockMode ? MOCK_CODEX_STATUS : codexStatus)
+        return { id: 'codex-auth', label: 'Codex subscription', value: line.value, detail: line.detail, configured: line.connected }
+      })()
     ],
     systemPaths: [
       { id: 'config-env', label: 'API environment', path: config.configFile, detail: 'Secrets and optional service configuration', exists: existsSync(config.configFile) },
@@ -1859,9 +1864,10 @@ async function systemDiagnostics(requested?: string) {
       const result = await fetchWindow('You · Max', readPersonalToken())
       return { ok: result.available, detail: result.available ? 'OAuth usage endpoint responded successfully' : result.note ?? 'Usage endpoint unavailable' }
     }),
-    check('codex-auth', 'Codex local auth', async () => {
-      const path = join(app.getPath('home'), '.codex', 'auth.json')
-      return { ok: existsSync(path), detail: existsSync(path) ? 'Local auth file is available' : 'Local auth file was not found' }
+    check('codex-auth', 'Codex sign-in', async () => {
+      if (!mockMode) codexStatus = await codexAccount.get('status')
+      const line = accountStatusLine(mockMode ? MOCK_CODEX_STATUS : codexStatus)
+      return { ok: line.connected, detail: line.connected ? `${line.value} · ${line.detail}` : `${line.value}: ${line.detail}` }
     }),
     check('history', 'History storage', async () => {
       const status = history.status()

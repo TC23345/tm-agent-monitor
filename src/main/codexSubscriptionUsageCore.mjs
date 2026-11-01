@@ -1,3 +1,12 @@
+const PLAN_WORDS = { prolite: 'Pro Lite', promax: 'Pro Max', cbp: 'CBP' }
+
+/** Codex's plan codes as words: `self_serve_business_prolite` is Business Pro Lite. */
+export function codexPlanName(plan) {
+  if (typeof plan !== 'string' || !plan || plan === 'unknown') return undefined
+  const text = plan.replace(/^self_serve_/, '').split('_').map((word) => PLAN_WORDS[word] ?? word).join(' ')
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
 function severity(usedPct) {
   if (usedPct >= 90) return 'critical'
   if (usedPct >= 75) return 'warning'
@@ -53,8 +62,7 @@ export function parseCodexUsage(label, raw) {
       extras.push({ ...item, label: `${prefix} · ${item.label}` })
     }
   }
-  const plan = typeof raw?.plan_type === 'string' && raw.plan_type
-    ? raw.plan_type.charAt(0).toUpperCase() + raw.plan_type.slice(1) : undefined
+  const plan = codexPlanName(raw?.plan_type)
   return {
     available: true,
     label: plan ? `${label} · ${plan}` : label,
