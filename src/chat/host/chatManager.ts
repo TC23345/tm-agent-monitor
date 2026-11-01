@@ -89,7 +89,7 @@ export class ChatManager extends EventEmitter implements ChatBridge {
   }
 
   /** Read-only account RPCs share the chat connection, including while no pane is open. */
-  async readCodexAccount(method: 'account/rateLimits/read' | 'account/usage/read'): Promise<unknown> {
+  async readCodexAccount(method: 'account/read' | 'account/rateLimits/read' | 'account/usage/read'): Promise<unknown> {
     this.keepCodex = true
     const server = this.server()
     try {

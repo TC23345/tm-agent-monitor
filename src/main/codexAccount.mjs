@@ -1,5 +1,5 @@
 // Documented account RPCs only. Authentication remains inside the installed CLI.
-import { parseCodexUsage } from './codexSubscriptionUsageCore.mjs'
+import { codexPlanName, parseCodexUsage } from './codexSubscriptionUsageCore.mjs'
 
 const number = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0
 export function parseAccountLimits(raw) {
@@ -34,31 +34,76 @@ export function parseAccountUsage(raw, now = Date.now()) {
   }
 }
 
+/**
+ * Who the CLI says is signed in, wherever it keeps the credential (file, keyring
+ * or CODEX_HOME). Only the method and plan are kept: the email never enters the app.
+ */
+export function parseAccountStatus(raw) {
+  const account = raw?.account
+  if (account !== null && typeof account?.type !== 'string') throw new Error('unsupported account response')
+  return {
+    available: true,
+    signedIn: !!account,
+    requiresAuth: raw.requiresOpenaiAuth !== false,
+    ...(account ? { method: account.type } : {}),
+    ...(typeof account?.planType === 'string' ? { plan: account.planType } : {})
+  }
+}
+
+const METHOD_LABEL = { apiKey: 'API key', amazonBedrock: 'Amazon Bedrock' }
+
+/** The one wording for Settings' row and the system check, so they cannot disagree. */
+export function accountStatusLine(status) {
+  if (!status) return { connected: false, value: 'not checked yet', detail: 'The Codex CLI has not answered yet' }
+  if (!status.available) return { connected: false, value: 'unavailable', detail: status.note ?? 'The Codex CLI did not answer' }
+  const stale = status.stale ? ' · last known' : ''
+  if (!status.signedIn) {
+    return status.requiresAuth
+      ? { connected: false, value: `not signed in${stale}`, detail: 'Reported by the Codex CLI. Run `codex login` to sign in.' }
+      : { connected: true, value: `no sign-in needed${stale}`, detail: 'Reported by the Codex CLI: this configuration does not use an OpenAI account' }
+  }
+  const how = status.method === 'chatgpt' ? codexPlanName(status.plan) ?? 'ChatGPT' : METHOD_LABEL[status.method] ?? status.method
+  return { connected: true, value: `connected · ${how}${stale}`, detail: 'Reported by the Codex CLI · rate limits and account usage' }
+}
+
+const READS = {
+  limits: { method: 'account/rateLimits/read', parse: parseAccountLimits, ttl: 60_000 },
+  usage: { method: 'account/usage/read', parse: parseAccountUsage, ttl: 300_000 },
+  status: { method: 'account/read', parse: parseAccountStatus, ttl: 60_000 }
+}
+
 /** Coalesced requests, bounded refresh and explicit stale/unavailable states. */
 export class CodexAccount {
   constructor(read, { now = Date.now } = {}) { this.read = read; this.now = now; this.cache = new Map(); this.pending = new Map(); this.epoch = 0 }
   clear() { this.epoch++; this.cache.clear(); this.pending.clear() }
-  async get(kind) {
+  async get(kind, rereads = 2) {
     const cached = this.cache.get(kind)
     if (cached && this.now() < cached.expires) return cached.value
     if (this.pending.has(kind)) return this.pending.get(kind)
     const epoch = this.epoch
-    const request = (async () => {
+    let request
+    const forget = () => { if (this.pending.get(kind) === request) this.pending.delete(kind) }
+    request = (async () => {
       let value, ttl
       try {
-        const raw = await this.read(kind === 'limits' ? 'account/rateLimits/read' : 'account/usage/read')
-        value = kind === 'limits' ? parseAccountLimits(raw) : parseAccountUsage(raw, this.now())
-        ttl = kind === 'limits' ? 60_000 : 300_000
+        const raw = await this.read(READS[kind].method)
+        value = READS[kind].parse(raw, this.now())
+        ttl = READS[kind].ttl
       } catch {
         // Never propagate raw RPC errors (which can contain account details) to the UI.
         value = cached?.value.available ? { ...cached.value, stale: true, note: 'Refresh unavailable; showing the last successful read.' }
           : { available: false, ...(kind === 'limits' ? { label: 'Codex' } : {}), note: 'Codex account data unavailable. A supported CLI and ChatGPT sign-in are required.' }
         ttl = 30_000
       }
-      if (epoch !== this.epoch) return { available: false, label: 'Codex', note: 'Codex account changed; refreshing.' }
+      // The account changed mid-read, which the CLI also announces once at startup.
+      // Drop the old answer and read again, or the first read would be lost until the next poll.
+      if (epoch !== this.epoch) {
+        forget() // Or the reread would find this request still pending and wait on itself.
+        return rereads > 0 ? this.get(kind, rereads - 1) : { available: false, ...(kind === 'limits' ? { label: 'Codex' } : {}), note: 'Codex account changed; refreshing.' }
+      }
       this.cache.set(kind, { value, expires: this.now() + ttl })
       return value
-    })().finally(() => { if (epoch === this.epoch) this.pending.delete(kind) })
+    })().finally(forget)
     this.pending.set(kind, request)
     return request
   }

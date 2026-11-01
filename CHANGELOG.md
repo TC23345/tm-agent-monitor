@@ -2,6 +2,12 @@
 
 Releases are GitHub Releases on `TC23345/tm-agent-monitor`; installed apps update from `latest.yml` there. Local builds land in `dist/` as `tm-agent-monitor-<version>-x64.exe`.
 
+## 0.4.80 — 2026-10-31
+
+- **Codex sign-in status comes from the Codex CLI.** Settings' *Codex subscription* row and the system check now ask the CLI instead of looking for `~/.codex/auth.json`, so a keyring sign-in or a custom `CODEX_HOME` reads correctly. The row names how you are signed in (your plan, or an API key), and tells "not signed in" apart from "the CLI did not answer". The monitor keeps only the method and plan, never your email.
+- **Codex limits are right from launch.** The CLI announces an account change once at startup, which threw away the first read and left limits saying *Codex account changed; refreshing* until the next poll, up to five minutes. A read caught by a change now simply reads again.
+- **Codex plan names read as words.** `self_serve_business_prolite` shows as *Business Pro Lite*, in Settings and in Limits.
+
 ## 0.4.79 — 2026-10-30
 
 - **Codex account usage in Insights.** Account totals, daily history, streaks and longest running turn appear separately from local session analysis and estimated spend.
