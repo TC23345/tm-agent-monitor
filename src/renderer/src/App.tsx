@@ -139,6 +139,14 @@ export function App() {
         if (!/reinstalling/.test(msg)) rebuildMsgTimer.current = setTimeout(() => setRebuild({ busy: false, msg: null }), 12_000)
       })
   }
+  /** The Update button: a downloaded release installs as it is, anything else builds from the checkout. */
+  const installUpdate = () => {
+    if (snap?.update?.source !== 'release') return rebuildApp()
+    window.watch.installRelease().then(
+      (msg) => setRebuild({ busy: false, msg }),
+      (error) => setRebuild({ busy: false, msg: `install failed: ${String(error)}` })
+    )
+  }
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   /** Whether a new or opened project opens in Cursor too (0.4.78, the user's switch: the projects menu and the dialog). */
   const [openInCursor, setOpenInCursor] = useState<boolean>(() => {
@@ -1787,6 +1795,8 @@ export function App() {
         onKeys={openLegend}
         rebuild={rebuild}
         onRebuild={rebuildApp}
+        update={snap?.update}
+        onUpdate={installUpdate}
         openMenu={openMenu === 'file' || openMenu === 'layout' || openMenu === 'terminal' || openMenu === 'user' || openMenu === 'projects' ? openMenu : null}
         onOpenMenu={setOpenMenu}
         onPalette={() => { setOpenMenu(null); setPalette((v) => !v) }}

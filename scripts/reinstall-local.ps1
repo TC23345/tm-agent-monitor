@@ -23,6 +23,13 @@ $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
 $installer = Join-Path $repo "dist\tm-agent-monitor-$version-x64.exe"
 if (-not (Test-Path $installer)) { throw "installer not found: $installer" }
 
+# Keep this build and one backup, like the Update button: the version being
+# replaced when it is running, else the newest older installer in dist\.
+$runningVersion = ''
+$runningExe = Get-Process 'TaylorMade Agents' -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($runningExe -and $runningExe.Path) { $runningVersion = (Get-Item $runningExe.Path).VersionInfo.FileVersion }
+node scripts\prune-installers.mjs $version $runningVersion
+
 # Close the running app so the installer never fights locked files. A graceful
 # close lets it run its final history flush; force only what ignores that.
 $running = Get-Process 'TaylorMade Agents' -ErrorAction SilentlyContinue

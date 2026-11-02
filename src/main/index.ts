@@ -25,6 +25,7 @@ import { UsageHistorySync } from './history.js'
 import { bootstrapConfig } from './config.js'
 import { readPersonalToken, fetchWindow } from './subscriptionUsage.js'
 import { CodexAccount, accountStatusLine, type CodexAccountStatus } from './codexAccount.mjs'
+import { installersToRemove, updateOffer as pickUpdateOffer } from '../shared/appUpdate.mjs'
 import { normalizeLiveUsage } from './codexLiveUsage.mjs'
 import type { scanCodexUsage, CodexRateLimits } from './codexUsage.mjs'
 import { PendingCalls, WORKER_TIMEOUT_MS, type WorkerKind } from '../shared/usageWorkerProtocol.mjs'
@@ -55,7 +56,7 @@ import { estimateCostUsd } from '../shared/pricing.mjs'
 // export 'autoUpdater' not found"), so import the default export and destructure.
 import electronUpdater from 'electron-updater'
 import { validateMutableSettingsPatch } from './store.js'
-import { DEFAULTS, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type WindowMaterial, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights, type ClipsListing, type ClipGroupOp, type PickerKeybinds, type DirListing, type FileContent, type ExtensionStatus, type PickerFavoriteModifier, type AppShortcutId, type ShortcutId, type ShortcutRow } from '../shared/types.js'
+import { DEFAULTS, type AppUpdateOffer, type StatusSnapshot, type UsageSummary, type PlanWindow, type ApiUsage, type UsageSample, type ProviderId, type ProviderUsageTotals, type AppSettingsPatch, type SizeMode, type WindowMaterial, type DailyUsageDay, type DesktopWindow, type ProjectUsage, type TerminalCreateRequest, type UsageInsights, type ClipsListing, type ClipGroupOp, type PickerKeybinds, type DirListing, type FileContent, type ExtensionStatus, type PickerFavoriteModifier, type AppShortcutId, type ShortcutId, type ShortcutRow } from '../shared/types.js'
 import { isPickerFavoriteModifier, normalizeAccelerator, normalizeFavoriteHotkeys, sameChord, SHORTCUT_DEFAULTS } from '../shared/hotkeys.mjs'
 
 const { autoUpdater } = electronUpdater
@@ -1018,7 +1019,8 @@ function shortcutRows(): ShortcutRow[] {
 
 // --- status assembly --------------------------------------------------------
 function buildSnapshot(): StatusSnapshot {
-  if (mockMode) return mockSnapshot()
+  const update = currentUpdateOffer() ?? undefined
+  if (mockMode) return { ...mockSnapshot(), update }
 
   const agents = daemon.store.snapshot()
   const waiting = agents.filter((a) => a.state === 'waiting')
@@ -1081,7 +1083,8 @@ function buildSnapshot(): StatusSnapshot {
     waitingCount: waiting.length,
     providers: { claude: health('claude'), codex: health('codex'), cursor: health('cursor') },
     mock: false,
-    generatedAt: now
+    generatedAt: now,
+    update
   }
 }
 
@@ -1743,6 +1746,32 @@ async function getUsageInsights(): Promise<UsageInsights> {
   return { ...value, codexAccount: account }
 }
 
+// The version in the local checkout, read once a minute: what the Update button compares against.
+let checkoutVersion: string | null = null
+async function refreshCheckoutVersion(): Promise<void> {
+  try {
+    const version = JSON.parse(await fsp.readFile(join(config.repoDir, 'package.json'), 'utf8')).version
+    checkoutVersion = typeof version === 'string' ? version : null
+  } catch {
+    checkoutVersion = null // No checkout on this machine: only a release can be offered.
+  }
+}
+
+function currentUpdateOffer(): AppUpdateOffer | null {
+  return pickUpdateOffer({ running: app.getVersion(), checkout: checkoutVersion, downloaded: updateReady })
+}
+
+/** Keeps the installer just built and one backup. A failure here must never stop the install. */
+async function pruneInstallers(dist: string, built: string): Promise<void> {
+  try {
+    const names = installersToRemove(await fsp.readdir(dist), { built, running: app.getVersion() })
+    await Promise.all(names.map((name) => fsp.unlink(join(dist, name)).catch(() => {})))
+    console.log(`[update] kept v${built} and its backup, removed ${names.length} old installer file(s)`)
+  } catch (error) {
+    console.warn(`[update] could not prune old installers: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 // Auto-update from the public release feed (packaged builds only). Downloads in
 // the background and installs on quit; just nudges the user when one is staged.
 function setupAutoUpdate(): void {
@@ -2043,6 +2072,14 @@ function registerIpc(): void {
       return `check failed: ${(e as Error).message}`
     }
   })
+  // The Update button when what it offers is a downloaded release: the tray's *Restart to update*.
+  ipcMain.handle('update:install-release', (): string => {
+    const offer = currentUpdateOffer()
+    if (offer?.source !== 'release') return 'no downloaded release to install'
+    installingUpdate = true
+    setTimeout(() => autoUpdater.quitAndInstall(), 800)
+    return `v${offer.version} downloaded — reinstalling, back in a moment`
+  })
   // Dev loop without a release: build the installer from the local checkout,
   // then hand off to a detached shell that waits for this process to exit,
   // silently reinstalls over the same location, and starts the new exe. The
@@ -2108,6 +2145,7 @@ function registerIpc(): void {
         child.on('close', (code) => { clearTimeout(cutoff); resolve({ code, out }) })
       })
       if (handoff.code !== 0) return `built, but could not start the installer helper (WMI ${handoff.code}): ${handoff.out.trim().slice(-200)}`
+      await pruneInstallers(join(repo, 'dist'), version)
       // The waiter installs what was just built. electron-updater would otherwise run the release it has
       // downloaded on this same quit (autoInstallOnAppQuit, silent, no relaunch) — two NSIS installers at once,
       // and NSIS runs one at a time, so the app stayed gone for minutes and looked crashed (0.4.74, 2026-10-22,
@@ -3449,6 +3487,8 @@ if (!gotLock) {
     setInterval(whenActive(refreshApi), 60_000)
     setInterval(whenActive(() => { void refreshLocalUsage() }), 30_000)
     setInterval(whenActive(() => { void refreshCodexUsage() }), 30_000)
+    void refreshCheckoutVersion()
+    setInterval(whenActive(() => { void refreshCheckoutVersion() }), 60_000)
     setInterval(pushStatus, DEFAULTS.pollMs)
     pushStatus()
     // Daily-history sync: first flush now that the initial scan is done, then 5-min cadence.

@@ -318,6 +318,12 @@ export interface ProviderHealth {
   bridgeVersion?: string
 }
 
+/** A version newer than the running one, and where it would come from. */
+export interface AppUpdateOffer {
+  version: string
+  source: 'checkout' | 'release'
+}
+
 export interface StatusSnapshot {
   agents: Agent[]
   usage: UsageSummary
@@ -325,6 +331,8 @@ export interface StatusSnapshot {
   providers: Record<ProviderId, ProviderHealth>
   mock: boolean
   generatedAt: number
+  /** What the title bar's Update button offers; absent hides it. */
+  update?: AppUpdateOffer
 }
 
 export type AgentEventKind =
