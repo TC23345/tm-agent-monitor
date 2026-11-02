@@ -142,12 +142,29 @@ argument list, which never needs the install directory:
 Start-Process .\dist\tm-agent-monitor-<version>-x64.exe -ArgumentList '--updated', '/S', '--force-run'
 ```
 
-This repo does exactly that in `app:reinstall` (the status bar's Update chip,
+This repo does exactly that in `app:reinstall` (the title bar's Update chip,
 File → Rebuild & relaunch, Settings → System) and `scripts/reinstall-local.ps1`:
 `npm install`, `npm run dist` in `CLAUDE_WATCH_REPO`, then a PowerShell waiter
 that waits for the app to exit and runs the installer with those three flags.
 Quit the app first when doing it by hand — the installer would wait for it, but
 quitting through the app runs the bounded history flush.
+
+Since 0.4.81 the chip shows only while `updateOffer` (`src/shared/appUpdate.mjs`,
+tested) finds a version newer than the running one: the checkout's `package.json`,
+read once a minute, or a downloaded release. So a change the user should get
+needs a version bump; File → Rebuild & relaunch still forces a same-version
+build. A release newer than the checkout goes through `update:install-release`
+(`quitAndInstall`) instead.
+
+After a successful build and handoff, `installersToRemove` deletes older
+installers from `dist`, keeping the one just built and one backup: the version
+being replaced if its installer is there, else the newest older one. It matches
+only exact `tm-agent-monitor-<version>-{x64.exe, x64.exe.blockmap, portable.exe}`
+names, and a failure never stops the install. The prune runs in the app doing
+the install, so a new prune rule first takes effect on the update *after* the one
+that ships it. The NSIS templates have no version check, so running the backup's
+`x64.exe` should install over a newer version (read from the templates, not yet
+run).
 
 The waiter must **not** be a child of the app. Electron's main process sits in
 a Windows job object and a `detached` spawn inherits it, so the helper is

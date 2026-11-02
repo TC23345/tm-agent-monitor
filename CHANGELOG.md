@@ -2,6 +2,11 @@
 
 Releases are GitHub Releases on `TC23345/tm-agent-monitor`; installed apps update from `latest.yml` there. Local builds land in `dist/` as `tm-agent-monitor-<version>-x64.exe`.
 
+## 0.4.81 — 2026-11-01
+
+- **The Update button shows only when there is something to install.** It appears as *Update to 0.4.82* when the local checkout, or a downloaded release, is newer than what is running, and stays hidden otherwise. File → *Rebuild & relaunch* and Settings still force a rebuild of the same version.
+- **Old installers no longer pile up.** Each update keeps the new installer and the version it replaced in `dist`, as your rollback, and deletes anything older. To roll back, run the previous `tm-agent-monitor-<version>-x64.exe` from `dist`.
+
 ## 0.4.80 — 2026-10-31
 
 - **Codex sign-in status comes from the Codex CLI.** Settings' *Codex subscription* row and the system check now ask the CLI instead of looking for `~/.codex/auth.json`, so a keyring sign-in or a custom `CODEX_HOME` reads correctly. The row names how you are signed in (your plan, or an API key), and tells "not signed in" apart from "the CLI did not answer". The monitor keeps only the method and plan, never your email.

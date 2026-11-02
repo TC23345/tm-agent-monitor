@@ -5,7 +5,7 @@ import { Settings } from './Icons'
 import mark from './assets/icon.png'
 import { MenuCheckItem, MenuItem, MenuPop, MenuSwitchItem } from './Menu'
 import { MAX_PANES, PANE_KINDS, type PaneCols, type PaneInstance, type PaneKind } from './panes'
-import type { ProjectCommand, ProviderHealth, ProviderId, SizeMode, TerminalLaunch } from '@shared/types'
+import type { AppUpdateOffer, ProjectCommand, ProviderHealth, ProviderId, SizeMode, TerminalLaunch } from '@shared/types'
 import { overallStatus } from '@shared/health.mjs'
 import type { FolderEntry } from '@shared/startPage.mjs'
 import { ProviderBadge } from './ProviderBadge'
@@ -105,6 +105,9 @@ interface Props {
   /** Rebuild & relaunch (File menu): shared busy state with the status bar's Update chip. */
   rebuild: { busy: boolean; msg: string | null }
   onRebuild: () => void
+  /** A newer version to install; the Update button shows only while there is one, or while a build runs. */
+  update?: AppUpdateOffer
+  onUpdate: () => void
 }
 
 /**
@@ -118,7 +121,7 @@ export function TopBar(props: Props) {
     waiting, waitingOnly, onWaitingOnly, onRouteWaiting, panes, context, onNewTerminal, onNewChat, onNewProject, onOpenProject, openInCursor, onToggleCursor, onNewStart, onOpenFolder, recentFolders, onOpenRecent, commands, onRunCommand,
     sizeMode, onSizeMode, paneCols, onPaneCols, canResetSizes, onResetSizes, fieldOn, onToggleField, sidebarHidden, onToggleSidebar, layouts, onSaveLayout, onApplyLayout, onDeleteLayout,
     canResetOrder, onResetOrder, onSettings, onKeys, openMenu, onOpenMenu, onPalette, onMinimize, onHide, onOpenPane, onActivity, hot, onFocusAgent,
-    rebuild, onRebuild
+    rebuild, onRebuild, update, onUpdate
   } = props
 
   const paneFull = panes.length >= MAX_PANES
@@ -375,16 +378,18 @@ export function TopBar(props: Props) {
             {rebuild.msg}
           </span>
         )}
-        <button
-          className={`update-btn ${rebuild.busy ? 'is-busy' : ''}`}
-          onClick={onRebuild}
-          disabled={rebuild.busy}
-          title={REBUILD_HINT}
-          data-testid="update-chip"
-        >
-          <RefreshCw className="update-ic" strokeWidth={2} />
-          {rebuild.busy ? 'Building…' : 'Update'}
-        </button>
+        {(update || rebuild.busy) && (
+          <button
+            className={`update-btn ${rebuild.busy ? 'is-busy' : ''}`}
+            onClick={onUpdate}
+            disabled={rebuild.busy}
+            title={update?.source === 'release' ? `Quit and install the downloaded v${update.version}` : REBUILD_HINT}
+            data-testid="update-chip"
+          >
+            <RefreshCw className="update-ic" strokeWidth={2} />
+            {rebuild.busy ? 'Building…' : `Update to ${update?.version}`}
+          </button>
+        )}
         <div className="winctl">
           <button className="winbtn" onClick={onMinimize} title="Minimize — the hotkey or the taskbar brings it back" aria-label="Minimize" data-testid="win-minimize">
             <Minus strokeWidth={2} />

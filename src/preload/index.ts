@@ -144,6 +144,8 @@ const api = {
   checkUpdates: (): Promise<string> => ipcRenderer.invoke('update:check'),
   /** Build the installer from the local repo, silently reinstall, relaunch. */
   reinstallApp: (): Promise<string> => ipcRenderer.invoke('app:reinstall'),
+  /** Quit and install the release already downloaded, when that is what the Update button offers. */
+  installRelease: (): Promise<string> => ipcRenderer.invoke('update:install-release'),
   manageHooks: (provider: ProviderId, action: 'install' | 'repair' | 'remove' | 'status'): Promise<{ ok: boolean; message: string; settings: AppSettings }> =>
     ipcRenderer.invoke('hooks:manage', provider, action),
   reviewCodexHookTrust: (): Promise<{ ok: boolean; message: string }> =>
